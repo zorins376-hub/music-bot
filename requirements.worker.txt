@@ -1,0 +1,14 @@
+# Включает все core зависимости + тяжёлые для parser / streamer / mixer / recommender
+-r requirements.txt
+
+# ── Userbot + Voice Chat (v1.1) ───────────────────────────────────────────
+pyrogram>=2.0.106
+TgCrypto>=1.2.3
+
+# pytgcalls — проверяй совместимость с pyrogram на https://pytgcalls.github.io
+pytgcalls>=0.1.0
+
+# ── Audio analysis / mixing (v1.2–v1.3) ──────────────────────────────────
+librosa>=0.10.0
+numpy>=1.26.0
+scikit-learn>=1.4.0

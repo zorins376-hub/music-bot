@@ -1,0 +1,104 @@
+services:
+  # ── Основной бот ────────────────────────────────────────────────────────
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  # ── Парсер каналов TEQUILA / FULLMOON (v1.1) ────────────────────────────
+  # Pyrogram userbot — мониторит каналы и добавляет треки в базу
+  # parser:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.worker
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   command: python -m parser.channel_parser
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./sessions:/app/sessions
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+  # ── Стример Voice Chat (v1.1) ───────────────────────────────────────────
+  # Pyrogram + pytgcalls — стримит 24/7 в BLACK ROOM NIGHT CHAT
+  # streamer:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.worker
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   command: python -m streamer.voice_chat
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./downloads:/app/downloads
+  #     - ./sessions:/app/sessions
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-musicbot}
+      POSTGRES_USER: ${POSTGRES_USER:-musicbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-musicbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── nginx + SSL (webhook-режим) ──────────────────────────────────────────
+  # Раскомментируй + замени YOUR_DOMAIN в nginx.conf
+  # nginx:
+  #   image: nginx:1.24-alpine
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./certbot/www:/var/www/certbot
+  #     - ./certbot/conf:/etc/letsencrypt
+  #   depends_on:
+  #     - bot
+
+volumes:
+  redis_data:
+  postgres_data:

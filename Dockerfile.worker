@@ -1,0 +1,25 @@
+# Dockerfile для parser + streamer (Pyrogram + pytgcalls + librosa)
+# Используется когда раскомментируешь parser/streamer в docker-compose.yml
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    libffi-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Сначала тяжёлые зависимости — кэшируются отдельным слоем
+COPY requirements.worker.txt requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.worker.txt
+
+COPY . .
+
+RUN mkdir -p /app/data /app/downloads /app/logs /app/sessions
+
+# CMD переопределяется в docker-compose.yml:
+#   parser:   python -m parser.channel_parser
+#   streamer: python -m streamer.voice_chat
+CMD ["python", "-m", "parser.channel_parser"]
