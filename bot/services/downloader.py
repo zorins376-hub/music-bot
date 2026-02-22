@@ -17,7 +17,7 @@ def _fmt_duration(seconds: int) -> str:
 def _search_sync(query: str, max_results: int) -> list[dict]:
     ydl_opts = {
         "format": "bestaudio/best",
-        "extract_flat": True,
+        "extract_flat": "in_playlist",
         "quiet": True,
         "no_warnings": True,
         "default_search": f"ytsearch{max_results}",
