@@ -8,6 +8,14 @@ from bot.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _make_redis() -> aioredis.Redis:
+    if settings.REDIS_URL.startswith("fakeredis://"):
+        import fakeredis.aioredis as fakeredis
+        logger.info("Using fakeredis (in-memory) — for local dev only")
+        return fakeredis.FakeRedis(decode_responses=True)
+    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
 class Cache:
     def __init__(self) -> None:
         self._redis: aioredis.Redis | None = None
@@ -15,9 +23,7 @@ class Cache:
     @property
     def redis(self) -> aioredis.Redis:
         if self._redis is None:
-            self._redis = aioredis.from_url(
-                settings.REDIS_URL, decode_responses=True
-            )
+            self._redis = _make_redis()
         return self._redis
 
     # ── File ID cache ───────────────────────────────────────────────────────
