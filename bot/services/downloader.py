@@ -3,6 +3,7 @@ import logging
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import yt_dlp
@@ -10,6 +11,9 @@ import yt_dlp
 from bot.config import settings, _COOKIES_PATH
 
 logger = logging.getLogger(__name__)
+
+# Dedicated thread pool for yt-dlp I/O operations
+_ytdl_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ytdl")
 
 
 def log_runtime_info() -> None:
@@ -151,6 +155,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "quiet": True,
         "no_warnings": True,
         "default_search": search_prefix,
+        "socket_timeout": 15,
         **_base_opts(),
     }
     try:
@@ -231,7 +236,8 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
         "writethumbnail": True,
         "quiet": True,
         "no_warnings": True,
-        "socket_timeout": 30,
+        "socket_timeout": 20,
+        "concurrent_fragment_downloads": 4,
         **_base_opts(),
         "match_filter": yt_dlp.utils.match_filter_func(
             f"duration <= {settings.MAX_DURATION}"
@@ -253,43 +259,20 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
 
 async def search_tracks(query: str, max_results: int = 5, source: str = "youtube") -> list[dict]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _search_sync, query, max_results, source)
+    return await loop.run_in_executor(_ytdl_pool, _search_sync, query, max_results, source)
 
 
 async def resolve_spotify(url: str) -> str | None:
     """Resolve Spotify URL to 'artist title' search query."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _extract_spotify_meta, url)
+    return await loop.run_in_executor(_ytdl_pool, _extract_spotify_meta, url)
 
 
 async def download_track(video_id: str, bitrate: int = 192) -> Path:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        None, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate
+        _ytdl_pool, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate
     )
-
-
-def _fetch_year_sync(video_id: str) -> str | None:
-    """Fetch upload year for a single video via yt-dlp (no download)."""
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        **_base_opts(),
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            if info:
-                return _extract_year(info)
-    except Exception:
-        pass
-    return None
-
-
-async def fetch_track_year(video_id: str) -> str | None:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _fetch_year_sync, video_id)
 
 
 def cleanup_file(path: Path) -> None:

@@ -51,6 +51,19 @@ class Cache:
         data = await self.redis.get(f"search:{session_id}")
         return json.loads(data) if data else None
 
+    # ── Global search cache (by query string) ────────────────────────────
+
+    async def get_query_cache(self, query: str, source: str = "youtube") -> list[dict] | None:
+        """Return cached search results for a query, or None."""
+        key = f"qcache:{source}:{query.lower().strip()}"
+        data = await self.redis.get(key)
+        return json.loads(data) if data else None
+
+    async def set_query_cache(self, query: str, results: list[dict], source: str = "youtube") -> None:
+        """Cache search results for a query (120s TTL)."""
+        key = f"qcache:{source}:{query.lower().strip()}"
+        await self.redis.setex(key, 120, json.dumps(results, ensure_ascii=False))
+
     # ── Rate limiting ────────────────────────────────────────────────────────
 
     async def check_rate_limit(

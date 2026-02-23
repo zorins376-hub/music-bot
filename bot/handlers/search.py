@@ -18,7 +18,7 @@ from bot.config import settings
 from bot.db import get_or_create_user, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
-from bot.services.downloader import cleanup_file, download_track, fetch_track_year, is_spotify_url, resolve_spotify, search_tracks
+from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +115,20 @@ async def _do_search(message: Message, query: str) -> None:
         )
         return
 
-    # STEP 2: YouTube search
-    results = await search_tracks(query, max_results=5, source="youtube")
+    # STEP 2: YouTube search (with global query cache)
+    results = await cache.get_query_cache(query, "youtube")
+    if results is None:
+        results = await search_tracks(query, max_results=5, source="youtube")
+        if results:
+            await cache.set_query_cache(query, results, "youtube")
 
     # STEP 3: SoundCloud fallback if YouTube found nothing
     if not results:
-        results = await search_tracks(query, max_results=5, source="soundcloud")
+        results = await cache.get_query_cache(query, "soundcloud")
+        if results is None:
+            results = await search_tracks(query, max_results=5, source="soundcloud")
+            if results:
+                await cache.set_query_cache(query, results, "soundcloud")
 
     if not results:
         await status.edit_text(t(lang, "no_results"))
@@ -233,9 +241,6 @@ async def handle_track_select(
     # Проверяем Redis кэш
     file_id = await cache.get_file_id(video_id, bitrate)
     if file_id:
-        # Fetch year if not in search cache
-        if not track_info.get("upload_year"):
-            track_info["upload_year"] = await fetch_track_year(video_id)
         caption = _track_caption(lang, track_info, bitrate)
         await callback.message.answer_audio(
             audio=file_id,
@@ -253,10 +258,6 @@ async def handle_track_select(
 
     status = await callback.message.answer(t(lang, "downloading"))
     await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
-
-    # Fetch year if not already in search cache
-    if not track_info.get("upload_year"):
-        track_info["upload_year"] = await fetch_track_year(video_id)
 
     mp3_path: Path | None = None
 
