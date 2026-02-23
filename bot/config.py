@@ -31,12 +31,20 @@ class Settings(BaseSettings):
 
     # ── Admins ────────────────────────────────────────────────────────────
     ADMIN_IDS: List[int] = []
+    ADMIN_USERNAMES: List[str] = ["Tequilasunshine1", "Kg_1988hp"]
 
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
     def parse_admin_ids(cls, v):
         if isinstance(v, str):
             return [int(x.strip()) for x in v.split(",") if x.strip()]
+        return v
+
+    @field_validator("ADMIN_USERNAMES", mode="before")
+    @classmethod
+    def parse_admin_usernames(cls, v):
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
         return v
 
     # ── Audio ─────────────────────────────────────────────────────────────

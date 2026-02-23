@@ -3,12 +3,24 @@ from datetime import datetime, timezone
 from sqlalchemy import case, select, update
 from sqlalchemy.sql import func
 
+from bot.config import settings
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
 
 
+def is_admin(user_id: int, username: str | None = None) -> bool:
+    """Check if user is admin by ID or username."""
+    if user_id in settings.ADMIN_IDS:
+        return True
+    if username and username.lower() in [u.lower() for u in settings.ADMIN_USERNAMES]:
+        return True
+    return False
+
+
 async def get_or_create_user(tg_user: TgUser) -> User:
+    admin = is_admin(tg_user.id, tg_user.username)
+
     async with async_session() as session:
         result = await session.execute(select(User).where(User.id == tg_user.id))
         user = result.scalar_one_or_none()
@@ -18,10 +30,14 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 id=tg_user.id,
                 username=tg_user.username,
                 first_name=tg_user.first_name,
+                is_premium=admin,
             )
             session.add(user)
             await session.commit()
             await session.refresh(user)
+            # Register admin ID dynamically
+            if admin and tg_user.id not in settings.ADMIN_IDS:
+                settings.ADMIN_IDS.append(tg_user.id)
         else:
             await session.execute(
                 update(User)
@@ -33,9 +49,21 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 )
             )
             await session.commit()
+            # Auto-grant premium to admins
+            if admin and not user.is_premium:
+                await session.execute(
+                    update(User)
+                    .where(User.id == tg_user.id)
+                    .values(is_premium=True)
+                )
+                await session.commit()
+                user.is_premium = True
+            # Register admin ID dynamically
+            if admin and tg_user.id not in settings.ADMIN_IDS:
+                settings.ADMIN_IDS.append(tg_user.id)
 
-        # Auto-revoke expired premium
-        if user.is_premium and user.premium_until and user.premium_until < datetime.now(timezone.utc):
+        # Auto-revoke expired premium (but not for admins — they always have premium)
+        if not admin and user.is_premium and user.premium_until and user.premium_until < datetime.now(timezone.utc):
             await session.execute(
                 update(User)
                 .where(User.id == tg_user.id)

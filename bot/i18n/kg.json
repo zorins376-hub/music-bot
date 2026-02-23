@@ -71,6 +71,7 @@
   "profile_name": "▸ Аты: <b>{name}</b>",
   "profile_status_free": "▸ Статус: Free",
   "profile_status_premium": "▸ Статус: ◇ <b>Premium</b> ({until} чейин)",
+  "profile_status_admin": "▸ Статус: ◆ <b>Админ</b> · Premium ∞",
   "profile_quality": "▸ Сапат: <b>{quality} kbps</b>",
   "profile_tracks": "▸ Ырлар: <b>{count}</b>",
   "profile_joined": "▸ Катталган: <b>{date}</b>",

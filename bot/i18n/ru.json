@@ -71,6 +71,7 @@
   "profile_name": "▸ Имя: <b>{name}</b>",
   "profile_status_free": "▸ Статус: Free",
   "profile_status_premium": "▸ Статус: ◇ <b>Premium</b> (до {until})",
+  "profile_status_admin": "▸ Статус: ◆ <b>Админ</b> · Premium ∞",
   "profile_quality": "▸ Качество: <b>{quality} kbps</b>",
   "profile_tracks": "▸ Треков: <b>{count}</b>",
   "profile_joined": "▸ С нами с: <b>{date}</b>",

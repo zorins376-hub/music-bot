@@ -71,6 +71,7 @@
   "profile_name": "▸ Name: <b>{name}</b>",
   "profile_status_free": "▸ Status: Free",
   "profile_status_premium": "▸ Status: ◇ <b>Premium</b> (until {until})",
+  "profile_status_admin": "▸ Status: ◆ <b>Admin</b> · Premium ∞",
   "profile_quality": "▸ Quality: <b>{quality} kbps</b>",
   "profile_tracks": "▸ Tracks: <b>{count}</b>",
   "profile_joined": "▸ Joined: <b>{date}</b>",

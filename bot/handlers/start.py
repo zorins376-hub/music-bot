@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy import select, update
 from sqlalchemy.sql import func
 
-from bot.db import get_or_create_user
+from bot.db import get_or_create_user, is_admin
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory
@@ -13,27 +13,30 @@ from bot.models.user import User
 router = Router()
 
 
-def _main_menu(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="▸ TEQUILA LIVE", callback_data="radio:tequila"),
-                InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
-            ],
-            [
-                InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
-                InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
-            ],
-            [
-                InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
-                InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
-            ],
-            [
-                InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
-                InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
-            ],
-        ]
-    )
+def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="▸ TEQUILA LIVE", callback_data="radio:tequila"),
+            InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
+        ],
+        [
+            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
+            InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
+        ],
+        [
+            InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
+            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
+        ],
+        [
+            InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
+            InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
+        ],
+    ]
+    if admin:
+        rows.append([
+            InlineKeyboardButton(text="◆ Админ-панель", callback_data="action:admin"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 _LANG_KEYBOARD = InlineKeyboardMarkup(
@@ -50,9 +53,10 @@ _LANG_KEYBOARD = InlineKeyboardMarkup(
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
+    admin = is_admin(message.from_user.id, message.from_user.username)
     await message.answer(
         t(user.language, "start_message", name=message.from_user.first_name or ""),
-        reply_markup=_main_menu(user.language),
+        reply_markup=_main_menu(user.language, admin=admin),
         parse_mode="HTML",
     )
 
@@ -127,11 +131,17 @@ async def _show_profile(message: Message, tg_user) -> None:
             )
         ) or 0
 
+    admin = is_admin(tg_user.id, tg_user.username)
+
     lines = [t(lang, "profile_header")]
     lines.append(t(lang, "profile_name", name=tg_user.first_name or tg_user.username or str(tg_user.id)))
 
-    if user.is_premium and user.premium_until:
+    if admin:
+        lines.append(t(lang, "profile_status_admin"))
+    elif user.is_premium and user.premium_until:
         lines.append(t(lang, "profile_status_premium", until=user.premium_until.strftime("%d.%m.%Y")))
+    elif user.is_premium:
+        lines.append(t(lang, "profile_status_premium", until="∞"))
     else:
         lines.append(t(lang, "profile_status_free"))
 
