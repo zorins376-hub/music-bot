@@ -1,4 +1,5 @@
 import logging
+import random as _random
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -61,12 +62,27 @@ def _playlist_view_kb(
     pl_id: int, tracks: list, lang: str, page: int = 0
 ) -> InlineKeyboardMarkup:
     rows = []
+    # Play all / Shuffle buttons (only if there are tracks)
+    if tracks:
+        rows.append([
+            InlineKeyboardButton(
+                text=t(lang, "pl_play_all"),
+                callback_data=PlCb(act="pall", id=pl_id).pack(),
+            ),
+            InlineKeyboardButton(
+                text=t(lang, "pl_shuffle"),
+                callback_data=PlCb(act="shuf", id=pl_id).pack(),
+            ),
+        ])
     start = page * 10
     for i, (pt, tr) in enumerate(tracks[start : start + 10], start=start):
         dur = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else "?:??"
-        label = f"{i + 1}. {tr.artist or '?'} — {(tr.title or '?')[:30]} ({dur})"
+        label = f"▸ {i + 1}. {tr.artist or '?'} — {(tr.title or '?')[:28]} ({dur})"
         rows.append([
-            InlineKeyboardButton(text=label, callback_data=f"noop:{i}"),
+            InlineKeyboardButton(
+                text=label,
+                callback_data=PlCb(act="play", id=pl_id, tid=tr.id).pack(),
+            ),
             InlineKeyboardButton(
                 text="✕",
                 callback_data=PlCb(act="rm", id=pl_id, tid=pt.id).pack(),
@@ -255,8 +271,88 @@ async def cb_remove_track(callback: CallbackQuery, callback_data: PlCb) -> None:
     await callback.answer(t(user.language, "pl_track_removed"))
     # Refresh view
     cb2 = PlCb(act="view", id=callback_data.id)
-    callback_data_refresh = cb2
-    await cb_view(callback, callback_data_refresh)
+    await cb_view(callback, cb2)
+
+
+# ── Play single track from playlist ─────────────────────────────────────
+
+
+@router.callback_query(PlCb.filter(F.act == "play"))
+async def cb_play_track(callback: CallbackQuery, callback_data: PlCb) -> None:
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
+    async with async_session() as session:
+        tr = await session.get(Track, callback_data.tid)
+        if not tr or not tr.file_id:
+            await callback.message.answer(t(user.language, "pl_track_no_file"))
+            return
+    dur = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else ""
+    caption = f"{tr.artist or '?'} — {tr.title or '?'}"
+    if dur:
+        caption += f" ({dur})"
+    await callback.message.answer_audio(
+        audio=tr.file_id,
+        title=tr.title,
+        performer=tr.artist,
+        duration=tr.duration,
+        caption=caption,
+    )
+
+
+# ── Play all / Shuffle ──────────────────────────────────────────────────
+
+
+async def _send_playlist_tracks(callback: CallbackQuery, pl_id: int, shuffle: bool) -> None:
+    user = await get_or_create_user(callback.from_user)
+    async with async_session() as session:
+        pl = await session.get(Playlist, pl_id)
+        if not pl or pl.user_id != user.id:
+            await callback.message.answer(t(user.language, "pl_not_found"))
+            return
+        result = await session.execute(
+            select(Track)
+            .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+            .where(PlaylistTrack.playlist_id == pl.id)
+            .order_by(PlaylistTrack.position)
+        )
+        tracks = list(result.scalars().all())
+
+    playable = [tr for tr in tracks if tr.file_id]
+    if not playable:
+        await callback.message.answer(t(user.language, "pl_no_playable"))
+        return
+
+    if shuffle:
+        _random.shuffle(playable)
+
+    mode = t(user.language, "pl_shuffle") if shuffle else t(user.language, "pl_play_all")
+    await callback.message.answer(
+        t(user.language, "pl_playing", name=pl.name, mode=mode, count=len(playable)),
+        parse_mode="HTML",
+    )
+
+    for tr in playable:
+        try:
+            await callback.message.answer_audio(
+                audio=tr.file_id,
+                title=tr.title,
+                performer=tr.artist,
+                duration=tr.duration,
+            )
+        except Exception:
+            logger.warning("Failed to send track %s from playlist %s", tr.id, pl_id)
+
+
+@router.callback_query(PlCb.filter(F.act == "pall"))
+async def cb_play_all(callback: CallbackQuery, callback_data: PlCb) -> None:
+    await callback.answer()
+    await _send_playlist_tracks(callback, callback_data.id, shuffle=False)
+
+
+@router.callback_query(PlCb.filter(F.act == "shuf"))
+async def cb_shuffle(callback: CallbackQuery, callback_data: PlCb) -> None:
+    await callback.answer()
+    await _send_playlist_tracks(callback, callback_data.id, shuffle=True)
 
 
 # ── Add track to playlist (called from search after download) ────────────

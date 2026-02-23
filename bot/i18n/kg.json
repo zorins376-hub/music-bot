@@ -99,6 +99,11 @@
   "pl_track_limit": "Максимум 50 ыр.",
   "pl_pick": "Плейлистти тандаңыз:",
   "pl_empty_create_first": "Плейлист жок. /playlist аркылуу түзүңүз",
+  "pl_play_all": "▸ Баарын ойнотуу",
+  "pl_shuffle": "⇄ Аралаш",
+  "pl_playing": "▸ <b>{name}</b> — {mode} ({count} ыр)",
+  "pl_track_no_file": "Ыр жүктөлө элек. Алгач издөө аркылуу табыңыз.",
+  "pl_no_playable": "Ойнотуучу ыр жок.",
 
   "captcha_prompt": "Улантуу үчүн чыгар: <b>{a} + {b} = ?</b>",
   "captcha_ok": "✓ Текшерүү өттү!",

@@ -99,6 +99,11 @@
   "pl_track_limit": "Maximum 50 tracks per playlist.",
   "pl_pick": "Choose a playlist:",
   "pl_empty_create_first": "No playlists yet. Create one via /playlist",
+  "pl_play_all": "▸ Play all",
+  "pl_shuffle": "⇄ Shuffle",
+  "pl_playing": "▸ <b>{name}</b> — {mode} ({count} tracks)",
+  "pl_track_no_file": "Track not downloaded yet. Find it via search first.",
+  "pl_no_playable": "No playable tracks available.",
 
   "captcha_prompt": "Solve to continue: <b>{a} + {b} = ?</b>",
   "captcha_ok": "✓ Verified!",
