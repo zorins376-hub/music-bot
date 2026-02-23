@@ -1,7 +1,8 @@
 import logging
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
+from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import func, select, update
 
@@ -16,6 +17,14 @@ from bot.services.cache import cache
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+_USERS_PER_PAGE = 10
+
+
+class AdmUserCb(CallbackData, prefix="au"):
+    act: str   # list / prem / unprem
+    uid: int = 0
+    p: int = 0  # page
 
 
 def _is_admin(user_id: int) -> bool:
@@ -210,6 +219,9 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="◇ Дать Premium", callback_data="adm:premium"),
                 InlineKeyboardButton(text="✖ Бан", callback_data="adm:ban"),
+            ],
+            [
+                InlineKeyboardButton(text="◎ Пользователи", callback_data=AdmUserCb(act="list").pack()),
             ],
             [
                 InlineKeyboardButton(text="▸ Очередь эфира", callback_data="adm:queue"),
@@ -425,6 +437,102 @@ async def handle_adm_back(callback: CallbackQuery) -> None:
         reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id)),
         parse_mode="HTML",
     )
+
+
+# ── Admin user list with premium toggle ────────────────────────────────────────
+
+
+async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+    async with async_session() as session:
+        total = await session.scalar(select(func.count()).select_from(User)) or 0
+        result = await session.execute(
+            select(User)
+            .order_by(User.created_at.desc())
+            .offset(page * _USERS_PER_PAGE)
+            .limit(_USERS_PER_PAGE)
+        )
+        users = list(result.scalars().all())
+
+    rows = []
+    for u in users:
+        name = u.username or u.first_name or str(u.id)
+        label = f"{'\u25c7' if u.is_premium else '\u25cb'} @{name}" if u.username else f"{'\u25c7' if u.is_premium else '\u25cb'} {name}"
+        if u.is_premium:
+            btn_text = "\u2717"
+            btn_cb = AdmUserCb(act="unprem", uid=u.id, p=page).pack()
+        else:
+            btn_text = "\u25c7"
+            btn_cb = AdmUserCb(act="prem", uid=u.id, p=page).pack()
+        rows.append([
+            InlineKeyboardButton(text=label, callback_data=f"noop:u{u.id}"),
+            InlineKeyboardButton(text=btn_text, callback_data=btn_cb),
+        ])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(
+            text="\u25c1", callback_data=AdmUserCb(act="list", p=page - 1).pack(),
+        ))
+    total_pages = (total + _USERS_PER_PAGE - 1) // _USERS_PER_PAGE
+    nav.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop:pg"))
+    if (page + 1) * _USERS_PER_PAGE < total:
+        nav.append(InlineKeyboardButton(
+            text="\u25b7", callback_data=AdmUserCb(act="list", p=page + 1).pack(),
+        ))
+    rows.append(nav)
+    rows.append([InlineKeyboardButton(text="\u25c1 \u041d\u0430\u0437\u0430\u0434", callback_data="action:admin")])
+
+    text = f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b> ({total})\n\n\u25c7 = Premium \u00b7 \u25cb = Free\n\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(AdmUserCb.filter(F.act == "list"))
+async def handle_user_list(callback: CallbackQuery, callback_data: AdmUserCb) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    text, kb = await _build_user_list_kb(callback_data.p)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(AdmUserCb.filter(F.act == "prem"))
+async def handle_grant_premium(callback: CallbackQuery, callback_data: AdmUserCb) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    async with async_session() as session:
+        await session.execute(
+            update(User).where(User.id == callback_data.uid).values(is_premium=True)
+        )
+        await session.commit()
+    await callback.answer("\u25c7 Premium \u0432\u044b\u0434\u0430\u043d", show_alert=False)
+    text, kb = await _build_user_list_kb(callback_data.p)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@router.callback_query(AdmUserCb.filter(F.act == "unprem"))
+async def handle_revoke_premium(callback: CallbackQuery, callback_data: AdmUserCb) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    async with async_session() as session:
+        await session.execute(
+            update(User).where(User.id == callback_data.uid).values(is_premium=False, premium_until=None)
+        )
+        await session.commit()
+    await callback.answer("\u2717 Premium \u0441\u043d\u044f\u0442", show_alert=False)
+    text, kb = await _build_user_list_kb(callback_data.p)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("adm:"))
