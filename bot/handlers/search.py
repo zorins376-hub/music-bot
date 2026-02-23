@@ -182,27 +182,26 @@ async def handle_text(message: Message) -> None:
 
     matched_prefix = False
 
-    # Handle @bot_username mentions in groups
-    if is_group and message.entities:
-        for ent in message.entities:
-            if ent.type == "mention":
-                mention = text[ent.offset:ent.offset + ent.length]
-                bot_me = await message.bot.me()
-                if mention.lower() == f"@{bot_me.username.lower()}":
-                    # Remove the mention from the query
-                    text = (text[:ent.offset] + text[ent.offset + ent.length:]).strip()
-                    lower = text.lower()
-                    matched_prefix = True  # treat mention as a trigger
-                    break
+    # Handle @bot_username mentions in groups — simple text-based detection
+    if is_group:
+        bot_me = await message.bot.me()
+        if bot_me.username:
+            at_tag = f"@{bot_me.username}"
+            # Case-insensitive check
+            idx = lower.find(at_tag.lower())
+            if idx != -1:
+                text = (text[:idx] + text[idx + len(at_tag):]).strip()
+                lower = text.lower()
+                matched_prefix = True
 
     # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
     _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
     if not matched_prefix:
         for prefix in _PREFIXES:
-        if lower.startswith(prefix):
-            text = text[len(prefix):].strip()
-            matched_prefix = True
-            break
+            if lower.startswith(prefix):
+                text = text[len(prefix):].strip()
+                matched_prefix = True
+                break
 
     # In groups: only respond to trigger words, ignore random messages
     if is_group and not matched_prefix:
