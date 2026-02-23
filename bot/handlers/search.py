@@ -28,6 +28,10 @@ router = Router()
 # Group chat auto-cleanup timeout (seconds)
 _GROUP_CLEANUP_SEC = 60
 
+# Search result limits
+_MAX_RESULTS_PRIVATE = 10   # Show all versions: original, remix, extended, slow etc.
+_MAX_RESULTS_GROUP = 1      # In groups — just one track
+
 # session_id → {chat_id, user_msg_id, status_msg_id}
 _group_sessions: dict[str, dict] = {}
 
@@ -127,8 +131,11 @@ async def _do_search(message: Message, query: str) -> None:
         await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
         status = await message.answer(t(lang, "searching"))
 
+    is_group = message.chat.type in ("group", "supergroup")
+    max_results = _MAX_RESULTS_GROUP if is_group else _MAX_RESULTS_PRIVATE
+
     # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
-    local_tracks = await search_local_tracks(query, limit=5)
+    local_tracks = await search_local_tracks(query, limit=max_results)
     if local_tracks:
         results = []
         for tr in local_tracks:
@@ -141,33 +148,29 @@ async def _do_search(message: Message, query: str) -> None:
                 "source": tr.source or "channel",
                 "file_id": tr.file_id,
             })
-        session_id = secrets.token_urlsafe(6)
-        await cache.store_search(session_id, results)
         await record_listening_event(
             user_id=user.id, query=query[:500], action="search", source="search"
         )
+
+        # Groups: auto-play first track immediately
+        if is_group:
+            await _group_auto_play(message, status, user, results[0])
+            return
+
+        session_id = secrets.token_urlsafe(6)
+        await cache.store_search(session_id, results)
         keyboard = _build_results_keyboard(results, session_id)
         await status.edit_text(
             f"{t(lang, 'found_local')}\n<b>{query}</b>",
             reply_markup=keyboard,
             parse_mode="HTML",
         )
-
-        # Group cleanup: schedule auto-delete
-        is_group = message.chat.type in ("group", "supergroup")
-        if is_group:
-            _group_sessions[session_id] = {
-                "chat_id": message.chat.id,
-                "user_msg_id": message.message_id,
-                "status_msg_id": status.message_id,
-            }
-            asyncio.create_task(_schedule_group_cleanup(message.bot, session_id))
         return
 
     # STEP 2: YouTube search (with global query cache)
     results = await cache.get_query_cache(query, "youtube")
     if results is None:
-        results = await search_tracks(query, max_results=5, source="youtube")
+        results = await search_tracks(query, max_results=max_results, source="youtube")
         if results:
             await cache.set_query_cache(query, results, "youtube")
 
@@ -175,7 +178,7 @@ async def _do_search(message: Message, query: str) -> None:
     if not results:
         results = await cache.get_query_cache(query, "soundcloud")
         if results is None:
-            results = await search_tracks(query, max_results=5, source="soundcloud")
+            results = await search_tracks(query, max_results=max_results, source="soundcloud")
             if results:
                 await cache.set_query_cache(query, results, "soundcloud")
 
@@ -183,13 +186,17 @@ async def _do_search(message: Message, query: str) -> None:
         await status.edit_text(t(lang, "no_results"))
         return
 
-    session_id = secrets.token_urlsafe(6)
-    await cache.store_search(session_id, results)
-
     await record_listening_event(
         user_id=user.id, query=query[:500], action="search", source="search"
     )
 
+    # Groups: auto-play first track immediately
+    if is_group:
+        await _group_auto_play(message, status, user, results[0])
+        return
+
+    session_id = secrets.token_urlsafe(6)
+    await cache.store_search(session_id, results)
     keyboard = _build_results_keyboard(results, session_id)
     await status.edit_text(
         f"<b>{t(lang, 'search_results')}:</b> {query}",
@@ -197,15 +204,91 @@ async def _do_search(message: Message, query: str) -> None:
         parse_mode="HTML",
     )
 
-    # Group cleanup: schedule auto-delete
-    is_group = message.chat.type in ("group", "supergroup")
-    if is_group:
-        _group_sessions[session_id] = {
-            "chat_id": message.chat.id,
-            "user_msg_id": message.message_id,
-            "status_msg_id": status.message_id,
-        }
-        asyncio.create_task(_schedule_group_cleanup(message.bot, session_id))
+
+async def _group_auto_play(
+    message: Message, status: Message, user, track_info: dict
+) -> None:
+    """In groups: download and send the first track immediately, then clean up."""
+    lang = user.language
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else settings.DEFAULT_BITRATE
+    video_id = track_info["video_id"]
+
+    # Local file_id (channel tracks)
+    local_fid = track_info.get("file_id")
+    if local_fid:
+        caption = _track_caption(lang, track_info, bitrate)
+        await message.answer_audio(
+            audio=local_fid,
+            title=track_info["title"],
+            performer=track_info["uploader"],
+            duration=track_info.get("duration"),
+            caption=caption,
+        )
+        await _post_download(user.id, track_info, local_fid, bitrate)
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
+        return
+
+    # Redis cache
+    file_id = await cache.get_file_id(video_id, bitrate)
+    if file_id:
+        caption = _track_caption(lang, track_info, bitrate)
+        await message.answer_audio(
+            audio=file_id,
+            title=track_info["title"],
+            performer=track_info["uploader"],
+            duration=track_info.get("duration"),
+            caption=caption,
+        )
+        await _post_download(user.id, track_info, file_id, bitrate)
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
+        return
+
+    # Download
+    await status.edit_text(t(lang, "downloading"))
+    await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+    mp3_path: Path | None = None
+    try:
+        mp3_path = await download_track(video_id, bitrate)
+        file_size = mp3_path.stat().st_size
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128:
+            cleanup_file(mp3_path)
+            mp3_path = None
+            mp3_path = await download_track(video_id, 128)
+            bitrate = 128
+            file_size = mp3_path.stat().st_size
+            if file_size > settings.MAX_FILE_SIZE:
+                await status.edit_text(t(lang, "error_too_large_final"))
+                return
+        sent = await message.answer_audio(
+            audio=FSInputFile(mp3_path),
+            title=track_info["title"],
+            performer=track_info["uploader"],
+            duration=track_info.get("duration"),
+            caption=_track_caption(lang, track_info, bitrate),
+        )
+        await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+        await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
+    except Exception as e:
+        err_msg = str(e)
+        logger.error("Group auto-play error for %s: %s", video_id, err_msg)
+        if "Sign in to confirm your age" in err_msg:
+            await status.edit_text(t(lang, "error_age_restricted"))
+        else:
+            await status.edit_text(t(lang, "error_download"))
+    finally:
+        if mp3_path:
+            cleanup_file(mp3_path)
+
+
+async def _delete_msgs(bot, chat_id: int, msg_ids: list[int]) -> None:
+    """Silently delete messages in a group chat."""
+    for mid in msg_ids:
+        if mid:
+            try:
+                await bot.delete_message(chat_id, mid)
+            except Exception:
+                pass
 
 
 def _fmt_duration(seconds: int | None) -> str:
