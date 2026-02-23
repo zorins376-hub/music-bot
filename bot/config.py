@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # ── Bot ──────────────────────────────────────────────────────────────
     BOT_TOKEN: str
 
-    # ── Database ──────────────────────────────────────────────────────────
+    # ── Database (Supabase PostgreSQL or local SQLite) ──────────────────────
     DATABASE_URL: str = (
         f"sqlite+aiosqlite:///{_BASE / 'data' / 'bot.db'}"
     )
