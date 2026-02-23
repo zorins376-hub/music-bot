@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inli
 from sqlalchemy import select, distinct
 from sqlalchemy.sql import func
 
-from bot.db import get_or_create_user
+from bot.db import get_or_create_user, upsert_track
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import Track
@@ -156,6 +156,42 @@ async def handle_live_play(callback: CallbackQuery, callback_data: LiveCb) -> No
             await asyncio.sleep(0.3)
         except Exception as e:
             logger.warning("Live play skip %s: %s", tr.source_id, e)
+
+
+# ── Auto-capture channel posts ──────────────────────────────────────────
+
+def _channel_label(chat_id: int) -> str | None:
+    """Return live label for a channel chat_id, or None."""
+    teq = settings.TEQUILA_CHANNEL
+    ful = settings.FULLMOON_CHANNEL
+    cid = str(chat_id)
+    if teq and (cid == teq or cid == teq.lstrip("@")):
+        return "tequila"
+    if ful and (cid == ful or cid == ful.lstrip("@")):
+        return "fullmoon"
+    return None
+
+
+@router.channel_post()
+async def handle_channel_post(message: Message) -> None:
+    """Auto-capture audio posted to TEQUILA/FULLMOON channels."""
+    if not message.audio:
+        return
+    label = _channel_label(message.chat.id)
+    if not label:
+        return
+    audio = message.audio
+    source_id = f"tg_{message.chat.id}_{message.message_id}"
+    await upsert_track(
+        source_id=source_id,
+        title=audio.title or audio.file_name or "Unknown",
+        artist=audio.performer or "",
+        duration=audio.duration,
+        file_id=audio.file_id,
+        source="channel",
+        channel=label,
+    )
+    logger.info("Auto-captured audio %s → %s", source_id, label)
 
 
 @router.callback_query(lambda c: c.data == "radio:automix")

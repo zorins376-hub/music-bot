@@ -86,6 +86,7 @@ def build_dispatcher() -> Dispatcher:
     dp.message.middleware(LoggingMiddleware())
 
     dp.include_router(start.router)
+    dp.include_router(admin.router)      # Admin (before search for forward mode)
     dp.include_router(playlist.router)   # Playlists
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
@@ -94,7 +95,6 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(search.router)
     dp.include_router(inline.router)
     dp.include_router(history.router)
-    dp.include_router(admin.router)
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)

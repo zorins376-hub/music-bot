@@ -2,7 +2,7 @@ import json
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command
+from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import func, select, update
@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 _USERS_PER_PAGE = 10
+
+# Admin state for forwarding audio → LIVE
+# {user_id: "tequila" | "fullmoon"}
+_admin_forward_label: dict[int, str] = {}
 
 
 class AdmUserCb(CallbackData, prefix="au"):
@@ -248,6 +252,16 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     lang = user.language
     args = message.text.split(maxsplit=2)
     subcmd = args[1].lower() if len(args) > 1 else "stats"
+
+    # /admin стоп — exit forward mode
+    if subcmd in ("стоп", "stop"):
+        uid = message.from_user.id
+        if uid in _admin_forward_label:
+            _admin_forward_label.pop(uid)
+            await message.answer("✓ Режим пересылки отключён.")
+        else:
+            await message.answer("Режим пересылки не активен.")
+        return
 
     # /admin stats
     if subcmd == "stats":
@@ -570,10 +584,98 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         "adm:premium": "Для выдачи Premium:\n<code>/admin premium @username</code>\nили\n<code>/admin premium user_id</code>",
         "adm:ban": "Для бана:\n<code>/admin ban @username</code>\nДля разбана:\n<code>/admin unban @username</code>\n\nМожно также по ID.",
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
-        "adm:load": "Загрузить треки из канала:\n<code>/admin load @channel_name tequila</code>\nили\n<code>/admin load @channel_name fullmoon</code>\n\nБот должен быть добавлен в канал!",
+        "adm:load": None,  # handled separately below
     }
+    if callback.data == "adm:load":
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="● TEQUILA", callback_data="adm:fwd:tequila"),
+                InlineKeyboardButton(text="◑ FULLMOON", callback_data="adm:fwd:fullmoon"),
+            ],
+            [
+                InlineKeyboardButton(text="✖ Отмена", callback_data="adm:fwd:cancel"),
+            ],
+        ])
+        await callback.message.answer(
+            "◈ <b>Загрузка треков для LIVE</b>\n\n"
+            "Выбери канал, затем <b>пересылай аудио</b> из своего TG-канала в этот чат.\n"
+            "Бот сохранит их для LIVE.\n\n"
+            "Или используй команду:\n"
+            "<code>/admin load @channel_name tequila</code>",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+        return
     text = prompts.get(callback.data, "Используй команду /admin")
     await callback.message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("adm:fwd:"))
+async def handle_fwd_select(callback: CallbackQuery) -> None:
+    """Admin selects which LIVE channel to forward audio to."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    choice = callback.data.split(":")[-1]  # tequila / fullmoon / cancel
+    uid = callback.from_user.id
+    if choice == "cancel":
+        _admin_forward_label.pop(uid, None)
+        await callback.message.edit_text("✖ Режим пересылки отменён.")
+        return
+    _admin_forward_label[uid] = choice
+    label_name = "TEQUILA" if choice == "tequila" else "FULLMOON"
+    await callback.message.edit_text(
+        f"✓ Режим пересылки: <b>{label_name}</b>\n\n"
+        f"Теперь пересылай аудио сюда — бот сохранит их для {label_name} LIVE.\n"
+        f"Когда закончишь — напиши <code>/admin стоп</code>",
+        parse_mode="HTML",
+    )
+
+
+class _AdminForwardFilter(BaseFilter):
+    """Match only when admin is in forward-audio mode."""
+    async def __call__(self, message: Message) -> bool:
+        return (
+            message.audio is not None
+            and message.chat.type == "private"
+            and message.from_user.id in _admin_forward_label
+            and _is_admin(message.from_user.id)
+        )
+
+
+@router.message(_AdminForwardFilter())
+async def handle_forwarded_audio(message: Message) -> None:
+    """Save forwarded audio to LIVE when admin is in forward mode."""
+    uid = message.from_user.id
+    if uid not in _admin_forward_label:
+        return  # not in forward mode, skip (search handler will process)
+    if not _is_admin(uid):
+        _admin_forward_label.pop(uid, None)
+        return
+    label = _admin_forward_label[uid]
+    audio = message.audio
+    # Build source_id from forwarded channel or message id
+    fwd_chat = message.forward_from_chat
+    if fwd_chat:
+        source_id = f"tg_{fwd_chat.id}_{message.forward_from_message_id}"
+    else:
+        source_id = f"tg_fwd_{uid}_{message.message_id}"
+    track = await upsert_track(
+        source_id=source_id,
+        title=audio.title or audio.file_name or "Unknown",
+        artist=audio.performer or "",
+        duration=audio.duration,
+        file_id=audio.file_id,
+        source="channel",
+        channel=label,
+    )
+    label_name = "TEQUILA" if label == "tequila" else "FULLMOON"
+    await message.reply(
+        f"✓ <b>{audio.performer or ''} — {audio.title or 'Unknown'}</b> → {label_name}",
+        parse_mode="HTML",
+    )
+    logger.info("Admin %s forwarded audio %s → %s", uid, source_id, label)
 
 
 async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, label: str) -> None:
@@ -593,67 +695,23 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
 
     chat_id = chat.id
     saved, skipped, errors = 0, 0, 0
-    offset_msg_id = 0  # start from latest
 
-    # Telegram Bot API: getChatHistory via get_updates is not available,
-    # but we can use bot.forward_message or bot.copy_message approach.
-    # Actually, Bot API doesn't have getChatHistory.
-    # We'll iterate messages by ID (newest first) — try get message
-    # We can use bot's get_chat_member_count and iterate using known message IDs.
+    # Scan messages sequentially from ID 1 upward.
+    # Stop after 30 consecutive failures (end of channel).
+    msg_id = 0
+    consecutive_fails = 0
+    max_consecutive_fails = 30
 
-    # Alternative: Use the channel's message IDs. Telegram channels have sequential IDs.
-    # We'll try fetching messages by forwarding them from the channel.
-
-    # Get the last message ID from chat
-    # Bot API doesn't expose this directly, but we can binary-search.
-    # Simplest approach: try copy_message from msg_id = 1..N, skip failures.
-
-    # Actually the cleanest way: just ask bot to forward messages in batches.
-    # The trick: `bot.copy_message` with message_id from 1 upward.
-    # For efficiency, try a reasonable range.
-
-    # Let's use a more reliable method:
-    # Send a temp message to find approximate last_id
-    max_id = 0
-    # Try to find the latest message ID with binary search
-    lo, hi = 1, 100000
-    while lo <= hi:
-        mid = (lo + hi) // 2
+    while consecutive_fails < max_consecutive_fails:
+        msg_id += 1
         try:
-            # Try to copy message — if it exists, move higher
-            await bot.copy_message(
-                chat_id=admin_msg.from_user.id,
-                from_chat_id=chat_id,
-                message_id=mid,
-                disable_notification=True,
-            )
-            max_id = mid
-            lo = mid + 1
-            await asyncio.sleep(0.05)
-        except Exception:
-            hi = mid - 1
-            await asyncio.sleep(0.05)
-
-    if max_id == 0:
-        await status.edit_text("✖ Канал пуст или бот не имеет доступа к сообщениям.")
-        return
-
-    await status.edit_text(
-        f"◈ Найдено ~{max_id} сообщений. Сканирую аудио...",
-        parse_mode="HTML",
-    )
-
-    # Now iterate all messages 1..max_id looking for audio
-    for msg_id in range(1, max_id + 1):
-        try:
-            # Use getChat + getMessage via forwarding to self
-            # We need actual message content — use bot.forward_message temporarily
             fwd = await bot.forward_message(
                 chat_id=admin_msg.from_user.id,
                 from_chat_id=chat_id,
                 message_id=msg_id,
                 disable_notification=True,
             )
+            consecutive_fails = 0  # reset on success
 
             if fwd.audio:
                 audio = fwd.audio
@@ -696,6 +754,7 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
             await asyncio.sleep(0.1)  # rate limit
 
         except Exception:
+            consecutive_fails += 1
             errors += 1
             await asyncio.sleep(0.05)
 
@@ -703,11 +762,18 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
         if msg_id % 50 == 0:
             try:
                 await status.edit_text(
-                    f"◈ Прогресс: {msg_id}/{max_id}\n"
+                    f"◈ Прогресс: сообщение #{msg_id}\n"
                     f"♪ Аудио: {saved} · Пропущено: {skipped} · Ошибок: {errors}",
                 )
             except Exception:
                 pass
+
+    if saved == 0 and msg_id <= max_consecutive_fails:
+        await status.edit_text(
+            "✖ Канал пуст или бот не имеет доступа к сообщениям.\n"
+            "Проверь что бот добавлен в канал как администратор!",
+        )
+        return
 
     await status.edit_text(
         f"✓ <b>Загрузка завершена!</b>\n\n"
