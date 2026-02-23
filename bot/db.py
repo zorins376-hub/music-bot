@@ -1,5 +1,5 @@
 from aiogram.types import User as TgUser
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.sql import func
 
 from bot.models.base import async_session
@@ -124,7 +124,7 @@ async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:
             )
             .order_by(
                 # channel tracks first (tequila/fullmoon), then external
-                func.case(
+                case(
                     (Track.channel == "tequila", 0),
                     (Track.channel == "fullmoon", 1),
                     else_=2,
