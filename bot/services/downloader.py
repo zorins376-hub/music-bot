@@ -188,18 +188,25 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
 def _list_formats_debug(video_id: str) -> None:
     """Log available formats for a video (debug helper)."""
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, **_cookies_opt()}) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        with yt_dlp.YoutubeDL({
+            "quiet": False, "verbose": True, "no_warnings": False,
+            "skip_download": True, **_cookies_opt(),
+        }) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}",
+                download=False, process=False,
+            )
             if not info:
                 logger.error("DEBUG formats %s: no info returned", video_id)
                 return
             formats = info.get("formats") or []
-            logger.info("DEBUG formats %s: %d formats found", video_id, len(formats))
-            for f in formats:
+            logger.info("DEBUG formats %s: %d raw formats found", video_id, len(formats))
+            for f in formats[:10]:
                 logger.info(
-                    "  fmt %s | ext=%s | acodec=%s | vcodec=%s | abr=%s | resolution=%s",
+                    "  fmt %s | ext=%s | acodec=%s | vcodec=%s | abr=%s | res=%s | url=%s",
                     f.get("format_id"), f.get("ext"), f.get("acodec"),
                     f.get("vcodec"), f.get("abr"), f.get("resolution"),
+                    "YES" if f.get("url") else "NO",
                 )
     except Exception as e:
         logger.error("DEBUG list-formats failed for %s: %s", video_id, e)
