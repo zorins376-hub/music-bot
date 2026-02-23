@@ -185,6 +185,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         **_cookies_opt(),
         "match_filter": yt_dlp.utils.match_filter_func(
             f"duration <= {settings.MAX_DURATION}"
