@@ -22,14 +22,23 @@ router = Router()
 _USERS_PER_PAGE = 10
 
 # Admin state for forwarding audio → LIVE
-# {user_id: "tequila" | "fullmoon"}
-_admin_forward_label: dict[int, str] = {}
+# {user_id: {"label": str, "count": int, "track_ids": list[int]}}
+_admin_fwd_state: dict[int, dict] = {}
+
+_LIVE_TRACKS_PER_PAGE = 8
 
 
 class AdmUserCb(CallbackData, prefix="au"):
     act: str   # list / prem / unprem
     uid: int = 0
     p: int = 0  # page
+
+
+class AdmTrackCb(CallbackData, prefix="at"):
+    act: str     # list / del
+    ch: str = "" # tequila / fullmoon
+    tid: int = 0 # track id
+    p: int = 0   # page
 
 
 def _is_admin(user_id: int) -> bool:
@@ -233,7 +242,10 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="▸▸ Скип трек", callback_data="adm:skip"),
             ],
             [
-                InlineKeyboardButton(text="◈ Загрузить канал", callback_data="adm:load"),
+                InlineKeyboardButton(text="◈ Загрузить треки", callback_data="adm:load"),
+                InlineKeyboardButton(text="♪ Треки LIVE", callback_data="adm:trackmenu"),
+            ],
+            [
                 InlineKeyboardButton(text="◑ Режим эфира", callback_data="adm:mode"),
             ],
             [
@@ -256,8 +268,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     # /admin стоп — exit forward mode
     if subcmd in ("стоп", "stop"):
         uid = message.from_user.id
-        if uid in _admin_forward_label:
-            _admin_forward_label.pop(uid)
+        if uid in _admin_fwd_state:
+            _admin_fwd_state.pop(uid)
             await message.answer("✓ Режим пересылки отключён.")
         else:
             await message.answer("Режим пересылки не активен.")
@@ -373,14 +385,27 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await message.answer(f"Режим эфира: {labels[mode]}")
         logger.info("Admin %s changed radio mode to %s", message.from_user.id, mode)
 
+    # /admin tracks tequila|fullmoon — manage tracks
+    elif subcmd == "tracks":
+        if len(args) < 3 or args[2].lower() not in ("tequila", "fullmoon"):
+            await message.answer(
+                "Использование:\n"
+                "<code>/admin tracks tequila</code>\n"
+                "<code>/admin tracks fullmoon</code>",
+                parse_mode="HTML",
+            )
+            return
+        label = args[2].lower()
+        text, kb = await _build_tracks_list(label, page=0)
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
     # /admin load @channel tequila|fullmoon — загрузить треки из TG-канала
     elif subcmd == "load":
         if len(args) < 4:
             await message.answer(
                 "Использование:\n"
                 "<code>/admin load @channel_name tequila</code>\n"
-                "<code>/admin load @channel_name fullmoon</code>\n\n"
-                "Бот должен быть добавлен в канал как админ!",
+                "<code>/admin load @channel_name fullmoon</code>",
                 parse_mode="HTML",
             )
             return
@@ -401,8 +426,9 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin premium &lt;id или @username&gt; — выдать premium\n"
             "/admin queue — очередь эфира\n"
             "/admin skip — пропустить трек\n"
-            "/admin mode &lt;режим&gt; — режим эфира (night/energy/hybrid)\n"
-            "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить треки из канала",
+            "/admin mode &lt;режим&gt; — режим эфира\n"
+            "/admin tracks &lt;tequila|fullmoon&gt; — управление треками\n"
+            "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить из канала",
             parse_mode="HTML",
         )
 
@@ -585,7 +611,21 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         "adm:ban": "Для бана:\n<code>/admin ban @username</code>\nДля разбана:\n<code>/admin unban @username</code>\n\nМожно также по ID.",
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
         "adm:load": None,  # handled separately below
+        "adm:trackmenu": None,  # handled separately below
     }
+    if callback.data == "adm:trackmenu":
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="● TEQUILA", callback_data=AdmTrackCb(act="list", ch="tequila").pack()),
+                InlineKeyboardButton(text="◑ FULLMOON", callback_data=AdmTrackCb(act="list", ch="fullmoon").pack()),
+            ],
+        ])
+        await callback.message.answer(
+            "♪ <b>Треки LIVE</b>\n\nВыбери канал для просмотра и управления:",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+        return
     if callback.data == "adm:load":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -598,10 +638,8 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         ])
         await callback.message.answer(
             "◈ <b>Загрузка треков для LIVE</b>\n\n"
-            "Выбери канал, затем <b>пересылай аудио</b> из своего TG-канала в этот чат.\n"
-            "Бот сохранит их для LIVE.\n\n"
-            "Или используй команду:\n"
-            "<code>/admin load @channel_name tequila</code>",
+            "Выбери канал, затем <b>пересылай аудио</b> сюда.\n"
+            "Когда закончишь — нажми <b>✓ Готово</b>.",
             parse_mode="HTML",
             reply_markup=kb,
         )
@@ -617,19 +655,37 @@ async def handle_fwd_select(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     await callback.answer()
-    choice = callback.data.split(":")[-1]  # tequila / fullmoon / cancel
+    choice = callback.data.split(":")[-1]  # tequila / fullmoon / cancel / done
     uid = callback.from_user.id
     if choice == "cancel":
-        _admin_forward_label.pop(uid, None)
+        _admin_fwd_state.pop(uid, None)
         await callback.message.edit_text("✖ Режим пересылки отменён.")
         return
-    _admin_forward_label[uid] = choice
+    if choice == "done":
+        state = _admin_fwd_state.pop(uid, None)
+        cnt = state["count"] if state else 0
+        label = state["label"] if state else "?"
+        label_name = "TEQUILA" if label == "tequila" else "FULLMOON"
+        await callback.message.edit_text(
+            f"✓ <b>Загрузка завершена!</b>\n\n"
+            f"♪ Добавлено треков: <b>{cnt}</b> → {label_name} LIVE\n\n"
+            f"Управлять треками: /admin tracks {label}",
+            parse_mode="HTML",
+        )
+        return
+    _admin_fwd_state[uid] = {"label": choice, "count": 0, "track_ids": []}
     label_name = "TEQUILA" if choice == "tequila" else "FULLMOON"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✓ Готово", callback_data="adm:fwd:done")],
+        [InlineKeyboardButton(text="✖ Отмена", callback_data="adm:fwd:cancel")],
+    ])
     await callback.message.edit_text(
-        f"✓ Режим пересылки: <b>{label_name}</b>\n\n"
-        f"Теперь пересылай аудио сюда — бот сохранит их для {label_name} LIVE.\n"
-        f"Когда закончишь — напиши <code>/admin стоп</code>",
+        f"● Режим загрузки: <b>{label_name}</b>\n\n"
+        f"Пересылай аудио сюда — бот сохранит их для {label_name} LIVE.\n"
+        f"Добавлено: <b>0</b> треков\n\n"
+        f"Когда закончишь — нажми <b>✓ Готово</b>",
         parse_mode="HTML",
+        reply_markup=kb,
     )
 
 
@@ -639,7 +695,7 @@ class _AdminForwardFilter(BaseFilter):
         return (
             message.audio is not None
             and message.chat.type == "private"
-            and message.from_user.id in _admin_forward_label
+            and message.from_user.id in _admin_fwd_state
             and _is_admin(message.from_user.id)
         )
 
@@ -648,14 +704,11 @@ class _AdminForwardFilter(BaseFilter):
 async def handle_forwarded_audio(message: Message) -> None:
     """Save forwarded audio to LIVE when admin is in forward mode."""
     uid = message.from_user.id
-    if uid not in _admin_forward_label:
-        return  # not in forward mode, skip (search handler will process)
-    if not _is_admin(uid):
-        _admin_forward_label.pop(uid, None)
+    state = _admin_fwd_state.get(uid)
+    if not state:
         return
-    label = _admin_forward_label[uid]
+    label = state["label"]
     audio = message.audio
-    # Build source_id from forwarded channel or message id
     fwd_chat = message.forward_from_chat
     if fwd_chat:
         source_id = f"tg_{fwd_chat.id}_{message.forward_from_message_id}"
@@ -670,12 +723,103 @@ async def handle_forwarded_audio(message: Message) -> None:
         source="channel",
         channel=label,
     )
+    state["count"] += 1
+    state["track_ids"].append(track.id)
     label_name = "TEQUILA" if label == "tequila" else "FULLMOON"
     await message.reply(
-        f"✓ <b>{audio.performer or ''} — {audio.title or 'Unknown'}</b> → {label_name}",
+        f"✓ [{state['count']}] <b>{audio.performer or ''} — {audio.title or 'Unknown'}</b> → {label_name}",
         parse_mode="HTML",
     )
-    logger.info("Admin %s forwarded audio %s → %s", uid, source_id, label)
+    logger.info("Admin %s forwarded audio %s → %s (count=%d)", uid, source_id, label, state["count"])
+
+
+# ── Track management (list + delete) ────────────────────────────────────
+
+async def _build_tracks_list(channel: str, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+    """Build a paginated track list for the given channel with delete buttons."""
+    label_name = "TEQUILA" if channel == "tequila" else "FULLMOON"
+    async with async_session() as session:
+        total = await session.scalar(
+            select(func.count()).select_from(Track).where(Track.channel == channel)
+        ) or 0
+        result = await session.execute(
+            select(Track)
+            .where(Track.channel == channel)
+            .order_by(Track.created_at.desc())
+            .offset(page * _LIVE_TRACKS_PER_PAGE)
+            .limit(_LIVE_TRACKS_PER_PAGE)
+        )
+        tracks = list(result.scalars().all())
+
+    lines = [f"♪ <b>{label_name} LIVE</b> — треков: {total}\n"]
+    rows = []
+    for tr in tracks:
+        dur = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else "?:??"
+        lines.append(f"  {tr.artist or '?'} — {tr.title or '?'} ({dur})")
+        rows.append([
+            InlineKeyboardButton(
+                text=f"✖ {tr.artist or '?'} — {(tr.title or '?')[:30]}",
+                callback_data=AdmTrackCb(act="del", ch=channel, tid=tr.id, p=page).pack(),
+            )
+        ])
+
+    if not tracks:
+        lines.append("  (пусто)")
+
+    # Pagination
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(
+            text="◁ Назад",
+            callback_data=AdmTrackCb(act="list", ch=channel, p=page - 1).pack(),
+        ))
+    if (page + 1) * _LIVE_TRACKS_PER_PAGE < total:
+        nav.append(InlineKeyboardButton(
+            text="Далее ▷",
+            callback_data=AdmTrackCb(act="list", ch=channel, p=page + 1).pack(),
+        ))
+    if nav:
+        rows.append(nav)
+
+    # Add more tracks button
+    rows.append([
+        InlineKeyboardButton(text="◈ Добавить ещё", callback_data="adm:load"),
+    ])
+
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(AdmTrackCb.filter(F.act == "list"))
+async def handle_track_list_page(callback: CallbackQuery, callback_data: AdmTrackCb) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    text, kb = await _build_tracks_list(callback_data.ch, callback_data.p)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@router.callback_query(AdmTrackCb.filter(F.act == "del"))
+async def handle_track_delete(callback: CallbackQuery, callback_data: AdmTrackCb) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    async with async_session() as session:
+        track = await session.get(Track, callback_data.tid)
+        if track:
+            await session.delete(track)
+            await session.commit()
+            await callback.answer(f"✖ Удалён: {track.artist} — {track.title}", show_alert=False)
+        else:
+            await callback.answer("Трек не найден", show_alert=False)
+    text, kb = await _build_tracks_list(callback_data.ch, callback_data.p)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
 
 
 async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, label: str) -> None:
