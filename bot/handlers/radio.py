@@ -1,17 +1,24 @@
 """
 radio.py — TEQUILA LIVE, FULLMOON LIVE, AUTO MIX handlers.
 
-MVP: показывает статус эфира и текущий трек из Redis (если стример запущен).
-v1.1: полноценная интеграция с Pyrogram + pytgcalls streamer.
+Radio: показывает статус эфира и текущий трек из Redis.
+AUTO MIX: скачивает случайные треки из БД, миксует и отправляет.
 """
 import logging
+from pathlib import Path
 
 from aiogram import Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
+from sqlalchemy import select
+from sqlalchemy.sql import func
 
 from bot.db import get_or_create_user
 from bot.i18n import t
+from bot.models.base import async_session
+from bot.models.track import Track
 from bot.services.cache import cache
+from bot.services.downloader import download_track
+from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +79,73 @@ async def handle_fullmoon_live(callback: CallbackQuery) -> None:
 async def handle_automix(callback: CallbackQuery) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
-    await callback.message.answer(
-        t(user.language, "automix_coming_soon"), parse_mode="HTML"
+    lang = user.language
+
+    status = await callback.message.answer(
+        t(lang, "automix_generating"), parse_mode="HTML"
     )
+
+    # Pick random tracks from DB that have source_id (can be downloaded)
+    async with async_session() as session:
+        result = await session.execute(
+            select(Track)
+            .where(Track.source == "youtube", Track.source_id.is_not(None))
+            .order_by(func.random())
+            .limit(6)
+        )
+        tracks = result.scalars().all()
+
+    if len(tracks) < 2:
+        await status.edit_text(t(lang, "automix_no_tracks"))
+        return
+
+    # Download all tracks
+    downloaded_paths: list[Path] = []
+    try:
+        for tr in tracks:
+            try:
+                mp3 = await download_track(tr.source_id, bitrate=192)
+                downloaded_paths.append(mp3)
+            except Exception as e:
+                logger.warning("AutoMix: skip track %s: %s", tr.source_id, e)
+
+        if len(downloaded_paths) < 2:
+            await status.edit_text(t(lang, "automix_no_tracks"))
+            return
+
+        # Create mix
+        from mixer.automix import create_mix
+
+        mix_path = settings.DOWNLOAD_DIR / "automix_latest.mp3"
+        crossfade = 7
+        await create_mix(downloaded_paths, mix_path, crossfade_ms=crossfade * 1000)
+
+        mix_size = mix_path.stat().st_size
+        if mix_size > settings.MAX_FILE_SIZE:
+            await status.edit_text(t(lang, "automix_error"))
+            return
+
+        await callback.message.answer_audio(
+            audio=FSInputFile(mix_path),
+            title="AUTO MIX — BLACK ROOM",
+            performer="BLACK ROOM DJ",
+        )
+        await status.edit_text(
+            t(lang, "automix_done", count=len(downloaded_paths), crossfade=crossfade),
+            parse_mode="HTML",
+        )
+
+    except Exception as e:
+        logger.error("AutoMix error: %s", e)
+        await status.edit_text(t(lang, "automix_error"))
+    finally:
+        # Cleanup downloaded files
+        from bot.services.downloader import cleanup_file
+        for p in downloaded_paths:
+            cleanup_file(p)
+        mix_out = settings.DOWNLOAD_DIR / "automix_latest.mp3"
+        if mix_out.exists():
+            mix_out.unlink(missing_ok=True)
 
 
 # Триггер "что играет" / "что за трек"
@@ -110,7 +181,6 @@ async def handle_radio_control(message: Message) -> None:
     cmd = message.text.strip().lower()
 
     if cmd in ("стоп", "stop"):
-        # v1.1: отправить команду стримеру через Redis pub/sub
         await cache.redis.publish("radio:cmd", "stop")
         await message.answer(t(lang, "radio_stop"))
 

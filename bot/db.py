@@ -1,5 +1,6 @@
 from aiogram.types import User as TgUser
 from sqlalchemy import select, update
+from sqlalchemy.sql import func
 
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
@@ -109,3 +110,27 @@ async def upsert_track(
         await session.commit()
         await session.refresh(track)
         return track
+
+
+async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:
+    """Search tracks in local DB (channels TEQUILA / FULLMOON first, then all)."""
+    q = f"%{query}%"
+    async with async_session() as session:
+        # Priority: channel tracks first, then external
+        result = await session.execute(
+            select(Track)
+            .where(
+                (Track.title.ilike(q)) | (Track.artist.ilike(q))
+            )
+            .order_by(
+                # channel tracks first (tequila/fullmoon), then external
+                func.case(
+                    (Track.channel == "tequila", 0),
+                    (Track.channel == "fullmoon", 1),
+                    else_=2,
+                ),
+                Track.downloads.desc(),
+            )
+            .limit(limit)
+        )
+        return list(result.scalars().all())

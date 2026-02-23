@@ -14,10 +14,10 @@ from aiogram.types import (
 )
 
 from bot.config import settings
-from bot.db import get_or_create_user, increment_request_count, record_listening_event, upsert_track
+from bot.db import get_or_create_user, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
-from bot.services.downloader import cleanup_file, download_track, search_tracks
+from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,51 @@ async def _do_search(message: Message, query: str) -> None:
             await message.answer(t(lang, "rate_limit_exceeded"))
         return
 
-    status = await message.answer(t(lang, "searching"))
-    results = await search_tracks(query, max_results=5)
+    # Spotify link → extract metadata → YouTube search
+    if is_spotify_url(query):
+        status = await message.answer(t(lang, "spotify_detected"))
+        resolved = await resolve_spotify(query)
+        if resolved:
+            query = resolved
+        else:
+            await status.edit_text(t(lang, "no_results"))
+            return
+    else:
+        status = await message.answer(t(lang, "searching"))
+
+    # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
+    local_tracks = await search_local_tracks(query, limit=5)
+    if local_tracks:
+        results = []
+        for tr in local_tracks:
+            results.append({
+                "video_id": tr.source_id,
+                "title": tr.title or "Unknown",
+                "uploader": tr.artist or "Unknown",
+                "duration": tr.duration or 0,
+                "duration_fmt": _fmt_duration(tr.duration) if tr.duration else "?:??",
+                "source": tr.source or "channel",
+                "file_id": tr.file_id,
+            })
+        session_id = secrets.token_urlsafe(6)
+        await cache.store_search(session_id, results)
+        await record_listening_event(
+            user_id=user.id, query=query[:500], action="search", source="search"
+        )
+        keyboard = _build_results_keyboard(results, session_id)
+        await status.edit_text(
+            f"{t(lang, 'found_local')}\n<b>{query}</b>",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+        return
+
+    # STEP 2: YouTube search
+    results = await search_tracks(query, max_results=5, source="youtube")
+
+    # STEP 3: SoundCloud fallback if YouTube found nothing
+    if not results:
+        results = await search_tracks(query, max_results=5, source="soundcloud")
 
     if not results:
         await status.edit_text(t(lang, "no_results"))
@@ -69,7 +112,6 @@ async def _do_search(message: Message, query: str) -> None:
     session_id = secrets.token_urlsafe(6)
     await cache.store_search(session_id, results)
 
-    # Записываем запрос в историю
     await record_listening_event(
         user_id=user.id, query=query[:500], action="search", source="search"
     )
@@ -80,6 +122,13 @@ async def _do_search(message: Message, query: str) -> None:
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+
+def _fmt_duration(seconds: int | None) -> str:
+    if not seconds:
+        return "?:??"
+    m, s = divmod(seconds, 60)
+    return f"{m}:{s:02d}"
 
 
 @router.message(Command("search"))
@@ -95,12 +144,21 @@ async def cmd_search(message: Message) -> None:
 @router.message(lambda m: m.text and not m.text.startswith("/"))
 async def handle_text(message: Message) -> None:
     text = message.text.strip()[:500]
-    # "что играет" / "что за трек" → отдельный обработчик в radio.py
-    if any(phrase in text.lower() for phrase in ("что играет", "что за трек")):
+    lower = text.lower()
+
+    # "что играет" / "что за трек" → radio.py
+    if any(phrase in lower for phrase in ("что играет", "что за трек")):
         return
     # Команды управления радио → radio.py
-    if text.lower() in ("стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip"):
+    if lower in ("стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip"):
         return
+
+    # Natural language triggers: "включи", "поставь", "хочу послушать"
+    for prefix in ("включи ", "поставь ", "хочу послушать ", "play ", "найди "):
+        if lower.startswith(prefix):
+            text = text[len(prefix):].strip()
+            break
+
     await _do_search(message, text)
 
 
@@ -124,6 +182,18 @@ async def handle_track_select(
     track_info = results[callback_data.i]
     video_id = track_info["video_id"]
     bitrate = int(user.quality) if user.quality in ("128", "192", "320") else settings.DEFAULT_BITRATE
+
+    # If track already has a file_id from local DB (channel tracks)
+    local_fid = track_info.get("file_id")
+    if local_fid:
+        await callback.message.answer_audio(
+            audio=local_fid,
+            title=track_info["title"],
+            performer=track_info["uploader"],
+            duration=track_info.get("duration"),
+        )
+        await _post_download(user.id, track_info, local_fid, bitrate)
+        return
 
     # Проверяем Redis кэш
     file_id = await cache.get_file_id(video_id, bitrate)

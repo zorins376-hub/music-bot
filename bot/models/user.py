@@ -21,7 +21,10 @@ class User(Base):
 
     # AI DJ профиль (v1.2)
     fav_genres: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    fav_artists: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    fav_vibe: Mapped[str | None] = mapped_column(String(50), nullable=True)
     avg_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

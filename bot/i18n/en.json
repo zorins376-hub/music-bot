@@ -36,5 +36,24 @@
   "settings_quality_changed": "✅ Quality changed to <b>{quality} kbps</b>.",
   "radio_stop": "⏹ Radio stopped.",
   "radio_pause": "⏸ Radio paused.",
-  "radio_skip": "⏭ Next track..."
+  "radio_skip": "⏭ Next track...",
+
+  "onboard_q1": "🎵 Let's set up your profile!\n\n<b>What music style do you like?</b>",
+  "onboard_q2": "<b>What vibe do you prefer?</b>",
+  "onboard_q3": "<b>Type up to 5 favorite artists, separated by commas:</b>\n\n<i>e.g. Drake, The Weeknd, Billie Eilish</i>",
+  "onboard_done": "✅ Profile set up! I'll now recommend music tailored to you.",
+  "onboard_skip": "Skip",
+
+  "premium_invoice_title": "BLACK ROOM Premium (30 days)",
+  "premium_invoice_desc": "Unlimited tracks · 320 kbps · VIP stream · No ads",
+  "premium_pay_success": "🎉 Thank you! <b>Premium</b> activated for 30 days.",
+  "premium_pay_button": "⭐ Pay {price} Stars",
+
+  "automix_generating": "🔥 Generating AUTO MIX...\nThis may take a minute.",
+  "automix_no_tracks": "Not enough tracks for a mix. Listen to more music first!",
+  "automix_done": "🔥 <b>AUTO MIX</b> ready!\n\nTracks: {count} · Crossfade: {crossfade}s",
+  "automix_error": "Failed to create mix. Try again later.",
+
+  "spotify_detected": "🟢 Spotify link detected. Searching on YouTube...",
+  "found_local": "📂 Found in channel database:"
 }
