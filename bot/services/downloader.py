@@ -170,7 +170,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
 def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
     output_template = str(output_dir / f"{video_id}.%(ext)s")
     ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+        "format": "bestaudio/best",
         "outtmpl": output_template,
         "postprocessors": [
             {
@@ -185,20 +185,13 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        "extractor_args": {"youtube": {"player_client": ["mweb", "ios", "android"]}},
         **_cookies_opt(),
         "match_filter": yt_dlp.utils.match_filter_func(
             f"duration <= {settings.MAX_DURATION}"
         ),
     }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-    except Exception:
-        # Fallback: try with 'best' format (may get video+audio)
-        ydl_opts["format"] = "best[height<=480]/best"
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
 
     mp3_path = output_dir / f"{video_id}.mp3"
     if mp3_path.exists():
