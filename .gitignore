@@ -9,3 +9,7 @@ logs/
 .DS_Store
 tz1_output.txt
 tz2_output.txt
+cookies.txt
+cookie_debug.log
+export_log*.txt
+test_cookie_output.txt
