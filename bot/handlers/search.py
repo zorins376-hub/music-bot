@@ -180,6 +180,19 @@ async def handle_text(message: Message) -> None:
 
     is_group = message.chat.type in ("group", "supergroup")
 
+    # Handle @bot_username mentions in groups
+    if is_group and message.entities:
+        for ent in message.entities:
+            if ent.type == "mention":
+                mention = text[ent.offset:ent.offset + ent.length]
+                bot_me = await message.bot.me()
+                if mention.lower() == f"@{bot_me.username.lower()}":
+                    # Remove the mention from the query
+                    text = (text[:ent.offset] + text[ent.offset + ent.length:]).strip()
+                    lower = text.lower()
+                    matched_prefix = True  # treat mention as a trigger
+                    break
+
     # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
     _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
     matched_prefix = False
