@@ -436,8 +436,8 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
     await callback.answer()
     prompts = {
         "adm:broadcast": "Для рассылки используй:\n<code>/admin broadcast текст</code>",
-        "adm:premium": "Для выдачи Premium:\n<code>/admin premium user_id</code>",
-        "adm:ban": "Для бана:\n<code>/admin ban user_id</code>\nДля разбана:\n<code>/admin unban user_id</code>",
+        "adm:premium": "Для выдачи Premium:\n<code>/admin premium @username</code>\nили\n<code>/admin premium user_id</code>",
+        "adm:ban": "Для бана:\n<code>/admin ban @username</code>\nДля разбана:\n<code>/admin unban @username</code>\n\nМожно также по ID.",
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
     }
     text = prompts.get(callback.data, "Используй команду /admin")
