@@ -59,5 +59,10 @@
   "quality_premium_only": "🔒 320 kbps доступно только для Premium-подписчиков",
   "top_period_today": "сегодня",
   "top_period_week": "за неделю",
-  "top_period_all": "за всё время"
+  "top_period_all": "за всё время",
+  "search_results": "Результаты",
+  "rate_track": "Оцени трек:",
+  "feedback_recorded": "{emoji} Записано!",
+  "feedback_saved": "{emoji} Оценка сохранена",
+  "downloads_count": "скач."
 }

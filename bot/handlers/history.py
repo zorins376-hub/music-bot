@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User as TgUser
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 
 from bot.db import get_or_create_user
 from bot.i18n import t
@@ -11,15 +11,17 @@ from bot.models.track import ListeningHistory, Track
 
 router = Router()
 
-_TOP_PERIOD_KEYBOARD = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📅 Сегодня", callback_data="top:today"),
-            InlineKeyboardButton(text="📆 Неделя", callback_data="top:week"),
-            InlineKeyboardButton(text="🏆 Все время", callback_data="top:all"),
+
+def _top_period_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"📅 {t(lang, 'top_period_today')}", callback_data="top:today"),
+                InlineKeyboardButton(text=f"📆 {t(lang, 'top_period_week')}", callback_data="top:week"),
+                InlineKeyboardButton(text=f"🏆 {t(lang, 'top_period_all')}", callback_data="top:all"),
+            ]
         ]
-    ]
-)
+    )
 
 
 async def _show_top(message: Message, tg_user: TgUser, period: str = "week") -> None:
@@ -37,26 +39,34 @@ async def _show_top(message: Message, tg_user: TgUser, period: str = "week") -> 
         since = None
         period_label = t(lang, "top_period_all")
 
+    # Count play events per track within the time period
     async with async_session() as session:
-        query = select(Track).where(Track.downloads > 0)
+        q = (
+            select(
+                Track,
+                func.count(ListeningHistory.id).label("play_count"),
+            )
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(ListeningHistory.action == "play")
+        )
         if since:
-            query = query.where(Track.created_at >= since)
-        query = query.order_by(desc(Track.downloads)).limit(10)
-        result = await session.execute(query)
-        tracks = result.scalars().all()
+            q = q.where(ListeningHistory.created_at >= since)
+        q = q.group_by(Track.id).order_by(desc("play_count")).limit(10)
+        result = await session.execute(q)
+        rows = result.all()
 
-    if not tracks:
+    if not rows:
         await message.answer(t(lang, "top_empty"))
         return
 
     lines = [f"{t(lang, 'top_header')} ({period_label})"]
-    for i, track in enumerate(tracks, 1):
+    for i, (track, play_count) in enumerate(rows, 1):
         name = f"{track.artist} — {track.title}" if track.artist else track.title or "Unknown"
-        lines.append(f"{i}. {name} ({track.downloads} скач.)")
+        lines.append(f"{i}. {name} ({play_count} {t(lang, 'downloads_count')})")
 
     await message.answer(
         "\n".join(lines),
-        reply_markup=_TOP_PERIOD_KEYBOARD,
+        reply_markup=_top_period_keyboard(lang),
         parse_mode="HTML",
     )
 
@@ -68,7 +78,8 @@ async def cmd_history(message: Message) -> None:
 
     async with async_session() as session:
         result = await session.execute(
-            select(ListeningHistory)
+            select(ListeningHistory, Track)
+            .outerjoin(Track, ListeningHistory.track_id == Track.id)
             .where(
                 ListeningHistory.user_id == user.id,
                 ListeningHistory.action == "play",
@@ -76,15 +87,18 @@ async def cmd_history(message: Message) -> None:
             .order_by(desc(ListeningHistory.created_at))
             .limit(10)
         )
-        records = result.scalars().all()
+        rows = result.all()
 
-    if not records:
+    if not rows:
         await message.answer(t(lang, "history_empty"))
         return
 
     lines = [t(lang, "history_header")]
-    for i, rec in enumerate(records, 1):
-        label = rec.query or f"Track #{rec.track_id}"
+    for i, (rec, track) in enumerate(rows, 1):
+        if track and (track.title or track.artist):
+            label = f"{track.artist} — {track.title}" if track.artist else track.title
+        else:
+            label = rec.query or f"Track #{rec.track_id}"
         lines.append(f"{i}. {label}")
 
     await message.answer("\n".join(lines), parse_mode="HTML")

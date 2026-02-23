@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
@@ -23,7 +24,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(_LOG_DIR / "bot.log", encoding="utf-8"),
+        TimedRotatingFileHandler(
+            _LOG_DIR / "bot.log", when="D", backupCount=30, encoding="utf-8"
+        ),
     ],
 )
 logger = logging.getLogger(__name__)

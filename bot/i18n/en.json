@@ -59,5 +59,10 @@
   "quality_premium_only": "🔒 320 kbps is available only for Premium subscribers",
   "top_period_today": "today",
   "top_period_week": "this week",
-  "top_period_all": "all time"
+  "top_period_all": "all time",
+  "search_results": "Results",
+  "rate_track": "Rate this track:",
+  "feedback_recorded": "{emoji} Recorded!",
+  "feedback_saved": "{emoji} Rating saved",
+  "downloads_count": "plays"
 }

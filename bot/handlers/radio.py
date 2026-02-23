@@ -85,15 +85,33 @@ async def handle_automix(callback: CallbackQuery) -> None:
         t(lang, "automix_generating"), parse_mode="HTML"
     )
 
-    # Pick random tracks from DB that have source_id (can be downloaded)
+    # Pick random tracks from DB — prefer channel tracks (TEQUILA/FULLMOON)
     async with async_session() as session:
+        # First try channel tracks
         result = await session.execute(
             select(Track)
-            .where(Track.source == "youtube", Track.source_id.is_not(None))
+            .where(
+                Track.source_id.is_not(None),
+                Track.channel.in_(("tequila", "fullmoon")),
+            )
             .order_by(func.random())
             .limit(6)
         )
-        tracks = result.scalars().all()
+        tracks = list(result.scalars().all())
+
+        # Fill remaining slots with any tracks
+        if len(tracks) < 6:
+            existing_ids = [tr.id for tr in tracks]
+            filler = await session.execute(
+                select(Track)
+                .where(
+                    Track.source_id.is_not(None),
+                    Track.id.not_in(existing_ids) if existing_ids else True,
+                )
+                .order_by(func.random())
+                .limit(6 - len(tracks))
+            )
+            tracks.extend(filler.scalars().all())
 
     if len(tracks) < 2:
         await status.edit_text(t(lang, "automix_no_tracks"))
@@ -173,14 +191,14 @@ async def handle_whats_playing(message: Message) -> None:
 
 # Триггеры управления радио: "стоп", "пауза", "дальше", "скип", "next", "stop", "pause"
 @router.message(lambda m: m.text and m.text.strip().lower() in (
-    "стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip"
+    "стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip", "выключи"
 ))
 async def handle_radio_control(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
     cmd = message.text.strip().lower()
 
-    if cmd in ("стоп", "stop"):
+    if cmd in ("стоп", "stop", "выключи"):
         await cache.redis.publish("radio:cmd", "stop")
         await message.answer(t(lang, "radio_stop"))
 

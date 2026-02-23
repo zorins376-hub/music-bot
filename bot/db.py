@@ -1,4 +1,5 @@
 from aiogram.types import User as TgUser
+from datetime import datetime, timezone
 from sqlalchemy import case, select, update
 from sqlalchemy.sql import func
 
@@ -28,9 +29,20 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 .values(
                     username=tg_user.username,
                     first_name=tg_user.first_name,
+                    last_active=datetime.now(timezone.utc),
                 )
             )
             await session.commit()
+
+        # Auto-revoke expired premium
+        if user.is_premium and user.premium_until and user.premium_until < datetime.now(timezone.utc):
+            await session.execute(
+                update(User)
+                .where(User.id == tg_user.id)
+                .values(is_premium=False)
+            )
+            await session.commit()
+            user.is_premium = False
 
         return user
 

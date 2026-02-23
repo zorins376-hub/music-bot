@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # ── Rate limiting ─────────────────────────────────────────────────────
     RATE_LIMIT_REGULAR: int = 10
-    RATE_LIMIT_PREMIUM: int = 100
+    RATE_LIMIT_PREMIUM: int = 999999
     COOLDOWN_REGULAR: int = 5
     COOLDOWN_PREMIUM: int = 1
 

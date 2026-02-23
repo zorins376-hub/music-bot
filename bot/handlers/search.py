@@ -55,15 +55,17 @@ async def _do_search(message: Message, query: str) -> None:
     if user.is_banned:
         return
 
-    allowed, cooldown = await cache.check_rate_limit(
-        message.from_user.id, is_premium=user.is_premium
-    )
-    if not allowed:
-        if cooldown > 0:
-            await message.answer(t(lang, "rate_limit_cooldown", seconds=cooldown))
-        else:
-            await message.answer(t(lang, "rate_limit_exceeded"))
-        return
+    # Admins bypass rate limits
+    if message.from_user.id not in settings.ADMIN_IDS:
+        allowed, cooldown = await cache.check_rate_limit(
+            message.from_user.id, is_premium=user.is_premium
+        )
+        if not allowed:
+            if cooldown > 0:
+                await message.answer(t(lang, "rate_limit_cooldown", seconds=cooldown))
+            else:
+                await message.answer(t(lang, "rate_limit_exceeded"))
+            return
 
     # Spotify link → extract metadata → YouTube search
     if is_spotify_url(query):
@@ -125,7 +127,7 @@ async def _do_search(message: Message, query: str) -> None:
 
     keyboard = _build_results_keyboard(results, session_id)
     await status.edit_text(
-        f"<b>Результаты:</b> {query}",
+        f"<b>{t(lang, 'search_results')}:</b> {query}",
         reply_markup=keyboard,
         parse_mode="HTML",
     )
@@ -140,7 +142,7 @@ def _fmt_duration(seconds: int | None) -> str:
 
 @router.message(Command("search"))
 async def cmd_search(message: Message) -> None:
-    query = message.text.removeprefix("/search").strip()
+    query = message.text.removeprefix("/search").strip()[:500]
     if not query:
         user = await get_or_create_user(message.from_user)
         await message.answer(t(user.language, "search_prompt"))
@@ -156,8 +158,8 @@ async def handle_text(message: Message) -> None:
     # "что играет" / "что за трек" → radio.py
     if any(phrase in lower for phrase in ("что играет", "что за трек")):
         return
-    # Команды управления радио → radio.py
-    if lower in ("стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip"):
+    # "выключи" → radio.py
+    if lower in ("стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip", "выключи"):
         return
 
     # Natural language triggers: "включи", "поставь", "хочу послушать"
@@ -201,7 +203,7 @@ async def handle_track_select(
         )
         tid = await _post_download(user.id, track_info, local_fid, bitrate)
         await callback.message.answer(
-            "Оцени трек:",
+            t(lang, "rate_track"),
             reply_markup=_feedback_keyboard(tid),
         )
         return
@@ -217,7 +219,7 @@ async def handle_track_select(
         )
         tid = await _post_download(user.id, track_info, file_id, bitrate)
         await callback.message.answer(
-            "Оцени трек:",
+            t(lang, "rate_track"),
             reply_markup=_feedback_keyboard(tid),
         )
         return
@@ -252,7 +254,7 @@ async def handle_track_select(
         tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
         await status.delete()
         await callback.message.answer(
-            "Оцени трек:",
+            t(lang, "rate_track"),
             reply_markup=_feedback_keyboard(tid),
         )
 
@@ -326,7 +328,7 @@ async def handle_feedback(
         source="search",
     )
     emoji = "❤️" if callback_data.act == "like" else "👎"
-    await callback.answer(f"{emoji} Записано!")
+    await callback.answer(t(user.language, "feedback_recorded", emoji=emoji))
     await callback.message.edit_text(
-        f"{emoji} Оценка сохранена", reply_markup=None
+        t(user.language, "feedback_saved", emoji=emoji), reply_markup=None
     )

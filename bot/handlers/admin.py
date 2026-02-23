@@ -168,7 +168,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 
 
 async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
-    """Рассылка всем пользователям. Работает медленно при большой базе."""
+    """Broadcast to all users with Telegram-friendly rate limiting."""
+    import asyncio
     async with async_session() as session:
         result = await session.execute(
             select(User.id).where(User.is_banned == False)  # noqa: E712
@@ -182,7 +183,8 @@ async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
             sent += 1
         except Exception:
             failed += 1
+        await asyncio.sleep(0.05)  # ~20 msg/sec, safe for Telegram limits
 
     await admin_msg.answer(
-        f"Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
+        f"Broadcast done.\nSent: {sent}\nFailed: {failed}"
     )

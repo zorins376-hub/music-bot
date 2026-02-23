@@ -59,5 +59,10 @@
   "quality_premium_only": "🔒 320 kbps Premium колдонуучулар үчүн гана",
   "top_period_today": "бүгүн",
   "top_period_week": "жумага",
-  "top_period_all": "баары"
+  "top_period_all": "баары",
+  "search_results": "Натыйжалар",
+  "rate_track": "Ырды баалаңыз:",
+  "feedback_recorded": "{emoji} Жазылды!",
+  "feedback_saved": "{emoji} Баа сакталды",
+  "downloads_count": "жүктөө"
 }
