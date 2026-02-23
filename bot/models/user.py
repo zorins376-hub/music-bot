@@ -17,6 +17,7 @@ class User(Base):
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
     premium_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    captcha_passed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     request_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # AI DJ профиль (v1.2)

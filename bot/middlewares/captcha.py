@@ -3,7 +3,7 @@ CAPTCHA middleware — simple math challenge for new users.
 
 On first interaction the bot asks "a + b = ?" and blocks further
 messages/callbacks until the user answers correctly.
-Verified status is stored in Redis with a long TTL (30 days).
+Verified status is stored in the database permanently.
 """
 
 import random
@@ -11,17 +11,15 @@ from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import update
 
 from bot.db import get_or_create_user
 from bot.i18n import t
+from bot.models.base import async_session
+from bot.models.user import User
 from bot.services.cache import cache
 
-_VERIFIED_TTL = 60 * 60 * 24 * 30  # 30 days
-_CHALLENGE_TTL = 60 * 10            # 10 minutes to answer
-
-
-def _verified_key(user_id: int) -> str:
-    return f"captcha:ok:{user_id}"
+_CHALLENGE_TTL = 60 * 10  # 10 minutes to answer
 
 
 def _challenge_key(user_id: int) -> str:
@@ -37,49 +35,50 @@ class CaptchaMiddleware(BaseMiddleware):
         event: Message,
         data: dict[str, Any],
     ) -> Any:
-        user = event.from_user
-        if user is None:
+        tg_user = event.from_user
+        if tg_user is None:
             return await handler(event, data)
 
-        # Already verified?
-        if await cache.redis.exists(_verified_key(user.id)):
+        db_user = await get_or_create_user(tg_user)
+
+        # Already verified — pass through forever
+        if db_user.captcha_passed:
             return await handler(event, data)
 
-        # /start is always allowed (so the user can see the bot's greeting)
+        # /start is always allowed
         if event.text and event.text.strip().startswith("/start"):
-            # Generate captcha if not already pending
-            if not await cache.redis.exists(_challenge_key(user.id)):
-                await _send_challenge(event, user.id)
+            if not await cache.redis.exists(_challenge_key(tg_user.id)):
+                await _send_challenge(event, tg_user.id, db_user.language)
             return
 
         # Is there a pending challenge?
-        answer = await cache.redis.get(_challenge_key(user.id))
+        answer = await cache.redis.get(_challenge_key(tg_user.id))
         if answer is None:
-            # No challenge yet — send one
-            await _send_challenge(event, user.id)
+            await _send_challenge(event, tg_user.id, db_user.language)
             return
 
         # Check the user's answer
         text = (event.text or "").strip()
         if text == answer:
-            await cache.redis.setex(_verified_key(user.id), _VERIFIED_TTL, "1")
-            await cache.redis.delete(_challenge_key(user.id))
-            db_user = await get_or_create_user(user)
+            # Mark as passed permanently in DB
+            async with async_session() as session:
+                await session.execute(
+                    update(User).where(User.id == tg_user.id).values(captcha_passed=True)
+                )
+                await session.commit()
+            await cache.redis.delete(_challenge_key(tg_user.id))
             await event.answer(t(db_user.language, "captcha_ok"), parse_mode="HTML")
-            # Don't pass the answer message to handlers (it's just a number)
             return
         else:
-            db_user = await get_or_create_user(user)
             await event.answer(t(db_user.language, "captcha_fail"), parse_mode="HTML")
             return
 
 
-async def _send_challenge(event: Message, user_id: int) -> None:
+async def _send_challenge(event: Message, user_id: int, lang: str) -> None:
     a = random.randint(1, 20)
     b = random.randint(1, 20)
     answer = str(a + b)
     await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, answer)
-    db_user = await get_or_create_user(event.from_user)
     await event.answer(
-        t(db_user.language, "captcha_prompt", a=a, b=b), parse_mode="HTML"
+        t(lang, "captcha_prompt", a=a, b=b), parse_mode="HTML"
     )
