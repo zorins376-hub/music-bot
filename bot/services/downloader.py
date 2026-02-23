@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import yt_dlp
@@ -8,6 +10,22 @@ import yt_dlp
 from bot.config import settings, _COOKIES_PATH
 
 logger = logging.getLogger(__name__)
+
+
+def log_runtime_info() -> None:
+    """Log yt-dlp version, JS runtimes and cookie status at startup."""
+    logger.info("yt-dlp version: %s", yt_dlp.version.__version__)
+    for rt in ("deno", "node"):
+        path = shutil.which(rt)
+        if path:
+            try:
+                ver = subprocess.check_output([rt, "--version"], timeout=5, text=True).strip()
+                logger.info("JS runtime '%s': %s (%s)", rt, ver, path)
+            except Exception:
+                logger.info("JS runtime '%s': found at %s (version unknown)", rt, path)
+        else:
+            logger.info("JS runtime '%s': NOT FOUND", rt)
+    logger.info("Cookies file: %s (exists=%s)", _COOKIES_PATH, _COOKIES_PATH.exists())
 
 
 def _cookies_opt() -> dict:

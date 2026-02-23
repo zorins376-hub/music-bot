@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 async def on_startup(bot: Bot) -> None:
+    from bot.services.downloader import log_runtime_info
+    log_runtime_info()
+
     await init_db()
 
     # Register bot commands for private chats

@@ -5,8 +5,7 @@ aiofiles>=23.2.0
 pydantic-settings>=2.0.0
 
 # ── Download / audio ──────────────────────────────────────────────────────
-yt-dlp>=2025.1.0
-yt-dlp-ejs>=0.5.0
+yt-dlp==2026.2.21
 mutagen>=1.47.0
 pydub>=0.25.0
 
