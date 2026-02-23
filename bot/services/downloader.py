@@ -5,9 +5,16 @@ from pathlib import Path
 
 import yt_dlp
 
-from bot.config import settings
+from bot.config import settings, _COOKIES_PATH
 
 logger = logging.getLogger(__name__)
+
+
+def _cookies_opt() -> dict:
+    """Return cookiefile option if cookies.txt exists."""
+    if _COOKIES_PATH.exists():
+        return {"cookiefile": str(_COOKIES_PATH)}
+    return {}
 
 # Spotify URL regex
 _SPOTIFY_RE = re.compile(
@@ -114,6 +121,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "quiet": True,
         "no_warnings": True,
         "default_search": search_prefix,
+        **_cookies_opt(),
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -166,6 +174,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
         "no_warnings": True,
         "socket_timeout": 30,
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        **_cookies_opt(),
         "match_filter": yt_dlp.utils.match_filter_func(
             f"duration <= {settings.MAX_DURATION}"
         ),

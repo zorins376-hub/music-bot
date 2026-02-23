@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     FULLMOON_CHANNEL: str = ""
     BLACKROOM_GROUP_ID: Optional[int] = None
 
+    # ── YouTube cookies (base64-encoded Netscape cookies.txt) ────────────
+    YT_COOKIES: Optional[str] = None
+
     # ── Spotify (v1.2) ────────────────────────────────────────────────────
     SPOTIFY_CLIENT_ID: Optional[str] = None
     SPOTIFY_CLIENT_SECRET: Optional[str] = None
@@ -83,3 +86,9 @@ settings = Settings()
 
 settings.DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Write YouTube cookies file from env var if provided
+_COOKIES_PATH = settings.DATA_DIR / "cookies.txt"
+if settings.YT_COOKIES:
+    import base64 as _b64
+    _COOKIES_PATH.write_bytes(_b64.b64decode(settings.YT_COOKIES))
