@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from pathlib import Path
@@ -23,6 +24,44 @@ from bot.services.downloader import cleanup_file, download_track, is_spotify_url
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Group chat auto-cleanup timeout (seconds)
+_GROUP_CLEANUP_SEC = 60
+
+# session_id → {chat_id, user_msg_id, status_msg_id}
+_group_sessions: dict[str, dict] = {}
+
+
+async def _schedule_group_cleanup(bot, session_id: str) -> None:
+    """Delete search messages in group if no track selected within timeout."""
+    await asyncio.sleep(_GROUP_CLEANUP_SEC)
+    info = _group_sessions.pop(session_id, None)
+    if not info:
+        return
+    for mid in (info.get("status_msg_id"), info.get("user_msg_id")):
+        if mid:
+            try:
+                await bot.delete_message(info["chat_id"], mid)
+            except Exception:
+                pass
+
+
+async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> None:
+    """After track is selected in group: delete original message + search results."""
+    info = _group_sessions.pop(session_id, None)
+    # Delete the search results message (the inline keyboard message)
+    try:
+        await results_msg.delete()
+    except Exception:
+        pass
+    if not info:
+        return
+    # Delete the original user message
+    if info.get("user_msg_id"):
+        try:
+            await bot.delete_message(info["chat_id"], info["user_msg_id"])
+        except Exception:
+            pass
 
 
 class TrackCallback(CallbackData, prefix="t"):
@@ -113,6 +152,16 @@ async def _do_search(message: Message, query: str) -> None:
             reply_markup=keyboard,
             parse_mode="HTML",
         )
+
+        # Group cleanup: schedule auto-delete
+        is_group = message.chat.type in ("group", "supergroup")
+        if is_group:
+            _group_sessions[session_id] = {
+                "chat_id": message.chat.id,
+                "user_msg_id": message.message_id,
+                "status_msg_id": status.message_id,
+            }
+            asyncio.create_task(_schedule_group_cleanup(message.bot, session_id))
         return
 
     # STEP 2: YouTube search (with global query cache)
@@ -147,6 +196,16 @@ async def _do_search(message: Message, query: str) -> None:
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+    # Group cleanup: schedule auto-delete
+    is_group = message.chat.type in ("group", "supergroup")
+    if is_group:
+        _group_sessions[session_id] = {
+            "chat_id": message.chat.id,
+            "user_msg_id": message.message_id,
+            "status_msg_id": status.message_id,
+        }
+        asyncio.create_task(_schedule_group_cleanup(message.bot, session_id))
 
 
 def _fmt_duration(seconds: int | None) -> str:
@@ -221,6 +280,7 @@ async def handle_track_select(
 
     user = await get_or_create_user(callback.from_user)
     lang = user.language
+    is_group = callback.message.chat.type in ("group", "supergroup")
 
     if user.is_banned:
         return
@@ -246,10 +306,13 @@ async def handle_track_select(
             caption=caption,
         )
         tid = await _post_download(user.id, track_info, local_fid, bitrate)
-        await callback.message.answer(
-            t(lang, "rate_track"),
-            reply_markup=_feedback_keyboard(tid),
-        )
+        if is_group:
+            await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+        else:
+            await callback.message.answer(
+                t(lang, "rate_track"),
+                reply_markup=_feedback_keyboard(tid),
+            )
         return
 
     # Проверяем Redis кэш
@@ -264,10 +327,13 @@ async def handle_track_select(
             caption=caption,
         )
         tid = await _post_download(user.id, track_info, file_id, bitrate)
-        await callback.message.answer(
-            t(lang, "rate_track"),
-            reply_markup=_feedback_keyboard(tid),
-        )
+        if is_group:
+            await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+        else:
+            await callback.message.answer(
+                t(lang, "rate_track"),
+                reply_markup=_feedback_keyboard(tid),
+            )
         return
 
     status = await callback.message.answer(t(lang, "downloading"))
@@ -301,10 +367,13 @@ async def handle_track_select(
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
         tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
         await status.delete()
-        await callback.message.answer(
-            t(lang, "rate_track"),
-            reply_markup=_feedback_keyboard(tid),
-        )
+        if is_group:
+            await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+        else:
+            await callback.message.answer(
+                t(lang, "rate_track"),
+                reply_markup=_feedback_keyboard(tid),
+            )
 
     except Exception as e:
         err_msg = str(e)
