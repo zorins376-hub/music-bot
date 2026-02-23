@@ -50,6 +50,8 @@
   "premium_pay_success": "✧ Рахмат! <b>Premium</b> 30 күнгө активдештирилди.",
   "premium_pay_button": "★ {price} Stars төлөө",
 
+  "automix_pick_genre": "✦ <b>AUTO MIX</b>\n\nМикс үчүн жанр тандаңыз:",
+  "automix_all_genres": "✦ Баардык жанрлар (аралаш)",
   "automix_generating": "✦ AUTO MIX даярдалууда...\nБир мүнөт күтүңүз.",
   "automix_no_tracks": "Микс үчүн жетишсиз ырлар. Көбүрөөк угуңуз!",
   "automix_done": "✦ <b>AUTO MIX</b> даяр!\n\nЫрлар: {count} · Crossfade: {crossfade}s",

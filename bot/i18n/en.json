@@ -50,6 +50,8 @@
   "premium_pay_success": "✧ Thank you! <b>Premium</b> activated for 30 days.",
   "premium_pay_button": "★ Pay {price} Stars",
 
+  "automix_pick_genre": "✦ <b>AUTO MIX</b>\n\nPick a genre for the mix:",
+  "automix_all_genres": "✦ All genres (mixed)",
   "automix_generating": "✦ Generating AUTO MIX...\nThis may take a minute.",
   "automix_no_tracks": "Not enough tracks for a mix. Listen to more music first!",
   "automix_done": "✦ <b>AUTO MIX</b> ready!\n\nTracks: {count} · Crossfade: {crossfade}s",

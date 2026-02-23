@@ -2,14 +2,15 @@
 radio.py — TEQUILA LIVE, FULLMOON LIVE, AUTO MIX handlers.
 
 Radio: показывает статус эфира и текущий трек из Redis.
-AUTO MIX: скачивает случайные треки из БД, миксует и отправляет.
+AUTO MIX: скачивает треки из БД по жанру, миксует и отправляет.
 """
 import logging
 from pathlib import Path
 
-from aiogram import Router
-from aiogram.types import CallbackQuery, FSInputFile, Message
-from sqlalchemy import select
+from aiogram import F, Router
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import select, distinct
 from sqlalchemy.sql import func
 
 from bot.db import get_or_create_user
@@ -26,6 +27,17 @@ router = Router()
 
 # Ключи в Redis, которые стример (v1.1) будет обновлять
 _CURRENT_TRACK_KEY = "radio:current:{channel}"  # channel: tequila / fullmoon
+
+# Fallback genre list (shown if DB has no genre data)
+_DEFAULT_GENRES = [
+    "Hip-Hop", "Pop", "R&B", "Electronic", "Rock",
+    "Jazz", "Lo-fi", "Trap", "House", "Reggaeton",
+]
+
+
+class MixCb(CallbackData, prefix="mix"):
+    act: str       # genre / go
+    genre: str = ""
 
 
 async def _get_current_track(channel: str) -> dict | None:
@@ -77,41 +89,68 @@ async def handle_fullmoon_live(callback: CallbackQuery) -> None:
 
 @router.callback_query(lambda c: c.data == "radio:automix")
 async def handle_automix(callback: CallbackQuery) -> None:
+    """Show genre selection keyboard before creating a mix."""
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
     lang = user.language
+
+    # Fetch distinct genres from DB
+    async with async_session() as session:
+        result = await session.execute(
+            select(distinct(Track.genre))
+            .where(Track.genre.is_not(None), Track.genre != "")
+            .order_by(Track.genre)
+        )
+        db_genres = [row[0] for row in result.all() if row[0]]
+
+    genres = db_genres if db_genres else _DEFAULT_GENRES
+
+    rows = []
+    pair: list[InlineKeyboardButton] = []
+    for g in genres:
+        pair.append(InlineKeyboardButton(
+            text=g, callback_data=MixCb(act="go", genre=g).pack(),
+        ))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+
+    # "All genres" button
+    rows.append([InlineKeyboardButton(
+        text=t(lang, "automix_all_genres"),
+        callback_data=MixCb(act="go", genre="all").pack(),
+    )])
+    rows.append([InlineKeyboardButton(text="◁", callback_data="action:start")])
+
+    await callback.message.answer(
+        t(lang, "automix_pick_genre"),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(MixCb.filter(F.act == "go"))
+async def handle_automix_go(callback: CallbackQuery, callback_data: MixCb) -> None:
+    """Download tracks for the chosen genre and create a mix."""
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    genre = callback_data.genre
 
     status = await callback.message.answer(
         t(lang, "automix_generating"), parse_mode="HTML"
     )
 
-    # Pick random tracks from DB — prefer channel tracks (TEQUILA/FULLMOON)
+    # Pick tracks from DB filtered by genre
     async with async_session() as session:
-        # First try channel tracks
-        result = await session.execute(
-            select(Track)
-            .where(
-                Track.source_id.is_not(None),
-                Track.channel.in_(("tequila", "fullmoon")),
-            )
-            .order_by(func.random())
-            .limit(6)
-        )
+        q = select(Track).where(Track.source_id.is_not(None))
+        if genre != "all":
+            q = q.where(Track.genre == genre)
+        q = q.order_by(func.random()).limit(6)
+        result = await session.execute(q)
         tracks = list(result.scalars().all())
-
-        # Fill remaining slots with any tracks
-        if len(tracks) < 6:
-            existing_ids = [tr.id for tr in tracks]
-            filler = await session.execute(
-                select(Track)
-                .where(
-                    Track.source_id.is_not(None),
-                    Track.id.not_in(existing_ids) if existing_ids else True,
-                )
-                .order_by(func.random())
-                .limit(6 - len(tracks))
-            )
-            tracks.extend(filler.scalars().all())
 
     if len(tracks) < 2:
         await status.edit_text(t(lang, "automix_no_tracks"))
@@ -145,7 +184,7 @@ async def handle_automix(callback: CallbackQuery) -> None:
 
         await callback.message.answer_audio(
             audio=FSInputFile(mix_path),
-            title="AUTO MIX — BLACK ROOM",
+            title=f"AUTO MIX — {genre.upper()}" if genre != "all" else "AUTO MIX — BLACK ROOM",
             performer="BLACK ROOM DJ",
         )
         await status.edit_text(

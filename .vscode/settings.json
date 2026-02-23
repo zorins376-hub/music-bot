@@ -21,7 +21,10 @@
       "approve": true,
       "matchCommandLine": true
     },
-    "Tee-Object": true
+    "Tee-Object": true,
+    "git add": true,
+    "git commit": true,
+    "git push": true
   },
   "python-envs.defaultEnvManager": "ms-python.python:system"
 }

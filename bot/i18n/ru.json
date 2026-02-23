@@ -50,6 +50,8 @@
   "premium_pay_success": "✧ Спасибо! <b>Premium</b> активирован на 30 дней.",
   "premium_pay_button": "★ Оплатить {price} Stars",
 
+  "automix_pick_genre": "✦ <b>AUTO MIX</b>\n\nВыбери жанр для микса:",
+  "automix_all_genres": "✦ Все жанры (солянка)",
   "automix_generating": "✦ Генерирую AUTO MIX...\nЭто может занять минуту.",
   "automix_no_tracks": "Недостаточно треков для микса. Послушай больше музыки!",
   "automix_done": "✦ <b>AUTO MIX</b> готов!\n\nТреков: {count} · Crossfade: {crossfade}s",

@@ -39,6 +39,10 @@ class CaptchaMiddleware(BaseMiddleware):
         if tg_user is None:
             return await handler(event, data)
 
+        # Skip captcha in group chats — only require in private DM
+        if event.chat.type != "private":
+            return await handler(event, data)
+
         db_user = await get_or_create_user(tg_user)
 
         # Already verified — pass through forever
