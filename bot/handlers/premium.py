@@ -19,6 +19,7 @@ from bot.config import settings
 from bot.db import get_or_create_user
 from bot.i18n import t
 from bot.models.base import async_session
+from bot.models.track import Payment
 from bot.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,12 @@ async def handle_successful_payment(message: Message) -> None:
             .where(User.id == user.id)
             .values(is_premium=True, premium_until=premium_until)
         )
+        session.add(Payment(
+            user_id=user.id,
+            amount=message.successful_payment.total_amount,
+            currency=message.successful_payment.currency,
+            payload=message.successful_payment.invoice_payload,
+        ))
         await session.commit()
 
     logger.info(

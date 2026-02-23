@@ -16,7 +16,7 @@ class Base(DeclarativeBase):
 async def init_db() -> None:
     # Импортируем модели, чтобы они зарегистрировались в Base.metadata
     from bot.models.user import User  # noqa: F401
-    from bot.models.track import Track, ListeningHistory  # noqa: F401
+    from bot.models.track import Track, ListeningHistory, Payment  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

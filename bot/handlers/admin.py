@@ -9,7 +9,7 @@ from bot.config import settings
 from bot.db import get_or_create_user, is_admin
 from bot.i18n import t
 from bot.models.base import async_session
-from bot.models.track import Track
+from bot.models.track import ListeningHistory, Payment, Track
 from bot.models.user import User
 from bot.services.cache import cache
 
@@ -20,6 +20,161 @@ router = Router()
 
 def _is_admin(user_id: int) -> bool:
     return user_id in settings.ADMIN_IDS
+
+
+async def _build_detailed_stats() -> str:
+    """Build a detailed admin stats message."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    async with async_session() as session:
+        # ── Users ─────────────────────────────────
+        user_total = await session.scalar(
+            select(func.count()).select_from(User)
+        ) or 0
+        users_today = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.created_at >= today_start)
+        ) or 0
+        users_week = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.created_at >= week_ago)
+        ) or 0
+        active_today = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.last_active >= today_start)
+        ) or 0
+        active_week = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.last_active >= week_ago)
+        ) or 0
+        banned_count = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.is_banned == True)  # noqa: E712
+        ) or 0
+
+        # ── Premium ───────────────────────────────
+        premium_total = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.is_premium == True)  # noqa: E712
+        ) or 0
+        # Admin-granted premium = admins with premium (no premium_until)
+        admin_premium = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.is_premium == True, User.premium_until == None)  # noqa: E711,E712
+        ) or 0
+        paid_premium = premium_total - admin_premium
+
+        # ── Revenue (Stars) ───────────────────────
+        total_revenue = await session.scalar(
+            select(func.sum(Payment.amount))
+        ) or 0
+        payment_count = await session.scalar(
+            select(func.count()).select_from(Payment)
+        ) or 0
+        revenue_month = await session.scalar(
+            select(func.sum(Payment.amount))
+            .where(Payment.created_at >= month_ago)
+        ) or 0
+
+        # ── Tracks & Downloads ────────────────────
+        track_total = await session.scalar(
+            select(func.count()).select_from(Track)
+        ) or 0
+        total_downloads = await session.scalar(
+            select(func.sum(Track.downloads))
+        ) or 0
+        total_requests = await session.scalar(
+            select(func.sum(User.request_count))
+        ) or 0
+
+        # ── Listening events ──────────────────────
+        plays_today = await session.scalar(
+            select(func.count()).select_from(ListeningHistory)
+            .where(ListeningHistory.action == "play", ListeningHistory.created_at >= today_start)
+        ) or 0
+        plays_week = await session.scalar(
+            select(func.count()).select_from(ListeningHistory)
+            .where(ListeningHistory.action == "play", ListeningHistory.created_at >= week_ago)
+        ) or 0
+        searches_today = await session.scalar(
+            select(func.count()).select_from(ListeningHistory)
+            .where(ListeningHistory.action == "search", ListeningHistory.created_at >= today_start)
+        ) or 0
+        likes = await session.scalar(
+            select(func.count()).select_from(ListeningHistory)
+            .where(ListeningHistory.action == "like")
+        ) or 0
+        dislikes = await session.scalar(
+            select(func.count()).select_from(ListeningHistory)
+            .where(ListeningHistory.action == "dislike")
+        ) or 0
+
+        # ── Top 5 tracks ─────────────────────────
+        top_tracks_result = await session.execute(
+            select(Track.artist, Track.title, Track.downloads)
+            .order_by(Track.downloads.desc())
+            .limit(5)
+        )
+        top_tracks = top_tracks_result.all()
+
+        # ── Languages ─────────────────────────────
+        lang_result = await session.execute(
+            select(User.language, func.count())
+            .group_by(User.language)
+        )
+        lang_stats = {row[0]: row[1] for row in lang_result.all()}
+
+    # Format message
+    lines = [
+        "<b>◆ Подробная статистика бота</b>",
+        "",
+        "<b>◎ Пользователи:</b>",
+        f"  Всего: <b>{user_total}</b>",
+        f"  Новых сегодня: <b>{users_today}</b>",
+        f"  Новых за неделю: <b>{users_week}</b>",
+        f"  Активных сегодня: <b>{active_today}</b>",
+        f"  Активных за неделю: <b>{active_week}</b>",
+        f"  Забанено: <b>{banned_count}</b>",
+        "",
+        "<b>◇ Premium:</b>",
+        f"  Всего: <b>{premium_total}</b>",
+        f"  Оплаченных: <b>{paid_premium}</b>",
+        f"  Админских: <b>{admin_premium}</b>",
+        "",
+        "<b>★ Доход (Telegram Stars):</b>",
+        f"  Всего заработано: <b>{total_revenue} ★</b>",
+        f"  Кол-во оплат: <b>{payment_count}</b>",
+        f"  За последний месяц: <b>{revenue_month} ★</b>",
+        "",
+        "<b>♪ Треки:</b>",
+        f"  В базе: <b>{track_total}</b>",
+        f"  Скачиваний всего: <b>{total_downloads or 0}</b>",
+        f"  Запросов всего: <b>{total_requests or 0}</b>",
+        "",
+        "<b>▸ Активность:</b>",
+        f"  Прослушиваний сегодня: <b>{plays_today}</b>",
+        f"  Прослушиваний за неделю: <b>{plays_week}</b>",
+        f"  Поисков сегодня: <b>{searches_today}</b>",
+        f"  Лайков: <b>{likes}</b> | Дизлайков: <b>{dislikes}</b>",
+        "",
+        "<b>○ Языки:</b>",
+    ]
+    for lang_code, count in sorted(lang_stats.items(), key=lambda x: -x[1]):
+        flag = {"ru": "🇷🇺", "kg": "🇰🇬", "en": "🇬🇧"}.get(lang_code, "?")
+        lines.append(f"  {flag} {lang_code}: <b>{count}</b>")
+
+    if top_tracks:
+        lines.append("")
+        lines.append("<b>◆ Топ-5 треков:</b>")
+        for i, (artist, title, downloads) in enumerate(top_tracks, 1):
+            lines.append(f"  {i}. {artist or '?'} — {title or '?'} ({downloads} скач.)")
+
+    return "\n".join(lines)
 
 
 def _admin_panel_keyboard() -> InlineKeyboardMarkup:
@@ -57,22 +212,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 
     # /admin stats
     if subcmd == "stats":
-        async with async_session() as session:
-            user_count = await session.scalar(select(func.count()).select_from(User))
-            track_count = await session.scalar(select(func.count()).select_from(Track))
-            total_req = await session.scalar(select(func.sum(User.request_count)))
-            premium_count = await session.scalar(
-                select(func.count()).select_from(User).where(User.is_premium == True)  # noqa: E712
-            )
-
-        lines = [
-            t(lang, "stats_header"),
-            t(lang, "stats_users", count=user_count or 0),
-            f"◇ Premium: {premium_count or 0}",
-            t(lang, "stats_tracks", count=track_count or 0),
-            t(lang, "stats_requests", count=total_req or 0),
-        ]
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        text = await _build_detailed_stats()
+        await message.answer(text, parse_mode="HTML")
 
     # /admin ban <user_id>
     elif subcmd == "ban":
@@ -209,23 +350,8 @@ async def handle_adm_stats(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     await callback.answer()
-    user = await get_or_create_user(callback.from_user)
-    lang = user.language
-    async with async_session() as session:
-        user_count = await session.scalar(select(func.count()).select_from(User))
-        track_count = await session.scalar(select(func.count()).select_from(Track))
-        total_req = await session.scalar(select(func.sum(User.request_count)))
-        premium_count = await session.scalar(
-            select(func.count()).select_from(User).where(User.is_premium == True)  # noqa: E712
-        )
-    lines = [
-        t(lang, "stats_header"),
-        t(lang, "stats_users", count=user_count or 0),
-        f"◇ Premium: {premium_count or 0}",
-        t(lang, "stats_tracks", count=track_count or 0),
-        t(lang, "stats_requests", count=total_req or 0),
-    ]
-    await callback.message.answer("\n".join(lines), parse_mode="HTML")
+    text = await _build_detailed_stats()
+    await callback.message.answer(text, parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "adm:skip")

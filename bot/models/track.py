@@ -44,3 +44,18 @@ class ListeningHistory(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class Payment(Base):
+    """Запись об оплате Premium через Telegram Stars."""
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    amount: Mapped[int] = mapped_column(Integer)  # Stars amount
+    currency: Mapped[str] = mapped_column(String(10), default="XTR")
+    payload: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
