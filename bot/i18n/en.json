@@ -6,6 +6,7 @@
   "no_results": "Nothing found. Try a different query.",
   "downloading": "▽ Downloading...",
   "error_download": "Failed to download the track. Try another one.",
+  "error_age_restricted": "△ This track is age-restricted (18+). Try another one.",
   "error_too_large": "△ Track is too large. Trying lower bitrate...",
   "error_too_large_final": "Track is too long to send via Telegram.",
   "error_too_long": "Track is longer than 10 minutes — can't download.",

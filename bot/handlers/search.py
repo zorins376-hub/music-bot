@@ -292,8 +292,12 @@ async def handle_track_select(
         )
 
     except Exception as e:
-        logger.error("Download error for %s: %s", video_id, e)
-        await status.edit_text(t(lang, "error_download"))
+        err_msg = str(e)
+        logger.error("Download error for %s: %s", video_id, err_msg)
+        if "Sign in to confirm your age" in err_msg:
+            await status.edit_text(t(lang, "error_age_restricted"))
+        else:
+            await status.edit_text(t(lang, "error_download"))
     finally:
         if mp3_path:
             cleanup_file(mp3_path)
