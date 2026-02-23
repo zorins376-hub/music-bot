@@ -14,6 +14,68 @@ _SPOTIFY_RE = re.compile(
     r"https?://open\.spotify\.com/track/[a-zA-Z0-9]+",
 )
 
+# Junk to strip from YouTube titles
+_TITLE_JUNK_RE = re.compile(
+    r"\s*[\(\[]"
+    r"(?:official\s*(?:music\s*)?video|official\s*audio|official\s*lyric[s]?\s*video"
+    r"|lyric[s]?\s*video|lyric[s]?|audio|music\s*video|видеоклип|клип|текст"
+    r"|hd|hq|4k|1080p|720p|mv|m/v"
+    r"|премьера\s*(?:клипа)?\s*,?\s*\d{4}|премьера\s*\d{4}"
+    r"|ft\.?[^)\]]*|feat\.?[^)\]]*)\s*[\)\]]",
+    re.IGNORECASE,
+)
+_EXTRA_JUNK_RE = re.compile(
+    r"\s*\|.*$"
+    r"|\s*//.*$"
+    r"|\s*#\w+"
+    r"|\s*\(\s*\)"
+    r"|\s*\[\s*\]",
+    re.IGNORECASE,
+)
+
+
+def _clean_title(raw_title: str) -> str:
+    """Strip common YouTube junk from title."""
+    cleaned = _TITLE_JUNK_RE.sub("", raw_title)
+    cleaned = _EXTRA_JUNK_RE.sub("", cleaned)
+    # Strip trailing standalone words: "lyrics", "audio", "video", "текст"
+    cleaned = re.sub(r"\s+(?:lyrics|audio|video|текст)\s*$", "", cleaned, flags=re.IGNORECASE)
+    # Normalize whitespace
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
+def _parse_artist_title(raw_title: str, uploader: str) -> tuple[str, str]:
+    """Extract clean (artist, title) from YouTube video title.
+
+    Tries to split on ' - ', ' — ', ' – '. If found, returns parsed pair.
+    Otherwise uses uploader as artist and cleaned title as song name.
+    Strips ' - Topic' from YouTube auto-generated channel names.
+    """
+    cleaned = _clean_title(raw_title)
+
+    # Try splitting on common separators
+    for sep in (" — ", " – ", " - "):
+        if sep in cleaned:
+            parts = cleaned.split(sep, 1)
+            artist = parts[0].strip()
+            title = parts[1].strip()
+            if artist and title:
+                return artist, title
+
+    # Fallback: use uploader as artist, cleaned title as song
+    artist = uploader or "Unknown"
+    # Strip " - Topic" from YouTube auto-generated channels
+    if artist.endswith(" - Topic"):
+        artist = artist[:-8].strip()
+    elif artist.endswith(" - Тема"):
+        artist = artist[:-7].strip()
+    # Strip "VEVO" suffix
+    if artist.upper().endswith("VEVO"):
+        artist = artist[:-4].strip()
+
+    return artist, cleaned or raw_title
+
 
 def _fmt_duration(seconds: int) -> str:
     m, s = divmod(seconds, 60)
@@ -39,10 +101,12 @@ def is_spotify_url(text: str) -> bool:
 
 
 def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[dict]:
+    # Request extra results to compensate for filtered out 0-duration tracks
+    fetch_count = max_results + 5
     if source == "soundcloud":
-        search_prefix = f"scsearch{max_results}"
+        search_prefix = f"scsearch{fetch_count}"
     else:
-        search_prefix = f"ytsearch{max_results}"
+        search_prefix = f"ytsearch{fetch_count}"
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -61,19 +125,23 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
             if not entry:
                 continue
             duration = entry.get("duration") or 0
-            if duration > settings.MAX_DURATION:
+            # Skip tracks with no duration (unplayable) or too long
+            if duration <= 0 or duration > settings.MAX_DURATION:
                 continue
+            raw_title = entry.get("title", "Unknown")
+            uploader = entry.get("uploader") or entry.get("channel") or "Unknown"
+            artist, title = _parse_artist_title(raw_title, uploader)
             tracks.append(
                 {
                     "video_id": entry.get("id", ""),
-                    "title": entry.get("title", "Unknown"),
-                    "uploader": entry.get("uploader") or entry.get("channel") or "Unknown",
+                    "title": title,
+                    "uploader": artist,
                     "duration": duration,
                     "duration_fmt": _fmt_duration(int(duration)),
                     "source": source,
                 }
             )
-        return tracks
+        return tracks[:max_results]
     except Exception as e:
         logger.error("Search error: %s", e)
         return []
