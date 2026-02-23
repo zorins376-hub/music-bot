@@ -18,7 +18,7 @@ from bot.config import settings
 from bot.db import get_or_create_user, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
-from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
+from bot.services.downloader import cleanup_file, download_track, fetch_track_year, is_spotify_url, resolve_spotify, search_tracks
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,14 @@ class TrackCallback(CallbackData, prefix="t"):
 class FeedbackCallback(CallbackData, prefix="fb"):
     tid: int    # track DB id
     act: str    # like / dislike
+
+
+def _track_caption(lang: str, track_info: dict, bitrate: int) -> str:
+    """Build caption line: ◷ 3:42 · 192 kbps · 2019"""
+    dur = track_info.get("duration_fmt") or "?:??"
+    year = track_info.get("upload_year")
+    year_str = f" · {year}" if year else ""
+    return t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
 
 
 def _build_results_keyboard(results: list[dict], session_id: str) -> InlineKeyboardMarkup:
@@ -207,11 +215,13 @@ async def handle_track_select(
     # If track already has a file_id from local DB (channel tracks)
     local_fid = track_info.get("file_id")
     if local_fid:
+        caption = _track_caption(lang, track_info, bitrate)
         await callback.message.answer_audio(
             audio=local_fid,
             title=track_info["title"],
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
+            caption=caption,
         )
         tid = await _post_download(user.id, track_info, local_fid, bitrate)
         await callback.message.answer(
@@ -223,11 +233,16 @@ async def handle_track_select(
     # Проверяем Redis кэш
     file_id = await cache.get_file_id(video_id, bitrate)
     if file_id:
+        # Fetch year if not in search cache
+        if not track_info.get("upload_year"):
+            track_info["upload_year"] = await fetch_track_year(video_id)
+        caption = _track_caption(lang, track_info, bitrate)
         await callback.message.answer_audio(
             audio=file_id,
             title=track_info["title"],
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
+            caption=caption,
         )
         tid = await _post_download(user.id, track_info, file_id, bitrate)
         await callback.message.answer(
@@ -238,6 +253,11 @@ async def handle_track_select(
 
     status = await callback.message.answer(t(lang, "downloading"))
     await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+
+    # Fetch year if not already in search cache
+    if not track_info.get("upload_year"):
+        track_info["upload_year"] = await fetch_track_year(video_id)
+
     mp3_path: Path | None = None
 
     try:
@@ -260,6 +280,7 @@ async def handle_track_select(
             title=track_info["title"],
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
+            caption=_track_caption(lang, track_info, bitrate),
         )
 
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)

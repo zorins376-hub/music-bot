@@ -43,6 +43,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="top", description="◆ Топ треков"),
         BotCommand(command="history", description="▹ Мои запросы"),
         BotCommand(command="settings", description="≡ Качество аудио"),
+        BotCommand(command="profile", description="◉ Мой профиль"),
         BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
     ]

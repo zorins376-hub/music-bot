@@ -64,5 +64,17 @@
   "rate_track": "Ырды баалаңыз:",
   "feedback_recorded": "{emoji} Жазылды!",
   "feedback_saved": "{emoji} Баа сакталды",
-  "downloads_count": "жүктөө"
+  "downloads_count": "жүктөө",
+
+  "profile_header": "◉ <b>Менин профилим</b>",
+  "profile_name": "▸ Аты: <b>{name}</b>",
+  "profile_status_free": "▸ Статус: Free",
+  "profile_status_premium": "▸ Статус: ◇ <b>Premium</b> ({until} чейин)",
+  "profile_quality": "▸ Сапат: <b>{quality} kbps</b>",
+  "profile_tracks": "▸ Ырлар: <b>{count}</b>",
+  "profile_joined": "▸ Катталган: <b>{date}</b>",
+  "profile_genres": "▸ Жанрлар: <i>{genres}</i>",
+  "profile_vibe": "▸ Вайб: <i>{vibe}</i>",
+  "profile_artists": "▸ Аткаруучулар: <i>{artists}</i>",
+  "track_caption": "◷ {duration} · {bitrate} kbps{year}"
 }

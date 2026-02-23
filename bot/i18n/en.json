@@ -64,5 +64,17 @@
   "rate_track": "Rate this track:",
   "feedback_recorded": "{emoji} Recorded!",
   "feedback_saved": "{emoji} Rating saved",
-  "downloads_count": "plays"
+  "downloads_count": "plays",
+
+  "profile_header": "◉ <b>My Profile</b>",
+  "profile_name": "▸ Name: <b>{name}</b>",
+  "profile_status_free": "▸ Status: Free",
+  "profile_status_premium": "▸ Status: ◇ <b>Premium</b> (until {until})",
+  "profile_quality": "▸ Quality: <b>{quality} kbps</b>",
+  "profile_tracks": "▸ Tracks: <b>{count}</b>",
+  "profile_joined": "▸ Joined: <b>{date}</b>",
+  "profile_genres": "▸ Genres: <i>{genres}</i>",
+  "profile_vibe": "▸ Vibe: <i>{vibe}</i>",
+  "profile_artists": "▸ Artists: <i>{artists}</i>",
+  "track_caption": "◷ {duration} · {bitrate} kbps{year}"
 }

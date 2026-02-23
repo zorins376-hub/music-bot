@@ -89,6 +89,17 @@ def _fmt_duration(seconds: int) -> str:
     return f"{m}:{s:02d}"
 
 
+def _extract_year(entry: dict) -> str | None:
+    """Extract release year from yt-dlp entry."""
+    upload_date = entry.get("upload_date") or entry.get("release_date") or ""
+    if upload_date and len(upload_date) >= 4:
+        return upload_date[:4]
+    release_year = entry.get("release_year")
+    if release_year:
+        return str(release_year)
+    return None
+
+
 def _extract_spotify_meta(url: str) -> str | None:
     """Extract artist — title from Spotify URL via yt-dlp (no API key needed)."""
     try:
@@ -147,6 +158,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
                     "duration": duration,
                     "duration_fmt": _fmt_duration(int(duration)),
                     "source": source,
+                    "upload_year": _extract_year(entry),
                 }
             )
         return tracks[:max_results]
@@ -204,6 +216,29 @@ async def download_track(video_id: str, bitrate: int = 192) -> Path:
     return await loop.run_in_executor(
         None, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate
     )
+
+
+def _fetch_year_sync(video_id: str) -> str | None:
+    """Fetch upload year for a single video via yt-dlp (no download)."""
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        **_cookies_opt(),
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            if info:
+                return _extract_year(info)
+    except Exception:
+        pass
+    return None
+
+
+async def fetch_track_year(video_id: str) -> str | None:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_year_sync, video_id)
 
 
 def cleanup_file(path: Path) -> None:

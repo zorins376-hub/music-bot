@@ -64,5 +64,17 @@
   "rate_track": "Оцени трек:",
   "feedback_recorded": "{emoji} Записано!",
   "feedback_saved": "{emoji} Оценка сохранена",
-  "downloads_count": "скач."
+  "downloads_count": "скач.",
+
+  "profile_header": "◉ <b>Мой профиль</b>",
+  "profile_name": "▸ Имя: <b>{name}</b>",
+  "profile_status_free": "▸ Статус: Free",
+  "profile_status_premium": "▸ Статус: ◇ <b>Premium</b> (до {until})",
+  "profile_quality": "▸ Качество: <b>{quality} kbps</b>",
+  "profile_tracks": "▸ Треков: <b>{count}</b>",
+  "profile_joined": "▸ С нами с: <b>{date}</b>",
+  "profile_genres": "▸ Жанры: <i>{genres}</i>",
+  "profile_vibe": "▸ Вайб: <i>{vibe}</i>",
+  "profile_artists": "▸ Артисты: <i>{artists}</i>",
+  "track_caption": "◷ {duration} · {bitrate} kbps{year}"
 }
