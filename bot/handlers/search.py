@@ -180,6 +180,8 @@ async def handle_text(message: Message) -> None:
 
     is_group = message.chat.type in ("group", "supergroup")
 
+    matched_prefix = False
+
     # Handle @bot_username mentions in groups
     if is_group and message.entities:
         for ent in message.entities:
@@ -195,8 +197,8 @@ async def handle_text(message: Message) -> None:
 
     # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
     _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
-    matched_prefix = False
-    for prefix in _PREFIXES:
+    if not matched_prefix:
+        for prefix in _PREFIXES:
         if lower.startswith(prefix):
             text = text[len(prefix):].strip()
             matched_prefix = True
