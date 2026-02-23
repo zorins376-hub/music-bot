@@ -1,10 +1,7 @@
-"""
-radio.py — TEQUILA LIVE, FULLMOON LIVE, AUTO MIX handlers.
-
-Radio: показывает статус эфира и текущий трек из Redis.
-AUTO MIX: скачивает треки из БД по жанру, миксует и отправляет.
-"""
+import asyncio
+import json
 import logging
+import random as _random
 from pathlib import Path
 
 from aiogram import F, Router
@@ -47,44 +44,118 @@ async def _get_current_track(channel: str) -> dict | None:
     return json.loads(data) if data else None
 
 
+class LiveCb(CallbackData, prefix="live"):
+    act: str       # play / next / shuf
+    ch: str        # tequila / fullmoon
+
+
+_LIVE_BATCH = 5  # tracks per "page"
+
+
+async def _send_live_menu(message, lang: str, channel: str) -> None:
+    """Show live channel menu with track count + play buttons."""
+    label = "TEQUILA" if channel == "tequila" else "FULLMOON"
+    icon = "●" if channel == "tequila" else "◑"
+
+    # Check if there's a live stream
+    track = await _get_current_track(channel)
+
+    async with async_session() as session:
+        count = await session.scalar(
+            select(func.count()).select_from(Track).where(Track.channel == channel)
+        ) or 0
+
+    if track:
+        text = (
+            f"{icon} <b>{label} LIVE</b>\n\n"
+            f"▸ Сейчас играет:\n"
+            f"<b>{track.get('artist', '')} — {track.get('title', '')}</b>\n"
+            f"◷ {track.get('duration_fmt', '')}\n\n"
+            f"♪ Треков в базе: {count}"
+        )
+    else:
+        text = (
+            f"{icon} <b>{label} LIVE</b>\n\n"
+            f"♪ Треков в базе: <b>{count}</b>\n\n"
+            f"{t(lang, 'live_pick_action')}"
+        )
+
+    rows = []
+    if count > 0:
+        rows.append([
+            InlineKeyboardButton(
+                text=t(lang, "live_play"),
+                callback_data=LiveCb(act="play", ch=channel).pack(),
+            ),
+            InlineKeyboardButton(
+                text=t(lang, "live_shuffle"),
+                callback_data=LiveCb(act="shuf", ch=channel).pack(),
+            ),
+        ])
+    rows.append([InlineKeyboardButton(text="◁", callback_data="action:start")])
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
+
+
 @router.callback_query(lambda c: c.data == "radio:tequila")
 async def handle_tequila_live(callback: CallbackQuery) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
-    lang = user.language
-
-    track = await _get_current_track("tequila")
-    if track:
-        text = (
-            f"● <b>TEQUILA LIVE</b>\n\n"
-            f"▸ Сейчас играет:\n"
-            f"<b>{track.get('artist', '')} — {track.get('title', '')}</b>\n"
-            f"◷ {track.get('duration_fmt', '')}"
-        )
-    else:
-        text = t(lang, "radio_tequila_offline")
-
-    await callback.message.answer(text, parse_mode="HTML")
+    await _send_live_menu(callback.message, user.language, "tequila")
 
 
 @router.callback_query(lambda c: c.data == "radio:fullmoon")
 async def handle_fullmoon_live(callback: CallbackQuery) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
+    await _send_live_menu(callback.message, user.language, "fullmoon")
+
+
+@router.callback_query(LiveCb.filter(F.act.in_({"play", "shuf"})))
+async def handle_live_play(callback: CallbackQuery, callback_data: LiveCb) -> None:
+    """Send a batch of tracks from the channel as audio files."""
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
     lang = user.language
+    channel = callback_data.ch
+    shuffle = callback_data.act == "shuf"
+    label = "TEQUILA" if channel == "tequila" else "FULLMOON"
 
-    track = await _get_current_track("fullmoon")
-    if track:
-        text = (
-            f"◑ <b>FULLMOON LIVE</b>\n\n"
-            f"▸ Сейчас играет:\n"
-            f"<b>{track.get('artist', '')} — {track.get('title', '')}</b>\n"
-            f"◷ {track.get('duration_fmt', '')}"
+    async with async_session() as session:
+        q = (
+            select(Track)
+            .where(Track.channel == channel, Track.file_id.is_not(None))
         )
-    else:
-        text = t(lang, "radio_fullmoon_offline")
+        if shuffle:
+            q = q.order_by(func.random())
+        else:
+            q = q.order_by(Track.created_at.desc())
+        q = q.limit(_LIVE_BATCH)
+        result = await session.execute(q)
+        tracks = list(result.scalars().all())
 
-    await callback.message.answer(text, parse_mode="HTML")
+    if not tracks:
+        await callback.message.answer(t(lang, "live_no_tracks"))
+        return
+
+    mode = t(lang, "live_shuffle_mode") if shuffle else t(lang, "live_play_mode")
+    await callback.message.answer(
+        f"{'●' if channel == 'tequila' else '◑'} <b>{label}</b> — {mode} ({len(tracks)} треков)",
+        parse_mode="HTML",
+    )
+
+    for tr in tracks:
+        try:
+            dur_str = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else "?:??"
+            await callback.message.answer_audio(
+                audio=tr.file_id,
+                title=tr.title or "Unknown",
+                performer=tr.artist or label,
+                duration=tr.duration,
+                caption=f"◷ {dur_str} · {label}",
+            )
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.warning("Live play skip %s: %s", tr.source_id, e)
 
 
 @router.callback_query(lambda c: c.data == "radio:automix")

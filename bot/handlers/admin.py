@@ -1,3 +1,4 @@
+import json
 import logging
 
 from aiogram import Bot, F, Router
@@ -7,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy import func, select, update
 
 from bot.config import settings
-from bot.db import get_or_create_user, is_admin
+from bot.db import get_or_create_user, is_admin, upsert_track
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Payment, Track
@@ -228,7 +229,9 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="▸▸ Скип трек", callback_data="adm:skip"),
             ],
             [
+                InlineKeyboardButton(text="◈ Загрузить канал", callback_data="adm:load"),
                 InlineKeyboardButton(text="◑ Режим эфира", callback_data="adm:mode"),
+            ],
                 InlineKeyboardButton(text="◁ Назад", callback_data="adm:back"),
             ],
         ]
@@ -355,6 +358,24 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await message.answer(f"Режим эфира: {labels[mode]}")
         logger.info("Admin %s changed radio mode to %s", message.from_user.id, mode)
 
+    # /admin load @channel tequila|fullmoon — загрузить треки из TG-канала
+    elif subcmd == "load":
+        if len(args) < 4:
+            await message.answer(
+                "Использование:\n"
+                "<code>/admin load @channel_name tequila</code>\n"
+                "<code>/admin load @channel_name fullmoon</code>\n\n"
+                "Бот должен быть добавлен в канал как админ!",
+                parse_mode="HTML",
+            )
+            return
+        channel_ref = args[2]
+        label = args[3].lower()
+        if label not in ("tequila", "fullmoon"):
+            await message.answer("Метка канала: tequila или fullmoon")
+            return
+        await _load_channel_tracks(bot, message, channel_ref, label)
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -365,7 +386,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin premium &lt;id или @username&gt; — выдать premium\n"
             "/admin queue — очередь эфира\n"
             "/admin skip — пропустить трек\n"
-            "/admin mode &lt;режим&gt; — режим эфира (night/energy/hybrid)",
+            "/admin mode &lt;режим&gt; — режим эфира (night/energy/hybrid)\n"
+            "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить треки из канала",
             parse_mode="HTML",
         )
 
@@ -547,9 +569,157 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         "adm:premium": "Для выдачи Premium:\n<code>/admin premium @username</code>\nили\n<code>/admin premium user_id</code>",
         "adm:ban": "Для бана:\n<code>/admin ban @username</code>\nДля разбана:\n<code>/admin unban @username</code>\n\nМожно также по ID.",
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
+        "adm:load": "Загрузить треки из канала:\n<code>/admin load @channel_name tequila</code>\nили\n<code>/admin load @channel_name fullmoon</code>\n\nБот должен быть добавлен в канал!",
     }
     text = prompts.get(callback.data, "Используй команду /admin")
     await callback.message.answer(text, parse_mode="HTML")
+
+
+async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, label: str) -> None:
+    """Read audio messages from a Telegram channel and save them to DB + Redis queue."""
+    import asyncio
+
+    status = await admin_msg.answer(
+        f"◈ Загружаю аудио из канала <b>{channel_ref}</b> → <b>{label.upper()}</b>...",
+        parse_mode="HTML",
+    )
+
+    try:
+        chat = await bot.get_chat(channel_ref)
+    except Exception as e:
+        await status.edit_text(f"✖ Не удалось найти канал {channel_ref}: {e}")
+        return
+
+    chat_id = chat.id
+    saved, skipped, errors = 0, 0, 0
+    offset_msg_id = 0  # start from latest
+
+    # Telegram Bot API: getChatHistory via get_updates is not available,
+    # but we can use bot.forward_message or bot.copy_message approach.
+    # Actually, Bot API doesn't have getChatHistory.
+    # We'll iterate messages by ID (newest first) — try get message
+    # We can use bot's get_chat_member_count and iterate using known message IDs.
+
+    # Alternative: Use the channel's message IDs. Telegram channels have sequential IDs.
+    # We'll try fetching messages by forwarding them from the channel.
+
+    # Get the last message ID from chat
+    # Bot API doesn't expose this directly, but we can binary-search.
+    # Simplest approach: try copy_message from msg_id = 1..N, skip failures.
+
+    # Actually the cleanest way: just ask bot to forward messages in batches.
+    # The trick: `bot.copy_message` with message_id from 1 upward.
+    # For efficiency, try a reasonable range.
+
+    # Let's use a more reliable method:
+    # Send a temp message to find approximate last_id
+    max_id = 0
+    # Try to find the latest message ID with binary search
+    lo, hi = 1, 100000
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        try:
+            # Try to copy message — if it exists, move higher
+            await bot.copy_message(
+                chat_id=admin_msg.from_user.id,
+                from_chat_id=chat_id,
+                message_id=mid,
+                disable_notification=True,
+            )
+            max_id = mid
+            lo = mid + 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            hi = mid - 1
+            await asyncio.sleep(0.05)
+
+    if max_id == 0:
+        await status.edit_text("✖ Канал пуст или бот не имеет доступа к сообщениям.")
+        return
+
+    await status.edit_text(
+        f"◈ Найдено ~{max_id} сообщений. Сканирую аудио...",
+        parse_mode="HTML",
+    )
+
+    # Now iterate all messages 1..max_id looking for audio
+    for msg_id in range(1, max_id + 1):
+        try:
+            # Use getChat + getMessage via forwarding to self
+            # We need actual message content — use bot.forward_message temporarily
+            fwd = await bot.forward_message(
+                chat_id=admin_msg.from_user.id,
+                from_chat_id=chat_id,
+                message_id=msg_id,
+                disable_notification=True,
+            )
+
+            if fwd.audio:
+                audio = fwd.audio
+                source_id = f"tg_{chat_id}_{msg_id}"
+                title = audio.title or audio.file_name or "Unknown"
+                artist = audio.performer or ""
+
+                track = await upsert_track(
+                    source_id=source_id,
+                    title=title,
+                    artist=artist,
+                    duration=audio.duration,
+                    file_id=audio.file_id,
+                    source="channel",
+                    channel=label,
+                )
+
+                # Add to radio queue
+                await cache.redis.rpush(
+                    f"radio:queue:{label}",
+                    json.dumps({
+                        "track_id": track.id,
+                        "file_id": audio.file_id,
+                        "title": title,
+                        "artist": artist,
+                        "duration": audio.duration,
+                        "channel": label,
+                    }),
+                )
+                saved += 1
+            else:
+                skipped += 1
+
+            # Delete the forwarded message to keep admin chat clean
+            try:
+                await bot.delete_message(admin_msg.from_user.id, fwd.message_id)
+            except Exception:
+                pass
+
+            await asyncio.sleep(0.1)  # rate limit
+
+        except Exception:
+            errors += 1
+            await asyncio.sleep(0.05)
+
+        # Progress update every 50 messages
+        if msg_id % 50 == 0:
+            try:
+                await status.edit_text(
+                    f"◈ Прогресс: {msg_id}/{max_id}\n"
+                    f"♪ Аудио: {saved} · Пропущено: {skipped} · Ошибок: {errors}",
+                )
+            except Exception:
+                pass
+
+    await status.edit_text(
+        f"✓ <b>Загрузка завершена!</b>\n\n"
+        f"Канал: {channel_ref} → {label.upper()}\n"
+        f"♪ Аудио загружено: <b>{saved}</b>\n"
+        f"Пропущено (не аудио): {skipped}\n"
+        f"Ошибок: {errors}",
+        parse_mode="HTML",
+    )
+    logger.info(
+        "Admin %s loaded %d tracks from %s → %s",
+        admin_msg.from_user.id, saved, channel_ref, label,
+    )
 
 
 async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
