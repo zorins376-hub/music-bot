@@ -191,8 +191,14 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
             f"duration <= {settings.MAX_DURATION}"
         ),
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+    except Exception:
+        # Fallback: try with 'best' format (may get video+audio)
+        ydl_opts["format"] = "best[height<=480]/best"
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
 
     mp3_path = output_dir / f"{video_id}.mp3"
     if mp3_path.exists():
