@@ -6,7 +6,13 @@ from bot.config import settings
 _is_pg = settings.DATABASE_URL.startswith("postgresql")
 _engine_kwargs: dict = {"echo": False}
 if _is_pg:
-    _engine_kwargs.update(pool_size=5, max_overflow=10, pool_recycle=300, pool_pre_ping=True)
+    _engine_kwargs.update(
+        pool_size=5,
+        max_overflow=10,
+        pool_recycle=300,
+        pool_pre_ping=True,
+        connect_args={"prepared_statement_cache_size": 0},
+    )
 
 engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
