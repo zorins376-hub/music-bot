@@ -31,6 +31,7 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 username=tg_user.username,
                 first_name=tg_user.first_name,
                 is_premium=admin,
+                quality="320" if admin else "192",
             )
             session.add(user)
             await session.commit()
@@ -54,10 +55,19 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 await session.execute(
                     update(User)
                     .where(User.id == tg_user.id)
-                    .values(is_premium=True)
+                    .values(is_premium=True, quality="320")
                 )
                 await session.commit()
                 user.is_premium = True
+                user.quality = "320"
+            elif admin and user.quality != "320":
+                await session.execute(
+                    update(User)
+                    .where(User.id == tg_user.id)
+                    .values(quality="320")
+                )
+                await session.commit()
+                user.quality = "320"
             # Register admin ID dynamically
             if admin and tg_user.id not in settings.ADMIN_IDS:
                 settings.ADMIN_IDS.append(tg_user.id)
