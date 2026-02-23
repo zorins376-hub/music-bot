@@ -338,16 +338,21 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
 
 
 def _feedback_keyboard(track_id: int) -> InlineKeyboardMarkup:
+    from bot.handlers.playlist import AddToPlCb
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="❤️",
+                    text="\u2764\ufe0f",
                     callback_data=FeedbackCallback(tid=track_id, act="like").pack(),
                 ),
                 InlineKeyboardButton(
-                    text="👎",
+                    text="\ud83d\udc4e",
                     callback_data=FeedbackCallback(tid=track_id, act="dislike").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="+ \u25b8",
+                    callback_data=AddToPlCb(tid=track_id).pack(),
                 ),
             ]
         ]

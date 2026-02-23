@@ -16,7 +16,12 @@
       "approve": true,
       "matchCommandLine": true
     },
-    "pip": true
+    "pip": true,
+    "/^python c:\\\\Users\\\\sherh\\\\music-bot\\\\test_cookie\\.py$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "Tee-Object": true
   },
   "python-envs.defaultEnvManager": "ms-python.python:system"
 }

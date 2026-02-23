@@ -78,5 +78,29 @@
   "profile_genres": "▸ Жанры: <i>{genres}</i>",
   "profile_vibe": "▸ Вайб: <i>{vibe}</i>",
   "profile_artists": "▸ Артисты: <i>{artists}</i>",
-  "track_caption": "◷ {duration} · {bitrate} kbps{year}"
+  "track_caption": "◷ {duration} · {bitrate} kbps{year}",
+
+  "pl_header": "▸ <b>Мои плейлисты</b> ({count}/{max})",
+  "pl_create_btn": "+ Создать плейлист",
+  "pl_enter_name": "Напиши название плейлиста:",
+  "pl_created": "✓ Плейлист <b>{name}</b> создан!",
+  "pl_limit": "Максимум 20 плейлистов.",
+  "pl_view": "▸ <b>{name}</b> ({count}/{max} треков)",
+  "pl_delete_btn": "✗ Удалить",
+  "pl_back_btn": "◁ Назад",
+  "pl_delete_confirm": "Точно удалить плейлист?",
+  "pl_confirm_yes": "Да, удалить",
+  "pl_confirm_no": "Отмена",
+  "pl_deleted": "Плейлист удалён.",
+  "pl_not_found": "Плейлист не найден.",
+  "pl_track_added": "✓ Добавлено в {name}",
+  "pl_track_removed": "Трек удалён из плейлиста.",
+  "pl_track_exists": "Этот трек уже в плейлисте.",
+  "pl_track_limit": "Максимум 50 треков в плейлисте.",
+  "pl_pick": "Выбери плейлист:",
+  "pl_empty_create_first": "У тебя пока нет плейлистов. Создай через /playlist",
+
+  "captcha_prompt": "Реши пример чтобы продолжить: <b>{a} + {b} = ?</b>",
+  "captcha_ok": "✓ Проверка пройдена!",
+  "captcha_fail": "✗ Неправильно. Попробуй ещё."
 }

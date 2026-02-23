@@ -10,10 +10,11 @@ from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandSc
 
 from bot.config import settings as app_settings
 from bot.handlers import admin, history, inline, search, start
-from bot.handlers import radio, premium, recommend
+from bot.handlers import radio, premium, recommend, playlist
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
+from bot.middlewares.captcha import CaptchaMiddleware
 from bot.models.base import init_db
 from bot.services.cache import cache
 
@@ -46,6 +47,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="top", description="◆ Топ треков"),
         BotCommand(command="history", description="▹ Мои запросы"),
         BotCommand(command="settings", description="≡ Качество аудио"),
+        BotCommand(command="playlist", description="▸ Плейлисты"),
         BotCommand(command="profile", description="◉ Мой профиль"),
         BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
@@ -79,10 +81,12 @@ async def on_shutdown(bot: Bot) -> None:
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
+    dp.message.middleware(CaptchaMiddleware())
     dp.message.middleware(ThrottleMiddleware())
     dp.message.middleware(LoggingMiddleware())
 
     dp.include_router(start.router)
+    dp.include_router(playlist.router)   # Playlists
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ

@@ -78,5 +78,29 @@
   "profile_genres": "▸ Жанрлар: <i>{genres}</i>",
   "profile_vibe": "▸ Вайб: <i>{vibe}</i>",
   "profile_artists": "▸ Аткаруучулар: <i>{artists}</i>",
-  "track_caption": "◷ {duration} · {bitrate} kbps{year}"
+  "track_caption": "◷ {duration} · {bitrate} kbps{year}",
+
+  "pl_header": "▸ <b>Менин плейлисттерим</b> ({count}/{max})",
+  "pl_create_btn": "+ Плейлист түзүү",
+  "pl_enter_name": "Плейлисттин атын жаз:",
+  "pl_created": "✓ <b>{name}</b> плейлисти түзүлдү!",
+  "pl_limit": "Максимум 20 плейлист.",
+  "pl_view": "▸ <b>{name}</b> ({count}/{max} ыр)",
+  "pl_delete_btn": "✗ Жок кылуу",
+  "pl_back_btn": "◁ Артка",
+  "pl_delete_confirm": "Плейлистти жок кылуу?",
+  "pl_confirm_yes": "Ооба, жок кылуу",
+  "pl_confirm_no": "Жок",
+  "pl_deleted": "Плейлист жок кылынды.",
+  "pl_not_found": "Плейлист табылган жок.",
+  "pl_track_added": "✓ {name} кошулду",
+  "pl_track_removed": "Ыр плейлисттен жок кылынды.",
+  "pl_track_exists": "Бул ыр плейлистте бар.",
+  "pl_track_limit": "Максимум 50 ыр.",
+  "pl_pick": "Плейлистти тандаңыз:",
+  "pl_empty_create_first": "Плейлист жок. /playlist аркылуу түзүңүз",
+
+  "captcha_prompt": "Улантуу үчүн чыгар: <b>{a} + {b} = ?</b>",
+  "captcha_ok": "✓ Текшерүү өттү!",
+  "captcha_fail": "✗ Ката. Кайра аракет кылыңыз."
 }

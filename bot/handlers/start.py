@@ -31,6 +31,9 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
             InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
         ],
+        [
+            InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
+        ],
     ]
     if admin:
         rows.append([

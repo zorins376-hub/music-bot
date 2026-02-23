@@ -78,5 +78,29 @@
   "profile_genres": "▸ Genres: <i>{genres}</i>",
   "profile_vibe": "▸ Vibe: <i>{vibe}</i>",
   "profile_artists": "▸ Artists: <i>{artists}</i>",
-  "track_caption": "◷ {duration} · {bitrate} kbps{year}"
+  "track_caption": "◷ {duration} · {bitrate} kbps{year}",
+
+  "pl_header": "▸ <b>My Playlists</b> ({count}/{max})",
+  "pl_create_btn": "+ Create playlist",
+  "pl_enter_name": "Enter playlist name:",
+  "pl_created": "✓ Playlist <b>{name}</b> created!",
+  "pl_limit": "Maximum 20 playlists.",
+  "pl_view": "▸ <b>{name}</b> ({count}/{max} tracks)",
+  "pl_delete_btn": "✗ Delete",
+  "pl_back_btn": "◁ Back",
+  "pl_delete_confirm": "Delete this playlist?",
+  "pl_confirm_yes": "Yes, delete",
+  "pl_confirm_no": "Cancel",
+  "pl_deleted": "Playlist deleted.",
+  "pl_not_found": "Playlist not found.",
+  "pl_track_added": "✓ Added to {name}",
+  "pl_track_removed": "Track removed from playlist.",
+  "pl_track_exists": "This track is already in the playlist.",
+  "pl_track_limit": "Maximum 50 tracks per playlist.",
+  "pl_pick": "Choose a playlist:",
+  "pl_empty_create_first": "No playlists yet. Create one via /playlist",
+
+  "captcha_prompt": "Solve to continue: <b>{a} + {b} = ?</b>",
+  "captcha_ok": "✓ Verified!",
+  "captcha_fail": "✗ Wrong answer. Try again."
 }
