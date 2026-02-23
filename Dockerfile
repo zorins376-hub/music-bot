@@ -1,8 +1,9 @@
 FROM python:3.12-slim
 
-# Устанавливаем ffmpeg и зависимости
+# Устанавливаем ffmpeg, nodejs (для yt-dlp signature solving)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
