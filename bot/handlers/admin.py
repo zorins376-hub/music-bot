@@ -232,6 +232,7 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="◈ Загрузить канал", callback_data="adm:load"),
                 InlineKeyboardButton(text="◑ Режим эфира", callback_data="adm:mode"),
             ],
+            [
                 InlineKeyboardButton(text="◁ Назад", callback_data="adm:back"),
             ],
         ]
