@@ -1,6 +1,6 @@
 import logging
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
@@ -134,7 +134,7 @@ async def _show_playlists(
 # ── Create playlist ─────────────────────────────────────────────────────
 
 
-@router.callback_query(PlCb.filter(lambda c: c.act == "new"))
+@router.callback_query(PlCb.filter(F.act == "new"))
 async def cb_create_start(callback: CallbackQuery, state: FSMContext) -> None:
     user = await get_or_create_user(callback.from_user)
     async with async_session() as session:
@@ -171,7 +171,7 @@ async def create_playlist_name(message: Message, state: FSMContext) -> None:
 # ── View playlist ───────────────────────────────────────────────────────
 
 
-@router.callback_query(PlCb.filter(lambda c: c.act == "view"))
+@router.callback_query(PlCb.filter(F.act == "view"))
 async def cb_view(callback: CallbackQuery, callback_data: PlCb) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
@@ -193,7 +193,7 @@ async def cb_view(callback: CallbackQuery, callback_data: PlCb) -> None:
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
-@router.callback_query(PlCb.filter(lambda c: c.act == "list"))
+@router.callback_query(PlCb.filter(F.act == "list"))
 async def cb_back_to_list(callback: CallbackQuery) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
@@ -203,7 +203,7 @@ async def cb_back_to_list(callback: CallbackQuery) -> None:
 # ── Delete playlist ─────────────────────────────────────────────────────
 
 
-@router.callback_query(PlCb.filter(lambda c: c.act == "del"))
+@router.callback_query(PlCb.filter(F.act == "del"))
 async def cb_delete_confirm(callback: CallbackQuery, callback_data: PlCb) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
@@ -222,7 +222,7 @@ async def cb_delete_confirm(callback: CallbackQuery, callback_data: PlCb) -> Non
     )
 
 
-@router.callback_query(PlCb.filter(lambda c: c.act == "delcf"))
+@router.callback_query(PlCb.filter(F.act == "delcf"))
 async def cb_delete_exec(callback: CallbackQuery, callback_data: PlCb) -> None:
     user = await get_or_create_user(callback.from_user)
     async with async_session() as session:
@@ -242,7 +242,7 @@ async def cb_delete_exec(callback: CallbackQuery, callback_data: PlCb) -> None:
 # ── Remove track from playlist ──────────────────────────────────────────
 
 
-@router.callback_query(PlCb.filter(lambda c: c.act == "rm"))
+@router.callback_query(PlCb.filter(F.act == "rm"))
 async def cb_remove_track(callback: CallbackQuery, callback_data: PlCb) -> None:
     user = await get_or_create_user(callback.from_user)
     async with async_session() as session:
@@ -268,7 +268,7 @@ class AddToPlCb(CallbackData, prefix="apl"):
     pid: int = 0   # playlist id (0 = pick playlist)
 
 
-@router.callback_query(AddToPlCb.filter(lambda c: c.pid == 0))
+@router.callback_query(AddToPlCb.filter(F.pid == 0))
 async def cb_pick_playlist(callback: CallbackQuery, callback_data: AddToPlCb) -> None:
     """Show user's playlists to pick which one to add to."""
     await callback.answer()
@@ -297,7 +297,7 @@ async def cb_pick_playlist(callback: CallbackQuery, callback_data: AddToPlCb) ->
     )
 
 
-@router.callback_query(AddToPlCb.filter(lambda c: c.pid > 0))
+@router.callback_query(AddToPlCb.filter(F.pid > 0))
 async def cb_add_to_playlist(callback: CallbackQuery, callback_data: AddToPlCb) -> None:
     user = await get_or_create_user(callback.from_user)
     async with async_session() as session:
