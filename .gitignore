@@ -7,3 +7,5 @@ data/
 logs/
 *.log
 .DS_Store
+tz1_output.txt
+tz2_output.txt

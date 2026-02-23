@@ -11,6 +11,7 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import Track
 from bot.models.user import User
+from bot.services.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,49 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             await session.commit()
         await message.answer(f"Premium выдан пользователю {target_id}.")
 
+    # /admin queue — текущая очередь эфира
+    elif subcmd == "queue":
+        import json
+        lines = ["<b>📻 Очередь эфира:</b>\n"]
+        for channel in ("tequila", "fullmoon"):
+            queue_key = f"radio:queue:{channel}"
+            items = await cache.redis.lrange(queue_key, 0, 4)
+            lines.append(f"<b>{channel.upper()}</b> ({len(items)} в очереди):")
+            for i, raw in enumerate(items, 1):
+                try:
+                    item = json.loads(raw)
+                    lines.append(f"  {i}. {item.get('artist', '?')} — {item.get('title', '?')}")
+                except Exception:
+                    lines.append(f"  {i}. (ошибка)")
+            if not items:
+                lines.append("  (пусто)")
+            lines.append("")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    # /admin skip — пропустить текущий трек
+    elif subcmd == "skip":
+        await cache.redis.publish("radio:cmd", "skip")
+        await message.answer("⏭ Команда skip отправлена в эфир.")
+
+    # /admin mode <режим>
+    elif subcmd == "mode":
+        if len(args) < 3:
+            await message.answer(
+                "Использование: /admin mode <night|energy|hybrid>\n"
+                "🌙 night — FULLMOON (deep/ambient)\n"
+                "⚡ energy — TEQUILA (энергичные)\n"
+                "🔀 hybrid — AUTO MIX (оба канала)"
+            )
+            return
+        mode = args[2].lower()
+        if mode not in ("night", "energy", "hybrid"):
+            await message.answer("Режимы: night, energy, hybrid")
+            return
+        await cache.redis.set("radio:mode", mode)
+        labels = {"night": "🌙 Night Radio", "energy": "⚡ Energy Boost", "hybrid": "🔀 Hybrid"}
+        await message.answer(f"Режим эфира: {labels[mode]}")
+        logger.info("Admin %s changed radio mode to %s", message.from_user.id, mode)
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -115,7 +159,10 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin ban &lt;user_id&gt; — бан\n"
             "/admin unban &lt;user_id&gt; — разбан\n"
             "/admin broadcast &lt;текст&gt; — рассылка\n"
-            "/admin premium &lt;user_id&gt; — выдать premium",
+            "/admin premium &lt;user_id&gt; — выдать premium\n"
+            "/admin queue — очередь эфира\n"
+            "/admin skip — пропустить трек\n"
+            "/admin mode &lt;режим&gt; — режим эфира (night/energy/hybrid)",
             parse_mode="HTML",
         )
 

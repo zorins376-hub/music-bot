@@ -4,17 +4,21 @@ recommend.py — AI DJ «По вашему вкусу» + Onboarding.
 Onboarding: 3 вопроса для новых пользователей (стиль, вайб, артисты).
 Recommendations: на основе истории + профиля пользователя.
 """
+import secrets
+
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import desc, func, select, update
 
-from bot.db import get_or_create_user
+from bot.db import get_or_create_user, record_listening_event
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
+from bot.services.cache import cache
+from bot.services.downloader import search_tracks
 
 router = Router()
 
@@ -184,25 +188,92 @@ async def _show_recommendations(message: Message, user: User) -> None:
             )
             genre_tracks = genre_result.scalars().all()
 
-    if not personal_rows and not genre_tracks:
+    # Build combined track list
+    all_tracks: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for track, _cnt in personal_rows:
+        if track.source_id not in seen_ids:
+            seen_ids.add(track.source_id)
+            all_tracks.append({
+                "video_id": track.source_id,
+                "title": track.title or "Unknown",
+                "uploader": track.artist or "Unknown",
+                "duration": track.duration or 0,
+                "duration_fmt": _fmt_dur(track.duration),
+                "source": track.source or "youtube",
+                "file_id": track.file_id,
+            })
+
+    for track in genre_tracks:
+        if track.source_id not in seen_ids and len(all_tracks) < 10:
+            seen_ids.add(track.source_id)
+            all_tracks.append({
+                "video_id": track.source_id,
+                "title": track.title or "Unknown",
+                "uploader": track.artist or "Unknown",
+                "duration": track.duration or 0,
+                "duration_fmt": _fmt_dur(track.duration),
+                "source": track.source or "youtube",
+                "file_id": track.file_id,
+            })
+
+    # If nothing found in DB, search YouTube by fav artists/genres
+    if not all_tracks and user.fav_artists:
+        query = " ".join(user.fav_artists[:2])
+        yt_results = await search_tracks(query, max_results=5, source="youtube")
+        all_tracks.extend(yt_results)
+    elif not all_tracks and user.fav_genres:
+        genre_to_query = {
+            "electro": "electronic music mix",
+            "hiphop": "hip hop trending",
+            "pop": "pop hits 2026",
+            "rock": "rock music",
+            "rnb": "r&b music",
+            "lofi": "lo-fi chill beats",
+            "latin": "latin music hits",
+            "classical": "classical music",
+        }
+        genre_key = user.fav_genres[0] if user.fav_genres else "pop"
+        query = genre_to_query.get(genre_key, "trending music")
+        yt_results = await search_tracks(query, max_results=5, source="youtube")
+        all_tracks.extend(yt_results)
+
+    if not all_tracks:
         await message.answer(t(lang, "recommend_no_history"), parse_mode="HTML")
         return
 
-    lines = [t(lang, "recommend_header")]
+    # Store in search cache so user can click and download
+    session_id = secrets.token_urlsafe(6)
+    await cache.store_search(session_id, all_tracks)
+    await record_listening_event(
+        user_id=user.id, action="search", source="recommend"
+    )
 
-    if personal_rows:
-        for i, (track, cnt) in enumerate(personal_rows, 1):
-            name = f"{track.artist} — {track.title}" if track.artist else track.title or "Unknown"
-            lines.append(f"{i}. {name}")
+    # Build clickable keyboard (import TrackCallback from search handler)
+    from bot.handlers.search import TrackCallback
 
-    if genre_tracks:
-        start = len(personal_rows) + 1
-        for i, track in enumerate(genre_tracks, start):
-            if i > 10:
-                break
-            name = f"{track.artist} — {track.title}" if track.artist else track.title or "Unknown"
-            if not any(name in line for line in lines):
-                lines.append(f"{i}. {name}")
+    buttons = []
+    for i, tr in enumerate(all_tracks[:10]):
+        dur = tr.get("duration_fmt", "?:??")
+        label = f"🎵 {tr['uploader']} — {tr['title'][:35]} ({dur})"
+        buttons.append(
+            [InlineKeyboardButton(
+                text=label,
+                callback_data=TrackCallback(sid=session_id, i=i).pack(),
+            )]
+        )
 
-    lines.append(f"\n{t(lang, 'recommend_footer')}")
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await message.answer(
+        f"{t(lang, 'recommend_header')}\n\n{t(lang, 'recommend_footer')}",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+def _fmt_dur(seconds: int | None) -> str:
+    if not seconds:
+        return "?:??"
+    m, s = divmod(seconds, 60)
+    return f"{m}:{s:02d}"

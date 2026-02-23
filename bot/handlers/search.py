@@ -3,6 +3,7 @@ import secrets
 from pathlib import Path
 
 from aiogram import Router
+from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
@@ -27,6 +28,11 @@ router = Router()
 class TrackCallback(CallbackData, prefix="t"):
     sid: str  # session ID
     i: int    # result index
+
+
+class FeedbackCallback(CallbackData, prefix="fb"):
+    tid: int    # track DB id
+    act: str    # like / dislike
 
 
 def _build_results_keyboard(results: list[dict], session_id: str) -> InlineKeyboardMarkup:
@@ -69,6 +75,7 @@ async def _do_search(message: Message, query: str) -> None:
             await status.edit_text(t(lang, "no_results"))
             return
     else:
+        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
         status = await message.answer(t(lang, "searching"))
 
     # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
@@ -192,7 +199,11 @@ async def handle_track_select(
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
         )
-        await _post_download(user.id, track_info, local_fid, bitrate)
+        tid = await _post_download(user.id, track_info, local_fid, bitrate)
+        await callback.message.answer(
+            "Оцени трек:",
+            reply_markup=_feedback_keyboard(tid),
+        )
         return
 
     # Проверяем Redis кэш
@@ -204,10 +215,15 @@ async def handle_track_select(
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
         )
-        await _post_download(user.id, track_info, file_id, bitrate)
+        tid = await _post_download(user.id, track_info, file_id, bitrate)
+        await callback.message.answer(
+            "Оцени трек:",
+            reply_markup=_feedback_keyboard(tid),
+        )
         return
 
     status = await callback.message.answer(t(lang, "downloading"))
+    await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     mp3_path: Path | None = None
 
     try:
@@ -233,8 +249,12 @@ async def handle_track_select(
         )
 
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
-        await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+        tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
         await status.delete()
+        await callback.message.answer(
+            "Оцени трек:",
+            reply_markup=_feedback_keyboard(tid),
+        )
 
     except Exception as e:
         logger.error("Download error for %s: %s", video_id, e)
@@ -244,8 +264,8 @@ async def handle_track_select(
             cleanup_file(mp3_path)
 
 
-async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: int) -> None:
-    """Записывает трек в БД и событие в историю прослушивания."""
+async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: int) -> int:
+    """Записывает трек в БД и событие в историю прослушивания. Returns track DB id."""
     await increment_request_count(user_id)
     track = await upsert_track(
         source_id=track_info["video_id"],
@@ -261,4 +281,52 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
         track_id=track.id,
         action="play",
         source="search",
+    )
+    # Auto-update user taste profile every 10 listens
+    from bot.models.base import async_session as _async_session
+    from bot.models.user import User as _User
+    async with _async_session() as session:
+        from sqlalchemy import select as _sel
+        u = (await session.execute(_sel(_User).where(_User.id == user_id))).scalar()
+        if u and u.request_count and u.request_count % 10 == 0:
+            from recommender.ai_dj import update_user_profile
+            try:
+                await update_user_profile(user_id)
+            except Exception:
+                pass
+    return track.id
+
+
+def _feedback_keyboard(track_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❤️",
+                    callback_data=FeedbackCallback(tid=track_id, act="like").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="👎",
+                    callback_data=FeedbackCallback(tid=track_id, act="dislike").pack(),
+                ),
+            ]
+        ]
+    )
+
+
+@router.callback_query(FeedbackCallback.filter())
+async def handle_feedback(
+    callback: CallbackQuery, callback_data: FeedbackCallback
+) -> None:
+    user = await get_or_create_user(callback.from_user)
+    await record_listening_event(
+        user_id=user.id,
+        track_id=callback_data.tid,
+        action=callback_data.act,
+        source="search",
+    )
+    emoji = "❤️" if callback_data.act == "like" else "👎"
+    await callback.answer(f"{emoji} Записано!")
+    await callback.message.edit_text(
+        f"{emoji} Оценка сохранена", reply_markup=None
     )

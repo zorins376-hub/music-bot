@@ -30,7 +30,7 @@
   "recommend_header": "🧠 <b>Recommended for you:</b>",
   "recommend_footer": "Listen more — recommendations get better.",
   "premium_info": "💎 <b>BLACK ROOM Premium</b>\n\n<b>Free:</b>\n• 10 tracks/hour\n• 128-192 kbps\n\n<b>Premium:</b>\n• Unlimited\n• Up to 320 kbps\n• Priority track requests\n• VIP stream access",
-  "premium_active": "💎 <b>BLACK ROOM Premium</b> is active.\n\nAll features unlocked. Enjoy!",
+  "premium_active": "💎 <b>BLACK ROOM Premium</b> is active until {until}\n\nAll features unlocked. Enjoy!",
   "premium_soon": "⭐ Telegram Stars payments coming soon!\n\nStay tuned for updates.",
   "settings_quality": "⚙️ <b>Quality settings</b>\n\nCurrent quality: <b>{current} kbps</b>\n\nChoose bitrate:",
   "settings_quality_changed": "✅ Quality changed to <b>{quality} kbps</b>.",
@@ -55,5 +55,9 @@
   "automix_error": "Failed to create mix. Try again later.",
 
   "spotify_detected": "🟢 Spotify link detected. Searching on YouTube...",
-  "found_local": "📂 Found in channel database:"
+  "found_local": "📂 Found in channel database:",
+  "quality_premium_only": "🔒 320 kbps is available only for Premium subscribers",
+  "top_period_today": "today",
+  "top_period_week": "this week",
+  "top_period_all": "all time"
 }

@@ -33,7 +33,10 @@ async def handle_premium(callback: CallbackQuery) -> None:
     lang = user.language
 
     if user.is_premium:
-        text = t(lang, "premium_active")
+        until = ""
+        if user.premium_until:
+            until = user.premium_until.strftime("%d.%m.%Y")
+        text = t(lang, "premium_active", until=until)
         keyboard = None
     else:
         text = t(lang, "premium_info")
