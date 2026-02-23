@@ -11,7 +11,7 @@ if _is_pg:
         max_overflow=10,
         pool_recycle=300,
         pool_pre_ping=True,
-        connect_args={"prepared_statement_cache_size": 0},
+        connect_args={"statement_cache_size": 0},
     )
 
 engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
