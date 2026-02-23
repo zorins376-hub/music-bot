@@ -20,7 +20,7 @@ _QUALITY_KEYBOARD_FREE = InlineKeyboardMarkup(
             InlineKeyboardButton(text="192 kbps", callback_data="quality:192"),
         ],
         [
-            InlineKeyboardButton(text="🔒 320 kbps (Premium)", callback_data="quality:320"),
+            InlineKeyboardButton(text="▣ 320 kbps (Premium)", callback_data="quality:320"),
         ],
     ]
 )
@@ -30,7 +30,7 @@ _QUALITY_KEYBOARD_PREMIUM = InlineKeyboardMarkup(
         [
             InlineKeyboardButton(text="128 kbps", callback_data="quality:128"),
             InlineKeyboardButton(text="192 kbps", callback_data="quality:192"),
-            InlineKeyboardButton(text="⭐ 320 kbps", callback_data="quality:320"),
+            InlineKeyboardButton(text="★ 320 kbps", callback_data="quality:320"),
         ]
     ]
 )

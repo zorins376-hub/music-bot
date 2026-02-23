@@ -31,18 +31,18 @@ class OnboardState(StatesGroup):
 _GENRE_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
         [
-            InlineKeyboardButton(text="🎹 Электро", callback_data="ob_genre:electro"),
-            InlineKeyboardButton(text="🎤 Хип-хоп", callback_data="ob_genre:hiphop"),
-            InlineKeyboardButton(text="🎵 Pop", callback_data="ob_genre:pop"),
+            InlineKeyboardButton(text="▪ Электро", callback_data="ob_genre:electro"),
+            InlineKeyboardButton(text="▪ Хип-хоп", callback_data="ob_genre:hiphop"),
+            InlineKeyboardButton(text="♪ Pop", callback_data="ob_genre:pop"),
         ],
         [
-            InlineKeyboardButton(text="🎸 Rock", callback_data="ob_genre:rock"),
-            InlineKeyboardButton(text="💜 R&B", callback_data="ob_genre:rnb"),
-            InlineKeyboardButton(text="🌙 Lo-fi", callback_data="ob_genre:lofi"),
+            InlineKeyboardButton(text="▪ Rock", callback_data="ob_genre:rock"),
+            InlineKeyboardButton(text="▪ R&B", callback_data="ob_genre:rnb"),
+            InlineKeyboardButton(text="◑ Lo-fi", callback_data="ob_genre:lofi"),
         ],
         [
-            InlineKeyboardButton(text="💃 Latin", callback_data="ob_genre:latin"),
-            InlineKeyboardButton(text="🎻 Классика", callback_data="ob_genre:classical"),
+            InlineKeyboardButton(text="▪ Latin", callback_data="ob_genre:latin"),
+            InlineKeyboardButton(text="▪ Классика", callback_data="ob_genre:classical"),
         ],
     ]
 )
@@ -50,12 +50,12 @@ _GENRE_KEYBOARD = InlineKeyboardMarkup(
 _VIBE_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
         [
-            InlineKeyboardButton(text="🌙 Ночной / Deep", callback_data="ob_vibe:deep"),
-            InlineKeyboardButton(text="⚡ Энергичный", callback_data="ob_vibe:energy"),
+            InlineKeyboardButton(text="◑ Ночной / Deep", callback_data="ob_vibe:deep"),
+            InlineKeyboardButton(text="▸ Энергичный", callback_data="ob_vibe:energy"),
         ],
         [
-            InlineKeyboardButton(text="☁️ Спокойный", callback_data="ob_vibe:chill"),
-            InlineKeyboardButton(text="🔀 Микс", callback_data="ob_vibe:mix"),
+            InlineKeyboardButton(text="○ Спокойный", callback_data="ob_vibe:chill"),
+            InlineKeyboardButton(text="✧ Микс", callback_data="ob_vibe:mix"),
         ],
     ]
 )
@@ -256,7 +256,7 @@ async def _show_recommendations(message: Message, user: User) -> None:
     buttons = []
     for i, tr in enumerate(all_tracks[:10]):
         dur = tr.get("duration_fmt", "?:??")
-        label = f"🎵 {tr['uploader']} — {tr['title'][:35]} ({dur})"
+        label = f"♪ {tr['uploader']} — {tr['title'][:35]} ({dur})"
         buttons.append(
             [InlineKeyboardButton(
                 text=label,

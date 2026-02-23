@@ -40,10 +40,10 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
             results.append(
                 InlineQueryResultArticle(
                     id=video_id,
-                    title=f"🎵 {track['uploader']} — {track['title']}",
-                    description=f"⏱ {track['duration_fmt']} · Нажми чтобы получить в личке бота",
+                    title=f"♪ {track['uploader']} — {track['title']}",
+                    description=f"◷ {track['duration_fmt']} · Нажми чтобы получить в личке бота",
                     input_message_content=InputTextMessageContent(
-                        message_text=f"🎵 {track['uploader']} — {track['title']} ({track['duration_fmt']})\n\n"
+                        message_text=f"♪ {track['uploader']} — {track['title']} ({track['duration_fmt']})\n\n"
                                      f"Открой бота в личных сообщениях и отправь этот запрос:\n"
                                      f"<code>{track['uploader']} {track['title']}</code>",
                         parse_mode="HTML",

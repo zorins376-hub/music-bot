@@ -38,7 +38,7 @@ class FeedbackCallback(CallbackData, prefix="fb"):
 def _build_results_keyboard(results: list[dict], session_id: str) -> InlineKeyboardMarkup:
     buttons = []
     for i, track in enumerate(results):
-        label = f"🎵 {track['uploader']} — {track['title'][:40]} ({track['duration_fmt']})"
+        label = f"♪ {track['uploader']} — {track['title'][:40]} ({track['duration_fmt']})"
         buttons.append(
             [InlineKeyboardButton(
                 text=label,

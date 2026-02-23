@@ -15,19 +15,19 @@ def _main_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="▶️ TEQUILA LIVE", callback_data="radio:tequila"),
-                InlineKeyboardButton(text="🌕 FULLMOON LIVE", callback_data="radio:fullmoon"),
+                InlineKeyboardButton(text="▸ TEQUILA LIVE", callback_data="radio:tequila"),
+                InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
             ],
             [
-                InlineKeyboardButton(text="🔥 AUTO MIX", callback_data="radio:automix"),
-                InlineKeyboardButton(text="🧠 По вашему вкусу", callback_data="action:recommend"),
+                InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
+                InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
             ],
             [
-                InlineKeyboardButton(text="🔎 Найти трек", callback_data="action:search"),
-                InlineKeyboardButton(text="📊 Топ сегодня", callback_data="action:top"),
+                InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
+                InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
             ],
             [
-                InlineKeyboardButton(text="💎 Premium", callback_data="action:premium"),
+                InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
             ],
         ]
     )

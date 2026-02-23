@@ -45,7 +45,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         lines = [
             t(lang, "stats_header"),
             t(lang, "stats_users", count=user_count or 0),
-            f"💎 Premium: {premium_count or 0}",
+            f"◇ Premium: {premium_count or 0}",
             t(lang, "stats_tracks", count=track_count or 0),
             t(lang, "stats_requests", count=total_req or 0),
         ]
@@ -112,7 +112,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     # /admin queue — текущая очередь эфира
     elif subcmd == "queue":
         import json
-        lines = ["<b>📻 Очередь эфира:</b>\n"]
+        lines = ["<b>◆ Очередь эфира:</b>\n"]
         for channel in ("tequila", "fullmoon"):
             queue_key = f"radio:queue:{channel}"
             items = await cache.redis.lrange(queue_key, 0, 4)
@@ -131,16 +131,16 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     # /admin skip — пропустить текущий трек
     elif subcmd == "skip":
         await cache.redis.publish("radio:cmd", "skip")
-        await message.answer("⏭ Команда skip отправлена в эфир.")
+        await message.answer("▸▸ Команда skip отправлена в эфир.")
 
     # /admin mode <режим>
     elif subcmd == "mode":
         if len(args) < 3:
             await message.answer(
                 "Использование: /admin mode <night|energy|hybrid>\n"
-                "🌙 night — FULLMOON (deep/ambient)\n"
-                "⚡ energy — TEQUILA (энергичные)\n"
-                "🔀 hybrid — AUTO MIX (оба канала)"
+                "◑ night — FULLMOON (deep/ambient)\n"
+                "▸ energy — TEQUILA (энергичные)\n"
+                "✦ hybrid — AUTO MIX (оба канала)"
             )
             return
         mode = args[2].lower()
@@ -148,7 +148,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             await message.answer("Режимы: night, energy, hybrid")
             return
         await cache.redis.set("radio:mode", mode)
-        labels = {"night": "🌙 Night Radio", "energy": "⚡ Energy Boost", "hybrid": "🔀 Hybrid"}
+        labels = {"night": "◑ Night Radio", "energy": "▸ Energy Boost", "hybrid": "✦ Hybrid"}
         await message.answer(f"Режим эфира: {labels[mode]}")
         logger.info("Admin %s changed radio mode to %s", message.from_user.id, mode)
 

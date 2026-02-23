@@ -44,10 +44,10 @@ async def handle_tequila_live(callback: CallbackQuery) -> None:
     track = await _get_current_track("tequila")
     if track:
         text = (
-            f"🔴 <b>TEQUILA LIVE</b>\n\n"
-            f"▶️ Сейчас играет:\n"
+            f"● <b>TEQUILA LIVE</b>\n\n"
+            f"▸ Сейчас играет:\n"
             f"<b>{track.get('artist', '')} — {track.get('title', '')}</b>\n"
-            f"⏱ {track.get('duration_fmt', '')}"
+            f"◷ {track.get('duration_fmt', '')}"
         )
     else:
         text = t(lang, "radio_tequila_offline")
@@ -64,10 +64,10 @@ async def handle_fullmoon_live(callback: CallbackQuery) -> None:
     track = await _get_current_track("fullmoon")
     if track:
         text = (
-            f"🌕 <b>FULLMOON LIVE</b>\n\n"
-            f"▶️ Сейчас играет:\n"
+            f"◑ <b>FULLMOON LIVE</b>\n\n"
+            f"▸ Сейчас играет:\n"
             f"<b>{track.get('artist', '')} — {track.get('title', '')}</b>\n"
-            f"⏱ {track.get('duration_fmt', '')}"
+            f"◷ {track.get('duration_fmt', '')}"
         )
     else:
         text = t(lang, "radio_fullmoon_offline")
@@ -179,9 +179,9 @@ async def handle_whats_playing(message: Message) -> None:
 
     lines = []
     if tequila:
-        lines.append(f"▶️ TEQUILA: <b>{tequila.get('artist')} — {tequila.get('title')}</b>")
+        lines.append(f"▸ TEQUILA: <b>{tequila.get('artist')} — {tequila.get('title')}</b>")
     if fullmoon:
-        lines.append(f"🌕 FULLMOON: <b>{fullmoon.get('artist')} — {fullmoon.get('title')}</b>")
+        lines.append(f"◑ FULLMOON: <b>{fullmoon.get('artist')} — {fullmoon.get('title')}</b>")
 
     if not lines:
         await message.answer(t(lang, "radio_nothing_playing"))

@@ -16,9 +16,9 @@ def _top_period_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"📅 {t(lang, 'top_period_today')}", callback_data="top:today"),
-                InlineKeyboardButton(text=f"📆 {t(lang, 'top_period_week')}", callback_data="top:week"),
-                InlineKeyboardButton(text=f"🏆 {t(lang, 'top_period_all')}", callback_data="top:all"),
+                InlineKeyboardButton(text=f"▫ {t(lang, 'top_period_today')}", callback_data="top:today"),
+                InlineKeyboardButton(text=f"▪ {t(lang, 'top_period_week')}", callback_data="top:week"),
+                InlineKeyboardButton(text=f"◆ {t(lang, 'top_period_all')}", callback_data="top:all"),
             ]
         ]
     )
