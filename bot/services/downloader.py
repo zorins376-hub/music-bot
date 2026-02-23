@@ -28,11 +28,12 @@ def log_runtime_info() -> None:
     logger.info("Cookies file: %s (exists=%s)", _COOKIES_PATH, _COOKIES_PATH.exists())
 
 
-def _cookies_opt() -> dict:
-    """Return cookiefile option if cookies.txt exists."""
+def _base_opts() -> dict:
+    """Return base yt-dlp options: cookies + remote EJS components."""
+    opts: dict = {"remote_components": {"ejs:github"}}
     if _COOKIES_PATH.exists():
-        return {"cookiefile": str(_COOKIES_PATH)}
-    return {}
+        opts["cookiefile"] = str(_COOKIES_PATH)
+    return opts
 
 # Spotify URL regex
 _SPOTIFY_RE = re.compile(
@@ -150,7 +151,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "quiet": True,
         "no_warnings": True,
         "default_search": search_prefix,
-        **_cookies_opt(),
+        **_base_opts(),
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -190,7 +191,7 @@ def _list_formats_debug(video_id: str) -> None:
     try:
         with yt_dlp.YoutubeDL({
             "quiet": False, "verbose": True, "no_warnings": False,
-            "skip_download": True, **_cookies_opt(),
+            "skip_download": True, **_base_opts(),
         }) as ydl:
             info = ydl.extract_info(
                 f"https://www.youtube.com/watch?v={video_id}",
@@ -231,7 +232,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        **_cookies_opt(),
+        **_base_opts(),
         "match_filter": yt_dlp.utils.match_filter_func(
             f"duration <= {settings.MAX_DURATION}"
         ),
@@ -274,7 +275,7 @@ def _fetch_year_sync(video_id: str) -> str | None:
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
-        **_cookies_opt(),
+        **_base_opts(),
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
