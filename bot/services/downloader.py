@@ -185,7 +185,28 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         return []
 
 
+def _list_formats_debug(video_id: str) -> None:
+    """Log available formats for a video (debug helper)."""
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, **_cookies_opt()}) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            if not info:
+                logger.error("DEBUG formats %s: no info returned", video_id)
+                return
+            formats = info.get("formats") or []
+            logger.info("DEBUG formats %s: %d formats found", video_id, len(formats))
+            for f in formats:
+                logger.info(
+                    "  fmt %s | ext=%s | acodec=%s | vcodec=%s | abr=%s | resolution=%s",
+                    f.get("format_id"), f.get("ext"), f.get("acodec"),
+                    f.get("vcodec"), f.get("abr"), f.get("resolution"),
+                )
+    except Exception as e:
+        logger.error("DEBUG list-formats failed for %s: %s", video_id, e)
+
+
 def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
+    url = f"https://www.youtube.com/watch?v={video_id}"
     output_template = str(output_dir / f"{video_id}.%(ext)s")
     ydl_opts = {
         "format": "bestaudio/best",
@@ -208,8 +229,13 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
             f"duration <= {settings.MAX_DURATION}"
         ),
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        logger.error("Download failed for %s: %s", video_id, e)
+        _list_formats_debug(video_id)
+        raise
 
     mp3_path = output_dir / f"{video_id}.mp3"
     if mp3_path.exists():
