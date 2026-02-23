@@ -86,7 +86,7 @@ async def handle_successful_payment(message: Message) -> None:
         await session.execute(
             update(User)
             .where(User.id == user.id)
-            .values(is_premium=True, premium_until=premium_until, quality="320")
+            .values(is_premium=True, premium_until=premium_until)
         )
         session.add(Payment(
             user_id=user.id,

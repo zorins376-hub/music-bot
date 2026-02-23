@@ -13,34 +13,40 @@ from bot.models.user import User
 
 router = Router()
 
-_QUALITY_KEYBOARD_FREE = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(text="128 kbps", callback_data="quality:128"),
-            InlineKeyboardButton(text="192 kbps", callback_data="quality:192"),
-        ],
-        [
-            InlineKeyboardButton(text="▣ 320 kbps (Premium)", callback_data="quality:320"),
-        ],
-    ]
-)
 
-_QUALITY_KEYBOARD_PREMIUM = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(text="128 kbps", callback_data="quality:128"),
-            InlineKeyboardButton(text="192 kbps", callback_data="quality:192"),
-            InlineKeyboardButton(text="★ 320 kbps", callback_data="quality:320"),
+def _quality_keyboard(is_premium: bool, current: str) -> InlineKeyboardMarkup:
+    """Build quality keyboard with checkmark on current selection."""
+    def _label(val: str, text: str) -> str:
+        return f"✓ {text}" if current == val else text
+
+    if is_premium:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text=_label("128", "128 kbps"), callback_data="quality:128"),
+                    InlineKeyboardButton(text=_label("192", "192 kbps"), callback_data="quality:192"),
+                    InlineKeyboardButton(text=_label("320", "★ 320 kbps"), callback_data="quality:320"),
+                ]
+            ]
+        )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=_label("128", "128 kbps"), callback_data="quality:128"),
+                InlineKeyboardButton(text=_label("192", "192 kbps"), callback_data="quality:192"),
+            ],
+            [
+                InlineKeyboardButton(text="▣ 320 kbps (Premium)", callback_data="quality:320"),
+            ],
         ]
-    ]
-)
+    )
 
 
 @router.message(Command("settings"))
 async def cmd_settings(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
-    kb = _QUALITY_KEYBOARD_PREMIUM if user.is_premium else _QUALITY_KEYBOARD_FREE
+    kb = _quality_keyboard(user.is_premium, user.quality)
     await message.answer(
         t(lang, "settings_quality", current=user.quality),
         reply_markup=kb,
