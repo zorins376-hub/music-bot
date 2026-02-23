@@ -66,7 +66,8 @@ class CaptchaMiddleware(BaseMiddleware):
             await cache.redis.delete(_challenge_key(user.id))
             db_user = await get_or_create_user(user)
             await event.answer(t(db_user.language, "captcha_ok"), parse_mode="HTML")
-            return await handler(event, data)
+            # Don't pass the answer message to handlers (it's just a number)
+            return
         else:
             db_user = await get_or_create_user(user)
             await event.answer(t(db_user.language, "captcha_fail"), parse_mode="HTML")
