@@ -6,6 +6,7 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
 from bot.config import settings as app_settings
 from bot.handlers import admin, history, inline, search, start
@@ -34,6 +35,26 @@ logger = logging.getLogger(__name__)
 
 async def on_startup(bot: Bot) -> None:
     await init_db()
+
+    # Register bot commands for private chats
+    private_commands = [
+        BotCommand(command="start", description="◉ Главное меню"),
+        BotCommand(command="search", description="◈ Найти трек"),
+        BotCommand(command="top", description="◆ Топ треков"),
+        BotCommand(command="history", description="▹ Мои запросы"),
+        BotCommand(command="settings", description="≡ Качество аудио"),
+        BotCommand(command="lang", description="○ Сменить язык"),
+        BotCommand(command="help", description="◌ Справка"),
+    ]
+    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+
+    # Register bot commands for group chats
+    group_commands = [
+        BotCommand(command="search", description="◈ Найти трек"),
+        BotCommand(command="top", description="◆ Топ треков"),
+    ]
+    await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+
     if app_settings.USE_WEBHOOK:
         await bot.set_webhook(
             url=f"{app_settings.WEBHOOK_URL}{app_settings.WEBHOOK_PATH}",

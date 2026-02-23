@@ -1,6 +1,6 @@
 {
   "start_message": "◉ <b>BLACK ROOM RADIO BOT</b>\n\nСаламатсызбы, {name}!\n\nTelegram'дагы жеке DJ'ың.\n\n<i>TEQUILA MUSIC · FULLMOON TRIP SOUND · BLACK ROOM</i>",
-  "help_message": "<b>Буйруктар:</b>\n/search &lt;суроо&gt; — ыр издөө\n/top — топ ырлар\n/history — соңку суроолоруң\n/settings — аудио сапаты\n/lang — тил өзгөртүү\n/help — бул жардам\n\n<b>Же жөн эле ырдын атын жаз</b> — бот өзү табат.",
+  "help_message": "<b>Буйруктар:</b>\n/search &lt;суроо&gt; — ыр издөө\n/top — топ ырлар\n/history — соңку суроолоруң\n/settings — аудио сапаты\n/lang — тил өзгөртүү\n/help — бул жардам\n\n<b>Жекеде:</b> ырдын атын жаз\n<b>Группада:</b> <code>трек Гуф</code> же /search Гуф",
   "search_prompt": "Ырдын атын же аткаруучуну жаз:",
   "searching": "◈ Издеп жатам...",
   "no_results": "Эч нерсе табылган жок. Суроону так жаз.",

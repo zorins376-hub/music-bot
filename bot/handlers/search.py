@@ -162,11 +162,23 @@ async def handle_text(message: Message) -> None:
     if lower in ("стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip", "выключи"):
         return
 
-    # Natural language triggers: "включи", "поставь", "хочу послушать"
-    for prefix in ("включи ", "поставь ", "хочу послушать ", "play ", "найди "):
+    is_group = message.chat.type in ("group", "supergroup")
+
+    # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
+    _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
+    matched_prefix = False
+    for prefix in _PREFIXES:
         if lower.startswith(prefix):
             text = text[len(prefix):].strip()
+            matched_prefix = True
             break
+
+    # In groups: only respond to trigger words, ignore random messages
+    if is_group and not matched_prefix:
+        return
+
+    if not text:
+        return
 
     await _do_search(message, text)
 

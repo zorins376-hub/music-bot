@@ -1,6 +1,6 @@
 {
   "start_message": "◉ <b>BLACK ROOM RADIO BOT</b>\n\nHey, {name}!\n\nYour personal DJ in Telegram.\nThree sources. One bot.\n\n<i>TEQUILA MUSIC · FULLMOON TRIP SOUND · BLACK ROOM</i>",
-  "help_message": "<b>Commands:</b>\n/search &lt;query&gt; — search for a track\n/top — top tracks\n/history — your recent searches\n/settings — audio quality\n/lang — change language\n/help — this message\n\n<b>Or just type a track name</b> — I'll handle it.",
+  "help_message": "<b>Commands:</b>\n/search &lt;query&gt; — search for a track\n/top — top tracks\n/history — your recent searches\n/settings — audio quality\n/lang — change language\n/help — this message\n\n<b>In DM:</b> just type a track name\n<b>In groups:</b> <code>play Drake</code> or /search Drake",
   "search_prompt": "Type a track name or artist:",
   "searching": "◈ Searching...",
   "no_results": "Nothing found. Try a different query.",
