@@ -22,6 +22,29 @@ def _is_admin(user_id: int) -> bool:
     return user_id in settings.ADMIN_IDS
 
 
+async def _resolve_user(identifier: str):
+    """Resolve user by ID or @username. Returns (User, error_text)."""
+    identifier = identifier.strip().lstrip("@")
+    async with async_session() as session:
+        # Try as numeric ID first
+        try:
+            uid = int(identifier)
+            user = await session.get(User, uid)
+            if user:
+                return user, None
+            return None, f"Пользователь {uid} не найден в базе."
+        except ValueError:
+            pass
+        # Try as username (case-insensitive)
+        result = await session.execute(
+            select(User).where(func.lower(User.username) == identifier.lower())
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            return user, None
+        return None, f"Пользователь @{identifier} не найден в базе."
+
+
 async def _build_detailed_stats() -> str:
     """Build a detailed admin stats message."""
     from datetime import datetime, timedelta, timezone
@@ -215,38 +238,42 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         text = await _build_detailed_stats()
         await message.answer(text, parse_mode="HTML")
 
-    # /admin ban <user_id>
+    # /admin ban <user_id | @username>
     elif subcmd == "ban":
         if len(args) < 3:
-            await message.answer("Использование: /admin ban <user_id>")
+            await message.answer("Использование: /admin ban <user_id или @username>")
             return
-        try:
-            target_id = int(args[2])
-        except ValueError:
-            await message.answer("user_id должен быть числом")
+        target, err = await _resolve_user(args[2])
+        if not target:
+            await message.answer(err)
             return
 
         async with async_session() as session:
             await session.execute(
-                update(User).where(User.id == target_id).values(is_banned=True)
+                update(User).where(User.id == target.id).values(is_banned=True)
             )
             await session.commit()
 
-        await message.answer(f"Пользователь {target_id} заблокирован.")
-        logger.info("Admin %s banned user %s", message.from_user.id, target_id)
+        label = f"@{target.username}" if target.username else str(target.id)
+        await message.answer(f"Пользователь {label} заблокирован.")
+        logger.info("Admin %s banned user %s", message.from_user.id, target.id)
 
-    # /admin unban <user_id>
+    # /admin unban <user_id | @username>
     elif subcmd == "unban":
         if len(args) < 3:
-            await message.answer("Использование: /admin unban <user_id>")
+            await message.answer("Использование: /admin unban <user_id или @username>")
             return
-        target_id = int(args[2])
+        target, err = await _resolve_user(args[2])
+        if not target:
+            await message.answer(err)
+            return
         async with async_session() as session:
             await session.execute(
-                update(User).where(User.id == target_id).values(is_banned=False)
+                update(User).where(User.id == target.id).values(is_banned=False)
             )
             await session.commit()
-        await message.answer(f"Пользователь {target_id} разблокирован.")
+        label = f"@{target.username}" if target.username else str(target.id)
+        await message.answer(f"Пользователь {label} разблокирован.")
 
     # /admin broadcast <текст>
     elif subcmd == "broadcast":
@@ -256,22 +283,22 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         text = args[2]
         await _broadcast(bot, message, text)
 
-    # /admin premium <user_id>  — выдать premium вручную
+    # /admin premium <user_id | @username>  — выдать premium вручную
     elif subcmd == "premium":
         if len(args) < 3:
-            await message.answer("Использование: /admin premium <user_id>")
+            await message.answer("Использование: /admin premium <user_id или @username>")
             return
-        try:
-            target_id = int(args[2])
-        except ValueError:
-            await message.answer("user_id должен быть числом")
+        target, err = await _resolve_user(args[2])
+        if not target:
+            await message.answer(err)
             return
         async with async_session() as session:
             await session.execute(
-                update(User).where(User.id == target_id).values(is_premium=True)
+                update(User).where(User.id == target.id).values(is_premium=True)
             )
             await session.commit()
-        await message.answer(f"Premium выдан пользователю {target_id}.")
+        label = f"@{target.username}" if target.username else str(target.id)
+        await message.answer(f"Premium выдан пользователю {label}.")
 
     # /admin queue — текущая очередь эфира
     elif subcmd == "queue":
@@ -320,10 +347,10 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await message.answer(
             "<b>Команды админа:</b>\n"
             "/admin stats — статистика\n"
-            "/admin ban &lt;user_id&gt; — бан\n"
-            "/admin unban &lt;user_id&gt; — разбан\n"
+            "/admin ban &lt;id или @username&gt; — бан\n"
+            "/admin unban &lt;id или @username&gt; — разбан\n"
             "/admin broadcast &lt;текст&gt; — рассылка\n"
-            "/admin premium &lt;user_id&gt; — выдать premium\n"
+            "/admin premium &lt;id или @username&gt; — выдать premium\n"
             "/admin queue — очередь эфира\n"
             "/admin skip — пропустить трек\n"
             "/admin mode &lt;режим&gt; — режим эфира (night/energy/hybrid)",
