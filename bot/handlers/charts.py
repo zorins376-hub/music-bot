@@ -285,57 +285,13 @@ async def _fetch_rusradio() -> list[dict]:
     return tracks
 
 
-def _parse_radio_json(data: object) -> list[dict]:
-    """Best-effort parser for radio station track JSON."""
-    if isinstance(data, dict):
-        items = (data.get("items") or data.get("tracks") or
-                 data.get("data") or data.get("results") or [])
-    elif isinstance(data, list):
-        items = data
-    else:
-        return []
-    tracks = []
-    for item in items[:50]:
-        if not isinstance(item, dict):
-            continue
-        title = (item.get("title") or item.get("name") or
-                 item.get("song") or item.get("trackName") or "")
-        artist = (item.get("artist") or item.get("performer") or
-                  item.get("artistName") or item.get("author") or "")
-        if title and artist:
-            tracks.append({
-                "title": str(title).strip(),
-                "artist": str(artist).strip(),
-                "query": f"{artist} - {title}",
-            })
-    return tracks
-
-
 async def _fetch_europa() -> list[dict]:
-    """Европа Плюс TOP40 — пробуем API, иначе Apple Music UK."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://europaplus.ru/playlist",
-    }
-    for api_url in [
-        "https://europaplus.ru/api/v1/playlist?limit=50",
-        "https://europaplus.ru/api/v1/broadcast/history?limit=50",
-    ]:
-        try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(api_url, headers=headers,
-                                    timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        tracks = _parse_radio_json(data)
-                        if tracks:
-                            return tracks
-        except Exception:
-            pass
-
-    # Fallback: Apple Music UK (European pop, closer to Europa Plus style)
-    return await _fetch_apple_chart("gb")
+    """Европа Плюс TOP40 — Apple Music Europe (gb→de→us) chart."""
+    for storefront in ("gb", "de", "us"):
+        tracks = await _fetch_apple_chart(storefront)
+        if tracks:
+            return tracks
+    return []
 
 
 _CHART_FETCHERS = {
