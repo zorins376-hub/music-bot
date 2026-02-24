@@ -168,20 +168,62 @@ async def _fetch_youtube() -> list[dict]:
 
 
 async def _fetch_vk() -> list[dict]:
-    """Топ Россия — only Russian-language tracks (Cyrillic filter)."""
-    tracks = await _fetch_apple_chart("ru")
+    """Яндекс Музыка Топ Россия — official chart, only Russian-language tracks."""
+    tracks = await _fetch_yandex_chart()
     if tracks:
-        # Keep only tracks with Cyrillic in artist or title
-        ru_tracks = [t for t in tracks if _has_cyrillic(t["artist"]) or _has_cyrillic(t["title"])]
+        return tracks
+    # Fallback: Apple Music Russia with Cyrillic filter
+    apple_tracks = await _fetch_apple_chart("ru")
+    if apple_tracks:
+        ru_tracks = [t for t in apple_tracks if _has_cyrillic(t["artist"]) or _has_cyrillic(t["title"])]
         if ru_tracks:
             return ru_tracks
-    # Fallback: YouTube playlists with Russian music (cyrillic filter)
+    # Last resort: YouTube playlists
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_ytdl_pool, _fetch_yt_playlist_sync, [
         "https://www.youtube.com/playlist?list=PLw-VjHDlEOgtYfGcmRbz3PS1MKx31KP-9",
         "https://www.youtube.com/playlist?list=PLw-VjHDlEOgs658kAHR_LAaILBXb-s6Q5",
-        "https://www.youtube.com/playlist?list=PLFgquLnL59alW3K6d_KtHnMBBxV2PJfBI",
     ], 50, True)
+
+
+async def _fetch_yandex_chart() -> list[dict]:
+    """Официальный чарт Яндекс Музыки (Россия)."""
+    try:
+        from yandex_music import ClientAsync
+    except ImportError:
+        logger.warning("yandex-music package not installed")
+        return []
+
+    from bot.config import settings
+    token = settings.YANDEX_MUSIC_TOKEN or None
+    try:
+        client = await ClientAsync(token).init()
+        # chart() returns ChartInfo; chart("russia") for Russian chart
+        chart_info = await client.chart("russia")
+        if not chart_info or not getattr(chart_info, "chart", None):
+            return []
+
+        tracks = []
+        for item in (chart_info.chart.tracks or [])[:50]:
+            track = getattr(item, "track", None) or item
+            if not track:
+                continue
+            title = getattr(track, "title", None) or "Unknown"
+            artists = getattr(track, "artists", []) or []
+            artist = artists[0].name if artists else "Unknown"
+            # Skip compilations (> 8 min)
+            dur_ms = getattr(track, "duration_ms", 0) or 0
+            if dur_ms and dur_ms > 480_000:
+                continue
+            tracks.append({
+                "title": title,
+                "artist": artist,
+                "query": f"{artist} - {title}",
+            })
+        return tracks
+    except Exception as e:
+        logger.error("Яндекс Музыка chart error: %s", e)
+        return []
 
 
 _CHART_FETCHERS = {
@@ -193,7 +235,7 @@ _CHART_FETCHERS = {
 _CHART_LABELS = {
     "shazam": "🎵 Apple Music Global Top",
     "youtube": "▶ YouTube Music Top",
-    "vk": "🇷🇺 Топ Россия",
+    "vk": "🇷🇺 Яндекс Топ Россия",
 }
 
 
@@ -221,7 +263,7 @@ def _chart_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎵 Apple Music Global", callback_data=ChartCb(src="shazam", p=0).pack())],
         [InlineKeyboardButton(text="▶ YouTube Music Top", callback_data=ChartCb(src="youtube", p=0).pack())],
-        [InlineKeyboardButton(text="🇷🇺 Топ Россия", callback_data=ChartCb(src="vk", p=0).pack())],
+        [InlineKeyboardButton(text="🇷🇺 Яндекс Топ Россия", callback_data=ChartCb(src="vk", p=0).pack())],
         [InlineKeyboardButton(text="◁ Меню", callback_data="action:menu")],
     ])
 

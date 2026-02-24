@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     SPOTIFY_CLIENT_ID: Optional[str] = None
     SPOTIFY_CLIENT_SECRET: Optional[str] = None
 
+    # ── Yandex Music ──────────────────────────────────────────────────────
+    YANDEX_MUSIC_TOKEN: Optional[str] = None
+
     # ── Premium (Telegram Stars) ─────────────────────────────────────────
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)
     PREMIUM_DAYS: int = 30
