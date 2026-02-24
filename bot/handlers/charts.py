@@ -46,28 +46,92 @@ class ChartDl(CallbackData, prefix="cd"):
 # ── Chart fetchers ───────────────────────────────────────────────────────
 
 async def _fetch_shazam() -> list[dict]:
-    """Fetch Shazam Top 50 (world) via public API."""
-    url = "https://www.shazam.com/services/charts/v1/top/world"
+    """Fetch Shazam Top 200 (world) via public discovery API."""
+    # Primary: Shazam discovery API (more reliable)
+    urls = [
+        "https://www.shazam.com/services/charts/v1/top/world?pageSize=50&startFrom=0",
+        "https://www.shazam.com/services/charts/v1/top/RU?pageSize=50&startFrom=0",
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    for url in urls:
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status != 200:
+                        logger.warning("Shazam API %s returned %s", url, resp.status)
+                        continue
+                    data = await resp.json(content_type=None)
+        except Exception as e:
+            logger.error("Shazam fetch error (%s): %s", url, e)
+            continue
+
+        tracks = []
+        # Try multiple response formats
+        chart = data.get("chart") or data.get("tracks") or data.get("data") or []
+        for item in chart[:50]:
+            # Format 1: heading.title / heading.subtitle
+            heading = item.get("heading", {})
+            title = heading.get("title") or item.get("title") or item.get("track", "Unknown")
+            artist = heading.get("subtitle") or item.get("subtitle") or item.get("artist", "Unknown")
+            if title != "Unknown":
+                tracks.append({
+                    "title": title,
+                    "artist": artist,
+                    "query": f"{artist} - {title}",
+                })
+        if tracks:
+            return tracks
+
+    # Fallback: use yt-dlp to fetch Shazam Top 50 playlist from YouTube
+    logger.info("Shazam API failed, falling back to YouTube playlist")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_ytdl_pool, _fetch_shazam_yt_fallback)
+
+
+def _fetch_shazam_yt_fallback() -> list[dict]:
+    """Fetch Shazam Top 50 via YouTube search for Shazam playlist."""
+    import yt_dlp
+    from bot.services.downloader import _base_opts
+
+    # Search for top Shazam songs
+    opts = {
+        "extract_flat": "in_playlist",
+        "quiet": True,
+        "no_warnings": True,
+        "default_search": "ytsearch50",
+        "socket_timeout": 15,
+        **_base_opts(),
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    logger.warning("Shazam API returned %s", resp.status)
-                    return []
-                data = await resp.json(content_type=None)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info("Shazam Top 50 2026", download=False)
+            entries = info.get("entries", []) if info else []
     except Exception as e:
-        logger.error("Shazam fetch error: %s", e)
+        logger.error("Shazam YT fallback error: %s", e)
         return []
 
     tracks = []
-    for item in data.get("chart", [])[:50]:
-        heading = item.get("heading", {})
-        title = heading.get("title", "Unknown")
-        artist = heading.get("subtitle", "Unknown")
+    for entry in entries[:50]:
+        if not entry:
+            continue
+        raw_title = entry.get("title", "Unknown")
+        uploader = entry.get("uploader") or entry.get("channel") or ""
+        for sep in (" — ", " – ", " - "):
+            if sep in raw_title:
+                parts = raw_title.split(sep, 1)
+                artist, title = parts[0].strip(), parts[1].strip()
+                break
+        else:
+            artist, title = uploader, raw_title
         tracks.append({
             "title": title,
             "artist": artist,
             "query": f"{artist} - {title}",
+            "video_id": entry.get("id", ""),
         })
     return tracks
 
@@ -122,62 +186,62 @@ async def _fetch_youtube() -> list[dict]:
 
 
 async def _fetch_vk() -> list[dict]:
-    """Fetch VK Music Chart via public chart page."""
-    url = "https://api.vk.com/method/audio.getPopular"
-    # VK API requires access token; use chart scraping as fallback
-    # For now we use a curated search approach
-    try:
-        async with aiohttp.ClientSession() as session:
-            # VK chart endpoint (public, no auth for chart page data)
-            chart_url = "https://vk.com/al_audio.php?act=section&al=1&claim=0&is_layer=0&owner_id=0&section=chart"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "X-Requested-With": "XMLHttpRequest",
-            }
-            async with session.post(chart_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                text = await resp.text()
-    except Exception as e:
-        logger.error("VK chart fetch error: %s", e)
-        return []
-
-    # Fallback: hardcoded current popular Russian music queries
-    # VK's internal API is complex; we fetch a curated chart via search
-    return await _vk_chart_fallback()
-
-
-async def _vk_chart_fallback() -> list[dict]:
-    """Curated VK chart — top trending Russian/CIS tracks.
-    Updated from popular playlists; cached for 6h."""
-    # Use yt-dlp to extract VK music chart playlist
-    # VK Chart playlist on YouTube Music (Russian chart mirror)
+    """Fetch Russian/CIS music chart via yt-dlp YouTube search."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_ytdl_pool, _fetch_vk_sync)
+    return await loop.run_in_executor(_ytdl_pool, _fetch_russia_sync)
 
 
-def _fetch_vk_sync() -> list[dict]:
-    """Fetch Russian chart via yt-dlp from YouTube Music Russia chart."""
+def _fetch_russia_sync() -> list[dict]:
+    """Fetch trending Russian music via yt-dlp search."""
     import yt_dlp
     from bot.services.downloader import _base_opts
 
-    # YouTube Music Charts: Russia
-    playlist_url = "https://www.youtube.com/playlist?list=PLrAXtmErZgOeGMWkz5ySXfuaL3H-CQE_d"
-    opts = {
-        "extract_flat": "in_playlist",
-        "quiet": True,
-        "no_warnings": True,
-        "playlistend": 50,
-        **_base_opts(),
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(playlist_url, download=False)
-            entries = info.get("entries", []) if info else []
-    except Exception as e:
-        logger.error("VK/Russia chart fetch error: %s", e)
-        return []
+    # Try multiple known Russian chart playlists
+    playlist_urls = [
+        # YouTube Music Top Songs - Russia
+        "https://www.youtube.com/playlist?list=PLw-VjHDlEOgtYfGcmRbz3PS1MKx31KP-9",
+        # Trending music Russia
+        "https://www.youtube.com/playlist?list=PLw-VjHDlEOgs658kAHR_LAaILBXb-s6Q5",
+    ]
+
+    for playlist_url in playlist_urls:
+        opts = {
+            "extract_flat": "in_playlist",
+            "quiet": True,
+            "no_warnings": True,
+            "playlistend": 50,
+            **_base_opts(),
+        }
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(playlist_url, download=False)
+                entries = info.get("entries", []) if info else []
+                if entries:
+                    break
+        except Exception as e:
+            logger.warning("Russia chart playlist %s failed: %s", playlist_url, e)
+            entries = []
+
+    if not entries:
+        # Last resort: search for trending Russian music
+        opts = {
+            "extract_flat": "in_playlist",
+            "quiet": True,
+            "no_warnings": True,
+            "default_search": "ytsearch50",
+            "socket_timeout": 15,
+            **_base_opts(),
+        }
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info("русский хит чарт 2026 топ", download=False)
+                entries = info.get("entries", []) if info else []
+        except Exception as e:
+            logger.error("Russia chart search fallback error: %s", e)
+            return []
 
     tracks = []
-    for entry in entries:
+    for entry in entries[:50]:
         if not entry:
             continue
         raw_title = entry.get("title", "Unknown")
