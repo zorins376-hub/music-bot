@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 
@@ -45,10 +46,18 @@ class ChartDl(CallbackData, prefix="cd"):
 
 # ── Chart fetchers ───────────────────────────────────────────────────────
 
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 
-def _parse_yt_entries(entries: list) -> list[dict]:
+
+def _has_cyrillic(text: str) -> bool:
+    """Check if text contains at least one Cyrillic character."""
+    return bool(_CYRILLIC_RE.search(text))
+
+
+def _parse_yt_entries(entries: list, cyrillic_only: bool = False) -> list[dict]:
     """Parse yt-dlp playlist entries into chart track dicts.
-    Filters out compilations (duration > 8 min) and keeps only individual songs."""
+    Filters out compilations (duration > 8 min) and keeps only individual songs.
+    If cyrillic_only=True, keeps only tracks with Cyrillic in artist or title."""
     tracks = []
     for entry in entries:
         if not entry:
@@ -66,6 +75,8 @@ def _parse_yt_entries(entries: list) -> list[dict]:
                 break
         else:
             artist, title = uploader, raw_title
+        if cyrillic_only and not (_has_cyrillic(artist) or _has_cyrillic(title)):
+            continue
         tracks.append({
             "title": title,
             "artist": artist,
@@ -107,24 +118,25 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
     return tracks
 
 
-def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 50) -> list[dict]:
+def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 50, cyrillic_only: bool = False) -> list[dict]:
     """Try multiple YouTube playlists, return first that works. Individual songs only."""
     import yt_dlp
     from bot.services.downloader import _base_opts
 
+    fetch_extra = 80 if cyrillic_only else 20
     for playlist_url in playlist_urls:
         opts = {
             "extract_flat": "in_playlist",
             "quiet": True,
             "no_warnings": True,
-            "playlistend": max_tracks + 20,  # extra to compensate filtered
+            "playlistend": max_tracks + fetch_extra,
             **_base_opts(),
         }
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(playlist_url, download=False)
                 entries = info.get("entries", []) if info else []
-                tracks = _parse_yt_entries(entries)
+                tracks = _parse_yt_entries(entries, cyrillic_only=cyrillic_only)
                 if tracks:
                     return tracks[:max_tracks]
         except Exception as e:
@@ -156,17 +168,20 @@ async def _fetch_youtube() -> list[dict]:
 
 
 async def _fetch_vk() -> list[dict]:
-    """Топ Россия — Apple Music Russia chart + YouTube playlist fallback."""
+    """Топ Россия — only Russian-language tracks (Cyrillic filter)."""
     tracks = await _fetch_apple_chart("ru")
     if tracks:
-        return tracks
-    # Fallback: YouTube playlists with Russian music
+        # Keep only tracks with Cyrillic in artist or title
+        ru_tracks = [t for t in tracks if _has_cyrillic(t["artist"]) or _has_cyrillic(t["title"])]
+        if ru_tracks:
+            return ru_tracks
+    # Fallback: YouTube playlists with Russian music (cyrillic filter)
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_ytdl_pool, _fetch_yt_playlist_sync, [
         "https://www.youtube.com/playlist?list=PLw-VjHDlEOgtYfGcmRbz3PS1MKx31KP-9",
         "https://www.youtube.com/playlist?list=PLw-VjHDlEOgs658kAHR_LAaILBXb-s6Q5",
         "https://www.youtube.com/playlist?list=PLFgquLnL59alW3K6d_KtHnMBBxV2PJfBI",
-    ])
+    ], 50, True)
 
 
 _CHART_FETCHERS = {
