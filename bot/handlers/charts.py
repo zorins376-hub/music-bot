@@ -226,16 +226,132 @@ async def _fetch_yandex_chart() -> list[dict]:
         return []
 
 
+async def _fetch_rusradio() -> list[dict]:
+    """Русское Радио — Золотой Граммофон (voting chart)."""
+    url = "https://rusradio.ru/charts/golosujte-za-treki"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    logger.warning("Rusradio chart: HTTP %s", resp.status)
+                    return []
+                html = await resp.text()
+    except Exception as e:
+        logger.error("Rusradio chart fetch error: %s", e)
+        return []
+
+    tracks: list[dict] = []
+    seen: set[str] = set()
+
+    # Voting entries: each starts with a cover image from rusradio.ru/b/d/ path,
+    # followed by title text, artist text, vote count, then "ГОЛОСОВАТЬ" button.
+    # Promo/news images also use /b/d/ but are far from a ГОЛОСОВАТЬ button.
+    parts = re.split(r"rusradio\.ru/b/d/\S+?\.webp", html)
+    for chunk in parts[1:]:
+        gpos = chunk.find("ГОЛОСОВАТЬ")
+        if gpos < 0 or gpos > 2000:  # not a voting entry
+            continue
+        block = chunk[:gpos]
+        text = re.sub(r"<[^>]+>", "\n", block)
+        lines = [
+            ln.strip() for ln in text.splitlines()
+            if ln.strip()
+            and re.search(r"[А-Яа-яA-Za-z]", ln)
+            and 2 <= len(ln.strip()) <= 80
+            and not ln.strip().startswith("http")
+            and not ln.strip().isdigit()
+        ]
+        if len(lines) < 2:
+            continue
+        title, artist = lines[0], lines[1]
+        key = f"{artist}\t{title}"
+        if key in seen:
+            continue
+        seen.add(key)
+        tracks.append({"title": title, "artist": artist, "query": f"{artist} - {title}"})
+        if len(tracks) >= 50:
+            break
+
+    if not tracks:
+        logger.warning("Rusradio chart: no voting tracks parsed")
+    return tracks
+
+
+def _parse_radio_json(data: object) -> list[dict]:
+    """Best-effort parser for radio station track JSON."""
+    if isinstance(data, dict):
+        items = (data.get("items") or data.get("tracks") or
+                 data.get("data") or data.get("results") or [])
+    elif isinstance(data, list):
+        items = data
+    else:
+        return []
+    tracks = []
+    for item in items[:50]:
+        if not isinstance(item, dict):
+            continue
+        title = (item.get("title") or item.get("name") or
+                 item.get("song") or item.get("trackName") or "")
+        artist = (item.get("artist") or item.get("performer") or
+                  item.get("artistName") or item.get("author") or "")
+        if title and artist:
+            tracks.append({
+                "title": str(title).strip(),
+                "artist": str(artist).strip(),
+                "query": f"{artist} - {title}",
+            })
+    return tracks
+
+
+async def _fetch_europa() -> list[dict]:
+    """Европа Плюс TOP40 — пробуем API, иначе Apple Music UK."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://europaplus.ru/playlist",
+    }
+    for api_url in [
+        "https://europaplus.ru/api/v1/playlist?limit=50",
+        "https://europaplus.ru/api/v1/broadcast/history?limit=50",
+    ]:
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(api_url, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        tracks = _parse_radio_json(data)
+                        if tracks:
+                            return tracks
+        except Exception:
+            pass
+
+    # Fallback: Apple Music UK (European pop, closer to Europa Plus style)
+    return await _fetch_apple_chart("gb")
+
+
 _CHART_FETCHERS = {
     "shazam": _fetch_shazam,
     "youtube": _fetch_youtube,
     "vk": _fetch_vk,
+    "rusradio": _fetch_rusradio,
+    "europa": _fetch_europa,
 }
 
 _CHART_LABELS = {
     "shazam": "🎵 Apple Music Global Top",
     "youtube": "▶ YouTube Music Top",
     "vk": "🇷🇺 Яндекс Топ Россия",
+    "rusradio": "📻 Русское Радио — Золотой Граммофон",
+    "europa": "🎶 Европа Плюс TOP40",
 }
 
 
@@ -264,6 +380,8 @@ def _chart_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎵 Apple Music Global", callback_data=ChartCb(src="shazam", p=0).pack())],
         [InlineKeyboardButton(text="▶ YouTube Music Top", callback_data=ChartCb(src="youtube", p=0).pack())],
         [InlineKeyboardButton(text="🇷🇺 Яндекс Топ Россия", callback_data=ChartCb(src="vk", p=0).pack())],
+        [InlineKeyboardButton(text="📻 Русское Радио", callback_data=ChartCb(src="rusradio", p=0).pack())],
+        [InlineKeyboardButton(text="🎶 Европа Плюс TOP40", callback_data=ChartCb(src="europa", p=0).pack())],
         [InlineKeyboardButton(text="◁ Меню", callback_data="action:menu")],
     ])
 
