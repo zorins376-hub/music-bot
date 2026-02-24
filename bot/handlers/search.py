@@ -29,8 +29,15 @@ router = Router()
 _GROUP_CLEANUP_SEC = 60
 
 # Search result limits
-_MAX_RESULTS_PRIVATE = 10   # Show all versions: original, remix, extended, slow etc.
 _MAX_RESULTS_GROUP = 1      # In groups — just one track
+
+
+async def _get_bot_setting(key: str, default: str) -> str:
+    """Read admin-set setting from Redis (same keys as admin panel)."""
+    val = await cache.redis.get(f"bot:setting:{key}")
+    if val:
+        return val if isinstance(val, str) else val.decode()
+    return default
 
 # session_id → {chat_id, user_msg_id, status_msg_id}
 _group_sessions: dict[str, dict] = {}
@@ -86,6 +93,9 @@ def _track_caption(lang: str, track_info: dict, bitrate: int) -> str:
     return t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
 
 
+_SEARCH_LOGO = "\u25c9 <b>BLACK ROOM</b>"
+
+
 def _build_results_keyboard(results: list[dict], session_id: str) -> InlineKeyboardMarkup:
     buttons = []
     for i, track in enumerate(results):
@@ -132,7 +142,10 @@ async def _do_search(message: Message, query: str) -> None:
         status = await message.answer(t(lang, "searching"))
 
     is_group = message.chat.type in ("group", "supergroup")
-    max_results = _MAX_RESULTS_GROUP if is_group else _MAX_RESULTS_PRIVATE
+    if is_group:
+        max_results = _MAX_RESULTS_GROUP
+    else:
+        max_results = int(await _get_bot_setting("max_results", "10"))
 
     # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
     local_tracks = await search_local_tracks(query, limit=max_results)
@@ -161,7 +174,9 @@ async def _do_search(message: Message, query: str) -> None:
         await cache.store_search(session_id, results)
         keyboard = _build_results_keyboard(results, session_id)
         await status.edit_text(
-            f"{t(lang, 'found_local')}\n<b>{query}</b>",
+            f"{_SEARCH_LOGO}\n\n"
+            f"{t(lang, 'found_local')}\n"
+            f"\u25b8 <b>{query}</b> ({len(results)})",
             reply_markup=keyboard,
             parse_mode="HTML",
         )
@@ -198,8 +213,11 @@ async def _do_search(message: Message, query: str) -> None:
     session_id = secrets.token_urlsafe(6)
     await cache.store_search(session_id, results)
     keyboard = _build_results_keyboard(results, session_id)
+    source_tag = "▸ YouTube" if results[0].get("source") != "soundcloud" else "▸ SoundCloud"
     await status.edit_text(
-        f"<b>{t(lang, 'search_results')}:</b> {query}",
+        f"{_SEARCH_LOGO}\n\n"
+        f"<b>{t(lang, 'search_results')}:</b> {query}\n"
+        f"{source_tag} \u00b7 {len(results)} \u0442\u0440\u0435\u043a\u043e\u0432",
         reply_markup=keyboard,
         parse_mode="HTML",
     )
@@ -210,7 +228,8 @@ async def _group_auto_play(
 ) -> None:
     """In groups: download and send the first track immediately, then clean up."""
     lang = user.language
-    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else settings.DEFAULT_BITRATE
+    default_br = int(await _get_bot_setting("default_bitrate", "192"))
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else default_br
     video_id = track_info["video_id"]
 
     # Local file_id (channel tracks)
@@ -375,7 +394,8 @@ async def handle_track_select(
 
     track_info = results[callback_data.i]
     video_id = track_info["video_id"]
-    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else settings.DEFAULT_BITRATE
+    default_br = int(await _get_bot_setting("default_bitrate", "192"))
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else default_br
 
     # If track already has a file_id from local DB (channel tracks)
     local_fid = track_info.get("file_id")

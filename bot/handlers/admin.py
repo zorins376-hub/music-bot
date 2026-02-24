@@ -247,12 +247,54 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="◑ Режим эфира", callback_data="adm:mode"),
+                InlineKeyboardButton(text="≡ Настройки", callback_data="adm:settings"),
             ],
             [
                 InlineKeyboardButton(text="◁ Назад", callback_data="adm:back"),
             ],
         ]
     )
+
+
+# ── Admin content settings (stored in Redis) ──────────────────────────────────
+
+_SETTINGS_KEYS = {
+    "max_results": {"label": "Макс. результатов", "default": "10", "options": ["5", "10", "15", "20"]},
+    "max_duration": {"label": "Макс. длина трека (сек)", "default": "600", "options": ["300", "600", "900", "1200"]},
+    "default_bitrate": {"label": "Битрейт по умолч.", "default": "192", "options": ["128", "192", "320"]},
+    "search_source": {"label": "Источник поиска", "default": "all", "options": ["all", "youtube", "soundcloud"]},
+}
+
+
+async def _get_setting(key: str) -> str:
+    val = await cache.redis.get(f"bot:setting:{key}")
+    if val:
+        return val if isinstance(val, str) else val.decode()
+    return _SETTINGS_KEYS[key]["default"]
+
+
+async def _set_setting(key: str, value: str) -> None:
+    await cache.redis.set(f"bot:setting:{key}", value)
+
+
+async def _build_settings_text() -> str:
+    lines = ["<b>≡ Настройки контента</b>\n"]
+    for key, meta in _SETTINGS_KEYS.items():
+        val = await _get_setting(key)
+        lines.append(f"  {meta['label']}: <b>{val}</b>")
+    lines.append("\nНажми на параметр чтобы изменить:")
+    return "\n".join(lines)
+
+
+def _build_settings_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for key, meta in _SETTINGS_KEYS.items():
+        rows.append([InlineKeyboardButton(
+            text=f"≡ {meta['label']}",
+            callback_data=f"adm:set:{key}",
+        )])
+    rows.append([InlineKeyboardButton(text="◁ Админ-панель", callback_data="action:admin")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.message(Command("admin"))
@@ -439,11 +481,23 @@ async def handle_admin_panel(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     await callback.answer()
-    await callback.message.answer(
-        "<b>◆ Админ-панель</b>\n\nВыбери действие:",
-        reply_markup=_admin_panel_keyboard(),
-        parse_mode="HTML",
-    )
+    try:
+        await callback.message.edit_text(
+            "<b>◆ Админ-панель</b>\n\nВыбери действие:",
+            reply_markup=_admin_panel_keyboard(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await callback.message.answer(
+            "<b>◆ Админ-панель</b>\n\nВыбери действие:",
+            reply_markup=_admin_panel_keyboard(),
+            parse_mode="HTML",
+        )
+
+
+_back_to_panel_kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="◁ Админ-панель", callback_data="action:admin")],
+])
 
 
 @router.callback_query(lambda c: c.data == "adm:stats")
@@ -453,7 +507,10 @@ async def handle_adm_stats(callback: CallbackQuery) -> None:
         return
     await callback.answer()
     text = await _build_detailed_stats()
-    await callback.message.answer(text, parse_mode="HTML")
+    try:
+        await callback.message.edit_text(text, reply_markup=_back_to_panel_kb, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=_back_to_panel_kb, parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "adm:skip")
@@ -463,7 +520,13 @@ async def handle_adm_skip(callback: CallbackQuery) -> None:
         return
     await callback.answer()
     await cache.redis.publish("radio:cmd", "skip")
-    await callback.message.answer("▸▸ Команда skip отправлена в эфир.")
+    try:
+        await callback.message.edit_text(
+            "▸▸ Команда skip отправлена в эфир.",
+            reply_markup=_back_to_panel_kb,
+        )
+    except Exception:
+        await callback.message.answer("▸▸ Команда skip отправлена в эфир.", reply_markup=_back_to_panel_kb)
 
 
 @router.callback_query(lambda c: c.data == "adm:queue")
@@ -487,7 +550,14 @@ async def handle_adm_queue(callback: CallbackQuery) -> None:
         if not items:
             lines.append("  (пусто)")
         lines.append("")
-    await callback.message.answer("\n".join(lines), parse_mode="HTML")
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), reply_markup=_back_to_panel_kb, parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), reply_markup=_back_to_panel_kb, parse_mode="HTML"
+        )
 
 
 @router.callback_query(lambda c: c.data == "adm:back")
@@ -495,11 +565,18 @@ async def handle_adm_back(callback: CallbackQuery) -> None:
     await callback.answer()
     from bot.handlers.start import _main_menu
     user = await get_or_create_user(callback.from_user)
-    await callback.message.answer(
-        t(user.language, "start_message", name=callback.from_user.first_name or ""),
-        reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id)),
-        parse_mode="HTML",
-    )
+    try:
+        await callback.message.edit_text(
+            t(user.language, "start_message", name=callback.from_user.first_name or ""),
+            reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id)),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await callback.message.answer(
+            t(user.language, "start_message", name=callback.from_user.first_name or ""),
+            reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id)),
+            parse_mode="HTML",
+        )
 
 
 # ── Admin user list with premium toggle ────────────────────────────────────────
@@ -598,6 +675,31 @@ async def handle_revoke_premium(callback: CallbackQuery, callback_data: AdmUserC
         pass
 
 
+@router.callback_query(lambda c: c.data and c.data.startswith("adm:set:"))
+async def handle_adm_set(callback: CallbackQuery) -> None:
+    """Cycle through setting options."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    key = callback.data.split("adm:set:", 1)[1]
+    if key not in _SETTINGS_KEYS:
+        await callback.answer("Неизвестный параметр")
+        return
+    meta = _SETTINGS_KEYS[key]
+    current = await _get_setting(key)
+    opts = meta["options"]
+    idx = opts.index(current) if current in opts else 0
+    new_val = opts[(idx + 1) % len(opts)]
+    await _set_setting(key, new_val)
+    await callback.answer(f"{meta['label']}: {new_val}")
+    text = await _build_settings_text()
+    kb = _build_settings_keyboard()
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("adm:"))
 async def handle_adm_prompt(callback: CallbackQuery) -> None:
     """Handle admin buttons that need text input — show instructions."""
@@ -612,7 +714,16 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
         "adm:load": None,  # handled separately below
         "adm:trackmenu": None,  # handled separately below
+        "adm:settings": None,  # handled separately above
     }
+    if callback.data == "adm:settings":
+        text = await _build_settings_text()
+        kb = _build_settings_keyboard()
+        try:
+            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        return
     if callback.data == "adm:trackmenu":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
