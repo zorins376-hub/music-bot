@@ -45,125 +45,20 @@ class ChartDl(CallbackData, prefix="cd"):
 
 # ── Chart fetchers ───────────────────────────────────────────────────────
 
-async def _fetch_shazam() -> list[dict]:
-    """Fetch Shazam Top 200 (world) via public discovery API."""
-    # Primary: Shazam discovery API (more reliable)
-    urls = [
-        "https://www.shazam.com/services/charts/v1/top/world?pageSize=50&startFrom=0",
-        "https://www.shazam.com/services/charts/v1/top/RU?pageSize=50&startFrom=0",
-    ]
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    for url in urls:
-        try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status != 200:
-                        logger.warning("Shazam API %s returned %s", url, resp.status)
-                        continue
-                    data = await resp.json(content_type=None)
-        except Exception as e:
-            logger.error("Shazam fetch error (%s): %s", url, e)
-            continue
 
-        tracks = []
-        # Try multiple response formats
-        chart = data.get("chart") or data.get("tracks") or data.get("data") or []
-        for item in chart[:50]:
-            # Format 1: heading.title / heading.subtitle
-            heading = item.get("heading", {})
-            title = heading.get("title") or item.get("title") or item.get("track", "Unknown")
-            artist = heading.get("subtitle") or item.get("subtitle") or item.get("artist", "Unknown")
-            if title != "Unknown":
-                tracks.append({
-                    "title": title,
-                    "artist": artist,
-                    "query": f"{artist} - {title}",
-                })
-        if tracks:
-            return tracks
-
-    # Fallback: use yt-dlp to fetch Shazam Top 50 playlist from YouTube
-    logger.info("Shazam API failed, falling back to YouTube playlist")
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_ytdl_pool, _fetch_shazam_yt_fallback)
-
-
-def _fetch_shazam_yt_fallback() -> list[dict]:
-    """Fetch Shazam Top 50 via YouTube search for Shazam playlist."""
-    import yt_dlp
-    from bot.services.downloader import _base_opts
-
-    # Search for top Shazam songs
-    opts = {
-        "extract_flat": "in_playlist",
-        "quiet": True,
-        "no_warnings": True,
-        "default_search": "ytsearch50",
-        "socket_timeout": 15,
-        **_base_opts(),
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info("Shazam Top 50 2026", download=False)
-            entries = info.get("entries", []) if info else []
-    except Exception as e:
-        logger.error("Shazam YT fallback error: %s", e)
-        return []
-
-    tracks = []
-    for entry in entries[:50]:
-        if not entry:
-            continue
-        raw_title = entry.get("title", "Unknown")
-        uploader = entry.get("uploader") or entry.get("channel") or ""
-        for sep in (" — ", " – ", " - "):
-            if sep in raw_title:
-                parts = raw_title.split(sep, 1)
-                artist, title = parts[0].strip(), parts[1].strip()
-                break
-        else:
-            artist, title = uploader, raw_title
-        tracks.append({
-            "title": title,
-            "artist": artist,
-            "query": f"{artist} - {title}",
-            "video_id": entry.get("id", ""),
-        })
-    return tracks
-
-
-def _fetch_youtube_sync() -> list[dict]:
-    """Fetch YouTube Music Global Top 100 via yt-dlp (sync, runs in thread)."""
-    import yt_dlp
-    from bot.services.downloader import _base_opts
-
-    playlist_url = "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
-    opts = {
-        "extract_flat": "in_playlist",
-        "quiet": True,
-        "no_warnings": True,
-        "playlistend": 50,
-        **_base_opts(),
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(playlist_url, download=False)
-            entries = info.get("entries", []) if info else []
-    except Exception as e:
-        logger.error("YouTube chart fetch error: %s", e)
-        return []
-
+def _parse_yt_entries(entries: list) -> list[dict]:
+    """Parse yt-dlp playlist entries into chart track dicts.
+    Filters out compilations (duration > 8 min) and keeps only individual songs."""
     tracks = []
     for entry in entries:
         if not entry:
             continue
+        # Skip compilations / mixes (> 8 minutes)
+        dur = entry.get("duration") or 0
+        if dur and dur > 480:
+            continue
         raw_title = entry.get("title", "Unknown")
         uploader = entry.get("uploader") or entry.get("channel") or ""
-        # Try to split "Artist - Title"
         for sep in (" — ", " – ", " - "):
             if sep in raw_title:
                 parts = raw_title.split(sep, 1)
@@ -180,86 +75,98 @@ def _fetch_youtube_sync() -> list[dict]:
     return tracks
 
 
-async def _fetch_youtube() -> list[dict]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_ytdl_pool, _fetch_youtube_sync)
+async def _fetch_apple_chart(storefront: str) -> list[dict]:
+    """Fetch Apple Music most-played chart (individual songs, ranked).
+    storefront: 'us' for Global, 'ru' for Russia, etc."""
+    url = f"https://rss.applemonitoring.com/api/v2/{storefront}/music/most-played/100/songs.json"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    }
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    logger.warning("Apple Music RSS %s returned %s", storefront, resp.status)
+                    return []
+                data = await resp.json(content_type=None)
+    except Exception as e:
+        logger.error("Apple Music RSS error (%s): %s", storefront, e)
+        return []
+
+    results = data.get("feed", {}).get("results", [])
+    tracks = []
+    for item in results[:50]:
+        artist = item.get("artistName", "Unknown")
+        title = item.get("name", "Unknown")
+        tracks.append({
+            "title": title,
+            "artist": artist,
+            "query": f"{artist} - {title}",
+        })
+    return tracks
 
 
-async def _fetch_vk() -> list[dict]:
-    """Fetch Russian/CIS music chart via yt-dlp YouTube search."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_ytdl_pool, _fetch_russia_sync)
-
-
-def _fetch_russia_sync() -> list[dict]:
-    """Fetch trending Russian music via yt-dlp search."""
+def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 50) -> list[dict]:
+    """Try multiple YouTube playlists, return first that works. Individual songs only."""
     import yt_dlp
     from bot.services.downloader import _base_opts
-
-    # Try multiple known Russian chart playlists
-    playlist_urls = [
-        # YouTube Music Top Songs - Russia
-        "https://www.youtube.com/playlist?list=PLw-VjHDlEOgtYfGcmRbz3PS1MKx31KP-9",
-        # Trending music Russia
-        "https://www.youtube.com/playlist?list=PLw-VjHDlEOgs658kAHR_LAaILBXb-s6Q5",
-    ]
 
     for playlist_url in playlist_urls:
         opts = {
             "extract_flat": "in_playlist",
             "quiet": True,
             "no_warnings": True,
-            "playlistend": 50,
+            "playlistend": max_tracks + 20,  # extra to compensate filtered
             **_base_opts(),
         }
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(playlist_url, download=False)
                 entries = info.get("entries", []) if info else []
-                if entries:
-                    break
+                tracks = _parse_yt_entries(entries)
+                if tracks:
+                    return tracks[:max_tracks]
         except Exception as e:
-            logger.warning("Russia chart playlist %s failed: %s", playlist_url, e)
-            entries = []
+            logger.warning("YT playlist %s failed: %s", playlist_url, e)
+    return []
 
-    if not entries:
-        # Last resort: search for trending Russian music
-        opts = {
-            "extract_flat": "in_playlist",
-            "quiet": True,
-            "no_warnings": True,
-            "default_search": "ytsearch50",
-            "socket_timeout": 15,
-            **_base_opts(),
-        }
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info("русский хит чарт 2026 топ", download=False)
-                entries = info.get("entries", []) if info else []
-        except Exception as e:
-            logger.error("Russia chart search fallback error: %s", e)
-            return []
 
-    tracks = []
-    for entry in entries[:50]:
-        if not entry:
-            continue
-        raw_title = entry.get("title", "Unknown")
-        uploader = entry.get("uploader") or entry.get("channel") or ""
-        for sep in (" — ", " – ", " - "):
-            if sep in raw_title:
-                parts = raw_title.split(sep, 1)
-                artist, title = parts[0].strip(), parts[1].strip()
-                break
-        else:
-            artist, title = uploader, raw_title
-        tracks.append({
-            "title": title,
-            "artist": artist,
-            "query": f"{artist} - {title}",
-            "video_id": entry.get("id", ""),
-        })
-    return tracks
+async def _fetch_shazam() -> list[dict]:
+    """Shazam Top 50 — Apple Music global chart (same ecosystem)."""
+    # Apple Music most-played = closely mirrors Shazam chart
+    tracks = await _fetch_apple_chart("us")
+    if tracks:
+        return tracks
+    # Fallback: YouTube playlist extraction
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_ytdl_pool, _fetch_yt_playlist_sync, [
+        "https://www.youtube.com/playlist?list=PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
+        "https://www.youtube.com/playlist?list=PLhsz9CILh0673e1Hxlz54h0ldGpc4AMR0",
+    ])
+
+
+async def _fetch_youtube() -> list[dict]:
+    """YouTube Music Global Top — official trending playlist."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_ytdl_pool, _fetch_yt_playlist_sync, [
+        "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+        "https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+    ])
+
+
+async def _fetch_vk() -> list[dict]:
+    """Топ Россия — Apple Music Russia chart + YouTube playlist fallback."""
+    tracks = await _fetch_apple_chart("ru")
+    if tracks:
+        return tracks
+    # Fallback: YouTube playlists with Russian music
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_ytdl_pool, _fetch_yt_playlist_sync, [
+        "https://www.youtube.com/playlist?list=PLw-VjHDlEOgtYfGcmRbz3PS1MKx31KP-9",
+        "https://www.youtube.com/playlist?list=PLw-VjHDlEOgs658kAHR_LAaILBXb-s6Q5",
+        "https://www.youtube.com/playlist?list=PLFgquLnL59alW3K6d_KtHnMBBxV2PJfBI",
+    ])
 
 
 _CHART_FETCHERS = {
@@ -269,8 +176,8 @@ _CHART_FETCHERS = {
 }
 
 _CHART_LABELS = {
-    "shazam": "🎵 Shazam Top 50",
-    "youtube": "▶ YouTube Music Top 50",
+    "shazam": "🎵 Apple Music Global Top",
+    "youtube": "▶ YouTube Music Top",
     "vk": "🇷🇺 Топ Россия",
 }
 
@@ -297,7 +204,7 @@ async def _get_chart(source: str) -> list[dict]:
 
 def _chart_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎵 Shazam Top 50", callback_data=ChartCb(src="shazam", p=0).pack())],
+        [InlineKeyboardButton(text="🎵 Apple Music Global", callback_data=ChartCb(src="shazam", p=0).pack())],
         [InlineKeyboardButton(text="▶ YouTube Music Top", callback_data=ChartCb(src="youtube", p=0).pack())],
         [InlineKeyboardButton(text="🇷🇺 Топ Россия", callback_data=ChartCb(src="vk", p=0).pack())],
         [InlineKeyboardButton(text="◁ Меню", callback_data="action:menu")],
