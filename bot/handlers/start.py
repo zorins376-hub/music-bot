@@ -25,9 +25,10 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
-            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
+            InlineKeyboardButton(text="🎦 Видео", callback_data="action:video"),
         ],
         [
+            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
             InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
         ],
         [

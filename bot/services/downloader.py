@@ -275,6 +275,51 @@ async def download_track(video_id: str, bitrate: int = 192) -> Path:
     )
 
 
+# ── Video download ──────────────────────────────────────────────────────
+
+def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
+    """Download YouTube video as mp4. quality: 360 / 480 / 720."""
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    height = int(quality)
+    output_template = str(output_dir / f"{video_id}_v{quality}.%(ext)s")
+    ydl_opts = {
+        "format": f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best[height<={height}]",
+        "outtmpl": output_template,
+        "merge_output_format": "mp4",
+        "postprocessors": [{"key": "FFmpegMetadata"}],
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 30,
+        "concurrent_fragment_downloads": 4,
+        **_base_opts(),
+        "match_filter": yt_dlp.utils.match_filter_func(
+            f"duration <= {settings.MAX_DURATION}"
+        ),
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        logger.error("Video download failed for %s: %s", video_id, e)
+        raise
+
+    mp4_path = output_dir / f"{video_id}_v{quality}.mp4"
+    if mp4_path.exists():
+        return mp4_path
+    # yt-dlp might have used a different extension; find it
+    for f in output_dir.glob(f"{video_id}_v{quality}.*"):
+        if f.suffix in (".mp4", ".mkv", ".webm"):
+            return f
+    raise FileNotFoundError(f"Video not found after download: {video_id}")
+
+
+async def download_video(video_id: str, quality: str = "480") -> Path:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _ytdl_pool, _download_video_sync, video_id, settings.DOWNLOAD_DIR, quality
+    )
+
+
 def cleanup_file(path: Path) -> None:
     try:
         path.unlink(missing_ok=True)

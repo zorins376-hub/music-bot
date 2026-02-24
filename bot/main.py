@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
 from bot.config import settings as app_settings
-from bot.handlers import admin, charts, history, inline, search, start
+from bot.handlers import admin, charts, history, inline, search, start, video
 from bot.handlers import radio, premium, recommend, playlist
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
@@ -44,6 +44,7 @@ async def on_startup(bot: Bot) -> None:
     private_commands = [
         BotCommand(command="start", description="◉ Главное меню"),
         BotCommand(command="search", description="◈ Найти трек"),
+        BotCommand(command="video", description="🎦 Найти клип"),
         BotCommand(command="top", description="◆ Топ треков"),
         BotCommand(command="charts", description="🏆 Топ-чарты"),
         BotCommand(command="history", description="▹ Мои запросы"),
@@ -58,6 +59,7 @@ async def on_startup(bot: Bot) -> None:
     # Register bot commands for group chats
     group_commands = [
         BotCommand(command="search", description="◈ Найти трек"),
+        BotCommand(command="video", description="🎦 Найти клип"),
         BotCommand(command="top", description="◆ Топ треков"),
     ]
     await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
@@ -94,6 +96,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(recommend.router)  # AI DJ
     dp.include_router(settings_handler.router)  # /settings (quality)
     dp.include_router(charts.router)              # Top charts
+    dp.include_router(video.router)                # Video search & download
     dp.include_router(search.router)
     dp.include_router(inline.router)
     dp.include_router(history.router)
