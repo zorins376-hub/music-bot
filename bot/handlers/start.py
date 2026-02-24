@@ -28,6 +28,9 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
         ],
         [
+            InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
+        ],
+        [
             InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
             InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
         ],
@@ -100,6 +103,32 @@ async def handle_search_button(callback: CallbackQuery) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
     await callback.message.answer(t(user.language, "search_prompt"))
+
+
+@router.callback_query(lambda c: c.data == "action:charts")
+async def handle_charts_button(callback: CallbackQuery) -> None:
+    from bot.handlers.charts import cmd_charts
+    await callback.answer()
+    await cmd_charts(callback.message)
+
+
+@router.callback_query(lambda c: c.data == "action:menu")
+async def handle_menu_button(callback: CallbackQuery) -> None:
+    user = await get_or_create_user(callback.from_user)
+    admin = is_admin(callback.from_user.id, callback.from_user.username)
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            t(user.language, "start_message", name=callback.from_user.first_name or ""),
+            reply_markup=_main_menu(user.language, admin=admin),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await callback.message.answer(
+            t(user.language, "start_message", name=callback.from_user.first_name or ""),
+            reply_markup=_main_menu(user.language, admin=admin),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(lambda c: c.data == "action:top")
