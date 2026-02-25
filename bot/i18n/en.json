@@ -1,6 +1,6 @@
 {
   "start_message": "◉ <b>BLACK ROOM RADIO BOT</b>\n\nHey, {name}!\n\nYour personal DJ in Telegram.\nThree sources. One bot.\n\n<i>TEQUILA MUSIC · FULLMOON TRIP SOUND · BLACK ROOM</i>",
-  "help_message": "<b>Commands:</b>\n/search &lt;query&gt; — search for a track\n/top — top tracks\n/history — your recent searches\n/settings — audio quality\n/lang — change language\n/help — this message\n\n<b>In DM:</b> just type a track name\n<b>In groups:</b> <code>play Drake</code> or /search Drake",
+  "help_message": "<b>Commands:</b>\n/search &lt;query&gt; — search for a track\n/top — top tracks\n/history — your recent searches\n/settings — audio quality\n/lang — change language\n/help — this message\n\n<b>Recognition:</b> send a voice message, audio or video — the bot will identify the track via Shazam and download it\n\n<b>In DM:</b> just type a track name\n<b>In groups:</b> <code>play Drake</code> or /search Drake",
   "search_prompt": "Type a track name or artist:",
   "searching": "◈ Searching...",
   "no_results": "Nothing found. Try a different query.",
@@ -115,5 +115,12 @@
 
   "captcha_prompt": "Solve to continue: <b>{a} + {b} = ?</b>",
   "captcha_ok": "✓ Verified!",
-  "captcha_fail": "✗ Wrong answer. Try again."
+  "captcha_fail": "✗ Wrong. Try again.",
+
+  "shazam_recognizing": "◈ Recognizing track...",
+  "shazam_recognized": "◈ Recognized: <b>{artist}</b> — <b>{title}</b>\n\nSearching...",
+  "shazam_not_recognized": "◈ Could not recognize the track. Try sending a longer fragment (at least 5 seconds).",
+  "shazam_error": "◈ Recognition error. Try again later.",
+  "shazam_too_short": "◈ Fragment too short. Minimum 5 seconds.",
+  "shazam_too_large": "◈ File too large (maximum 20 MB)."
 }

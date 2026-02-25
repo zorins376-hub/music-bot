@@ -9,8 +9,13 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
 from bot.config import settings as app_settings
+
+if app_settings.SENTRY_DSN:
+    import sentry_sdk
+    sentry_sdk.init(dsn=app_settings.SENTRY_DSN, traces_sample_rate=0.05)
+
 from bot.handlers import admin, charts, history, inline, search, start, video
-from bot.handlers import radio, premium, recommend, playlist
+from bot.handlers import radio, premium, recommend, playlist, recognize
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
@@ -97,6 +102,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(settings_handler.router)  # /settings (quality)
     dp.include_router(charts.router)              # Top charts
     dp.include_router(video.router)                # Video search & download
+    dp.include_router(recognize.router)            # Shazam: voice/audio/video recognition
     dp.include_router(search.router)
     dp.include_router(inline.router)
     dp.include_router(history.router)

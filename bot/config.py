@@ -85,7 +85,8 @@ class Settings(BaseSettings):
 
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
-
+    # ── Sentry ───────────────────────────────────────────────────────────────
+    SENTRY_DSN: Optional[str] = None
     # ── Premium (Telegram Stars) ─────────────────────────────────────────
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)
     PREMIUM_DAYS: int = 30
