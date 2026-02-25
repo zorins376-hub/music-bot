@@ -85,6 +85,7 @@ class Settings(BaseSettings):
 
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
+    YANDEX_TOKENS: Optional[str] = None  # пул токенов через запятую (ротация)
     # ── VK Music ───────────────────────────────────────────────────────────────
     VK_TOKEN: Optional[str] = None       # Kate Mobile / VK Android token
     VK_LOGIN: Optional[str] = None

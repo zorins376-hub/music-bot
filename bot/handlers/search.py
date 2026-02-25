@@ -21,6 +21,7 @@ from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
 from bot.services.vk_provider import download_vk, search_vk
+from bot.services.yandex_provider import download_yandex, search_yandex
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 
 logger = logging.getLogger(__name__)
@@ -184,14 +185,20 @@ async def _do_search(message: Message, query: str) -> None:
         )
         return
 
-    # STEP 2: YouTube search (with global query cache)
-    results = await cache.get_query_cache(query, "youtube")
-    if results is None:
-        results = await search_tracks(query, max_results=max_results, source="youtube")
-        if results:
-            await cache.set_query_cache(query, results, "youtube")
+    # STEP 2: Яндекс.Музыка — 320 kbps, если токен есть
+    results = await search_yandex(query, limit=max_results)
+    if results:
+        requests_total.labels(source="yandex").inc()
 
-    # STEP 3: SoundCloud fallback if YouTube found nothing
+    # STEP 3: YouTube search (with global query cache)
+    if not results:
+        results = await cache.get_query_cache(query, "youtube")
+        if results is None:
+            results = await search_tracks(query, max_results=max_results, source="youtube")
+            if results:
+                await cache.set_query_cache(query, results, "youtube")
+
+    # STEP 4: SoundCloud fallback if YouTube found nothing
     if not results:
         results = await cache.get_query_cache(query, "soundcloud")
         if results is None:
@@ -199,7 +206,7 @@ async def _do_search(message: Message, query: str) -> None:
             if results:
                 await cache.set_query_cache(query, results, "soundcloud")
 
-    # STEP 4: VK fallback — rare tracks not on YouTube/SoundCloud
+    # STEP 5: VK fallback — rare tracks not on YouTube/SoundCloud
     if not results:
         results = await search_vk(query, limit=max_results)
         if results:
@@ -222,7 +229,7 @@ async def _do_search(message: Message, query: str) -> None:
     await cache.store_search(session_id, results)
     keyboard = _build_results_keyboard(results, session_id)
     _src = results[0].get("source", "youtube")
-    source_tag = {"soundcloud": "▸ SoundCloud", "vk": "▸ VK Music"}.get(_src, "▸ YouTube")
+    source_tag = {"soundcloud": "▸ SoundCloud", "vk": "▸ VK Music", "yandex": "▸ Яндекс.Музыка"}.get(_src, "▸ YouTube")
     await status.edit_text(
         f"{_SEARCH_LOGO}\n\n"
         f"<b>{t(lang, 'search_results')}:</b> {query}\n"
@@ -276,13 +283,16 @@ async def _group_auto_play(
     await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     mp3_path: Path | None = None
     try:
-        if track_info.get("source") == "vk" and track_info.get("vk_url"):
+        if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate)
+        elif track_info.get("source") == "vk" and track_info.get("vk_url"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
         else:
             mp3_path = await download_track(video_id, bitrate)
         file_size = mp3_path.stat().st_size
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") != "vk":
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
             cleanup_file(mp3_path)
             mp3_path = None
             mp3_path = await download_track(video_id, 128)
@@ -460,14 +470,17 @@ async def handle_track_select(
     mp3_path: Path | None = None
 
     try:
-        if track_info.get("source") == "vk" and track_info.get("vk_url"):
+        if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate)
+        elif track_info.get("source") == "vk" and track_info.get("vk_url"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
         else:
             mp3_path = await download_track(video_id, bitrate)
         file_size = mp3_path.stat().st_size
 
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") != "vk":
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
             cleanup_file(mp3_path)
             mp3_path = None
             await status.edit_text(t(lang, "error_too_large"))
