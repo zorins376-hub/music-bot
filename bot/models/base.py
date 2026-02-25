@@ -7,11 +7,15 @@ _is_pg = settings.DATABASE_URL.startswith("postgresql")
 _engine_kwargs: dict = {"echo": False}
 if _is_pg:
     _engine_kwargs.update(
-        pool_size=5,
-        max_overflow=10,
+        pool_size=3,        # Supabase free tier PgBouncer: keep small
+        max_overflow=7,     # max 10 total connections
+        pool_timeout=15,    # fail fast instead of queueing forever
         pool_recycle=300,
         pool_pre_ping=True,
-        connect_args={"statement_cache_size": 0},
+        connect_args={
+            "statement_cache_size": 0,
+            "command_timeout": 15,  # per-query timeout
+        },
     )
 
 engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)

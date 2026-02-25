@@ -20,6 +20,7 @@ def is_admin(user_id: int, username: str | None = None) -> bool:
 
 async def get_or_create_user(tg_user: TgUser) -> User:
     admin = is_admin(tg_user.id, tg_user.username)
+    now = datetime.now(timezone.utc)
 
     async with async_session() as session:
         result = await session.execute(select(User).where(User.id == tg_user.id))
@@ -35,42 +36,36 @@ async def get_or_create_user(tg_user: TgUser) -> User:
             session.add(user)
             await session.commit()
             await session.refresh(user)
-            # Register admin ID dynamically
-            if admin and tg_user.id not in settings.ADMIN_IDS:
-                settings.ADMIN_IDS.append(tg_user.id)
         else:
-            await session.execute(
-                update(User)
-                .where(User.id == tg_user.id)
-                .values(
-                    username=tg_user.username,
-                    first_name=tg_user.first_name,
-                    last_active=datetime.now(timezone.utc),
-                )
+            # Calculate all updates in one single query
+            expired_premium = (
+                not admin
+                and user.is_premium
+                and user.premium_until is not None
+                and user.premium_until < now
             )
-            await session.commit()
-            # Auto-grant premium to admins
+            update_values: dict = {
+                "username": tg_user.username,
+                "first_name": tg_user.first_name,
+                "last_active": now,
+            }
             if admin and not user.is_premium:
-                await session.execute(
-                    update(User)
-                    .where(User.id == tg_user.id)
-                    .values(is_premium=True)
-                )
-                await session.commit()
-                user.is_premium = True
-            # Register admin ID dynamically
-            if admin and tg_user.id not in settings.ADMIN_IDS:
-                settings.ADMIN_IDS.append(tg_user.id)
+                update_values["is_premium"] = True
+            if expired_premium:
+                update_values["is_premium"] = False
 
-        # Auto-revoke expired premium (but not for admins — they always have premium)
-        if not admin and user.is_premium and user.premium_until and user.premium_until < datetime.now(timezone.utc):
             await session.execute(
-                update(User)
-                .where(User.id == tg_user.id)
-                .values(is_premium=False)
+                update(User).where(User.id == tg_user.id).values(**update_values)
             )
             await session.commit()
-            user.is_premium = False
+
+            # Reflect changes on the in-memory object
+            if "is_premium" in update_values:
+                user.is_premium = update_values["is_premium"]
+
+        # Register admin ID dynamically (in-memory only, no extra query)
+        if admin and tg_user.id not in settings.ADMIN_IDS:
+            settings.ADMIN_IDS.append(tg_user.id)
 
         return user
 

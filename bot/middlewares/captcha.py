@@ -43,7 +43,11 @@ class CaptchaMiddleware(BaseMiddleware):
         if event.chat.type != "private":
             return await handler(event, data)
 
-        db_user = await get_or_create_user(tg_user)
+        try:
+            db_user = await get_or_create_user(tg_user)
+        except Exception:
+            # DB temporarily unavailable — let the request through
+            return await handler(event, data)
 
         # Already verified — pass through forever
         if db_user.captcha_passed:
