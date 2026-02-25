@@ -268,22 +268,89 @@ async def _fetch_html(url: str, headers: dict) -> str:
         return ""
 
 
-def _parse_rusradio_tracks(html: str) -> list[dict]:
-    """
-    Try multiple HTML parsing strategies for rusradio.ru charts.
-    Strategy 1: track card blocks (current chart layout).
-    Strategy 2: JSON-LD structured data.
-    Strategy 3: legacy voting page (seasonal Золотой Граммофон).
-    """
+def _extract_json_array(html: str, key: str) -> list:
+    """Find `"key":[...]` in HTML and extract the JSON array.
+    Handles both plain JSON and escaped JSON-in-JS (\\"key\\":[...])."""
+    for quote in ('"', '\\"'):
+        marker = f'{quote}{key}{quote}:'
+        idx = html.find(marker)
+        if idx < 0:
+            continue
+        # Find opening bracket
+        bracket_start = html.find("[", idx + len(marker))
+        if bracket_start < 0 or bracket_start - (idx + len(marker)) > 5:
+            continue
+
+        if quote == '\\"':
+            # Unescape a window around the data (up to 300KB), then parse
+            window = html[bracket_start: bracket_start + 300_000]
+            unescaped = window.replace('\\"', '"').replace("\\\\", "\\")
+        else:
+            unescaped = html[bracket_start: bracket_start + 300_000]
+
+        # Bracket-count to extract the full array
+        depth = 0
+        in_str = False
+        escaped = False
+        for i, c in enumerate(unescaped):
+            if escaped:
+                escaped = False
+                continue
+            if c == "\\" and in_str:
+                escaped = True
+                continue
+            if c == '"':
+                in_str = not in_str
+                continue
+            if not in_str:
+                if c == "[":
+                    depth += 1
+                elif c == "]":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(unescaped[: i + 1])
+                        except Exception:
+                            return []
+    return []
+
+
+def _parse_rusradio_json(html: str) -> list[dict]:
+    """Parse track data from rusradio.ru Next.js SSR page (embedded JSON)."""
+    items = _extract_json_array(html, "tracks")
+    if not items:
+        return []
+    tracks: list[dict] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        artist = str(item.get("artist") or "").strip()
+        if not title or not artist:
+            continue
+        if len(title) > 80 or len(artist) > 80:
+            continue
+        # Skip compilations (duration in seconds on this site)
+        dur = item.get("duration") or 0
+        if dur and dur > 480:
+            continue
+        key = f"{artist.lower()}\t{title.lower()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        tracks.append({"title": title, "artist": artist, "query": f"{artist} - {title}"})
+    return tracks
+
+
+def _parse_rusradio_html_fallback(html: str) -> list[dict]:
+    """Fallback HTML scraping for older rusradio.ru chart pages."""
     tracks: list[dict] = []
     seen: set[str] = set()
 
     def _add(artist: str, title: str) -> bool:
-        artist = artist.strip()
-        title = title.strip()
-        if not artist or not title:
-            return False
-        if len(artist) > 80 or len(title) > 80:
+        artist, title = artist.strip(), title.strip()
+        if not artist or not title or len(artist) > 80 or len(title) > 80:
             return False
         key = f"{artist.lower()}\t{title.lower()}"
         if key in seen:
@@ -292,70 +359,23 @@ def _parse_rusradio_tracks(html: str) -> list[dict]:
         tracks.append({"title": title, "artist": artist, "query": f"{artist} - {title}"})
         return True
 
-    # Strategy 1: JSON-LD (most reliable if present)
-    for match in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-                              html, re.DOTALL | re.IGNORECASE):
+    # JSON-LD
+    for m in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, re.DOTALL | re.IGNORECASE
+    ):
         try:
-            obj = json.loads(match.group(1))
-            items = obj if isinstance(obj, list) else [obj]
-            for item in items:
+            obj = json.loads(m.group(1))
+            for item in (obj if isinstance(obj, list) else [obj]):
                 if isinstance(item, dict) and item.get("@type") in ("MusicRecording", "Song"):
-                    artist = item.get("byArtist", {})
-                    if isinstance(artist, dict):
-                        artist = artist.get("name", "")
-                    title = item.get("name", "")
-                    _add(str(artist), str(title))
+                    a = item.get("byArtist", {})
+                    _add(a.get("name", "") if isinstance(a, dict) else str(a), item.get("name", ""))
         except Exception:
             pass
-
     if tracks:
         return tracks
 
-    # Strategy 2: track/song card blocks — look for data-* or class="*track*" patterns
-    # rusradio.ru uses blocks like: <div class="chart__item"> ... artist ... title ...
-    card_re = re.compile(
-        r'class="[^"]*(?:chart|track|song|music)[^"]*"[^>]*>(.*?)</(?:div|article|li)>',
-        re.DOTALL | re.IGNORECASE,
-    )
-    for m in card_re.finditer(html):
-        block = m.group(1)
-        text = re.sub(r"<[^>]+>", "\n", block)
-        lines = [
-            ln.strip() for ln in text.splitlines()
-            if ln.strip()
-            and re.search(r"[А-Яа-яA-Za-z]", ln)
-            and 2 <= len(ln.strip()) <= 80
-            and not ln.strip().startswith("http")
-            and not re.match(r"^\d+$", ln.strip())
-        ]
-        for i in range(len(lines) - 1):
-            for sep in (" — ", " – ", " - "):
-                combined = f"{lines[i]}{sep}{lines[i+1]}"
-                if _has_cyrillic(combined):
-                    _add(lines[i], lines[i + 1])
-                    break
-        if len(tracks) >= 50:
-            break
-
-    if tracks:
-        return tracks
-
-    # Strategy 3: generic separator parsing (artist — title appearing anywhere in text)
-    sep_re = re.compile(
-        r'(?:^|>)([А-ЯЁA-Z][^\n<>—–\-]{1,40})\s*[—–]\s*([^\n<>—–]{2,60})(?:$|<)',
-        re.MULTILINE,
-    )
-    for m in sep_re.finditer(html):
-        artist, title = m.group(1).strip(), m.group(2).strip()
-        if _has_cyrillic(artist) or _has_cyrillic(title):
-            _add(artist, title)
-        if len(tracks) >= 50:
-            break
-
-    if tracks:
-        return tracks
-
-    # Strategy 4: legacy voting page (seasonal Золотой Граммофон)
+    # Legacy voting page (Голосовать buttons)
     parts = re.split(r"rusradio\.ru/b/d/\S+?\.(?:webp|jpg|png)", html)
     for chunk in parts[1:]:
         gpos = chunk.find("ГОЛОСОВАТЬ")
@@ -372,7 +392,7 @@ def _parse_rusradio_tracks(html: str) -> list[dict]:
             and not ln.strip().isdigit()
         ]
         if len(lines) >= 2:
-            _add(lines[1], lines[0])  # page order: title then artist
+            _add(lines[1], lines[0])
         if len(tracks) >= 50:
             break
 
@@ -380,7 +400,7 @@ def _parse_rusradio_tracks(html: str) -> list[dict]:
 
 
 async def _fetch_rusradio() -> list[dict]:
-    """Русское Радио — TOP чарт (Золотой Граммофон / TOP-20)."""
+    """Русское Радио — Хит-парад Золотой Граммофон."""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -390,24 +410,36 @@ async def _fetch_rusradio() -> list[dict]:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
-    # Try primary chart URLs in order of preference
-    chart_urls = [
-        "https://rusradio.ru/music/chart/",
-        "https://rusradio.ru/charts/top-20/",
-        "https://rusradio.ru/charts/",
-        "https://rusradio.ru/charts/golosujte-za-treki",
-    ]
-    for url in chart_urls:
-        html = await _fetch_html(url, headers)
-        if not html:
-            continue
-        tracks = _parse_rusradio_tracks(html)
+    # Primary: parse embedded JSON from the official hit-parad page
+    html = await _fetch_html("https://rusradio.ru/charts/hit-parad-zolotoj-grammofon", headers)
+    if html:
+        tracks = _parse_rusradio_json(html)
         if tracks:
-            logger.info("Rusradio chart: %d tracks from %s", len(tracks), url)
+            logger.info("Rusradio chart: %d tracks from hit-parad JSON", len(tracks))
             return tracks
-        logger.debug("Rusradio: no tracks parsed from %s", url)
+        # Try HTML fallback on same page (old layout)
+        tracks = _parse_rusradio_html_fallback(html)
+        if tracks:
+            logger.info("Rusradio chart: %d tracks from hit-parad HTML", len(tracks))
+            return tracks
 
-    logger.warning("Rusradio chart: all URLs failed, using fallback")
+    # Try general charts page
+    html = await _fetch_html("https://rusradio.ru/charts", headers)
+    if html:
+        tracks = _parse_rusradio_json(html)
+        if tracks:
+            logger.info("Rusradio chart: %d tracks from /charts JSON", len(tracks))
+            return tracks
+
+    # Seasonal voting page (active during award season)
+    html = await _fetch_html("https://rusradio.ru/charts/golosujte-za-treki", headers)
+    if html:
+        tracks = _parse_rusradio_html_fallback(html)
+        if tracks:
+            logger.info("Rusradio chart: %d tracks from voting page", len(tracks))
+            return tracks
+
+    logger.warning("Rusradio chart: all strategies failed, using Яндекс fallback")
 
     # Fallback 1: Яндекс Музыка чарт Россия (already works for VK chart)
     yandex_tracks = await _fetch_yandex_chart()
