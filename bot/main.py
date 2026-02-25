@@ -45,6 +45,10 @@ async def on_startup(bot: Bot) -> None:
 
     await init_db()
 
+    if app_settings.METRICS_PORT:
+        from bot.services.metrics import start_metrics_server
+        start_metrics_server(app_settings.METRICS_PORT)
+
     # Register bot commands for private chats
     private_commands = [
         BotCommand(command="start", description="◉ Главное меню"),
@@ -52,6 +56,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="video", description="🎦 Найти клип"),
         BotCommand(command="top", description="◆ Топ треков"),
         BotCommand(command="charts", description="🏆 Топ-чарты"),
+        BotCommand(command="stats", description="◎ Моя статистика"),
         BotCommand(command="history", description="▹ Мои запросы"),
         BotCommand(command="settings", description="≡ Качество аудио"),
         BotCommand(command="playlist", description="▸ Плейлисты"),

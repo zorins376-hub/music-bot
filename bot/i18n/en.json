@@ -117,6 +117,12 @@
   "captcha_ok": "✓ Verified!",
   "captcha_fail": "✗ Wrong. Try again.",
 
+  "my_stats_header": "◎ <b>My Stats</b>",
+  "my_stats_total": "▸ Total downloads: <b>{count}</b> tracks",
+  "my_stats_week": "▸ This week: <b>{count}</b>",
+  "my_stats_top_artist": "▸ Favourite artist: <b>{artist}</b>",
+  "my_stats_since": "▸ Member since: <b>{date}</b>",
+
   "shazam_recognizing": "◈ Recognizing track...",
   "shazam_recognized": "◈ Recognized: <b>{artist}</b> — <b>{title}</b>\n\nSearching...",
   "shazam_not_recognized": "◈ Could not recognize the track. Try sending a longer fragment (at least 5 seconds).",

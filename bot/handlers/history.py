@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import desc, func, select
 
-from bot.db import get_or_create_user
+from bot.db import get_or_create_user, get_user_stats
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
@@ -107,6 +107,23 @@ async def cmd_history(message: Message) -> None:
 @router.message(Command("top"))
 async def cmd_top(message: Message) -> None:
     await _show_top(message, message.from_user)
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message) -> None:
+    user = await get_or_create_user(message.from_user)
+    lang = user.language
+    stats = await get_user_stats(user.id)
+
+    lines = [t(lang, "my_stats_header")]
+    lines.append(t(lang, "my_stats_total", count=stats["total"]))
+    lines.append(t(lang, "my_stats_week", count=stats["week"]))
+    if stats["top_artist"]:
+        lines.append(t(lang, "my_stats_top_artist", artist=stats["top_artist"]))
+    lines.append(
+        t(lang, "my_stats_since", date=user.created_at.strftime("%d.%m.%Y"))
+    )
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("top:"))

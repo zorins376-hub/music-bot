@@ -20,6 +20,8 @@ from bot.db import get_or_create_user, increment_request_count, record_listening
 from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
+from bot.services.vk_provider import download_vk, search_vk
+from bot.services.metrics import cache_hits, cache_misses, requests_total
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +199,12 @@ async def _do_search(message: Message, query: str) -> None:
             if results:
                 await cache.set_query_cache(query, results, "soundcloud")
 
+    # STEP 4: VK fallback — rare tracks not on YouTube/SoundCloud
+    if not results:
+        results = await search_vk(query, limit=max_results)
+        if results:
+            requests_total.labels(source="vk").inc()
+
     if not results:
         await status.edit_text(t(lang, "no_results"))
         return
@@ -213,7 +221,8 @@ async def _do_search(message: Message, query: str) -> None:
     session_id = secrets.token_urlsafe(6)
     await cache.store_search(session_id, results)
     keyboard = _build_results_keyboard(results, session_id)
-    source_tag = "▸ YouTube" if results[0].get("source") != "soundcloud" else "▸ SoundCloud"
+    _src = results[0].get("source", "youtube")
+    source_tag = {"soundcloud": "▸ SoundCloud", "vk": "▸ VK Music"}.get(_src, "▸ YouTube")
     await status.edit_text(
         f"{_SEARCH_LOGO}\n\n"
         f"<b>{t(lang, 'search_results')}:</b> {query}\n"
@@ -267,9 +276,13 @@ async def _group_auto_play(
     await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     mp3_path: Path | None = None
     try:
-        mp3_path = await download_track(video_id, bitrate)
+        if track_info.get("source") == "vk" and track_info.get("vk_url"):
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            await download_vk(track_info["vk_url"], mp3_path)
+        else:
+            mp3_path = await download_track(video_id, bitrate)
         file_size = mp3_path.stat().st_size
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128:
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") != "vk":
             cleanup_file(mp3_path)
             mp3_path = None
             mp3_path = await download_track(video_id, 128)
@@ -421,6 +434,7 @@ async def handle_track_select(
     # Проверяем Redis кэш
     file_id = await cache.get_file_id(video_id, bitrate)
     if file_id:
+        cache_hits.inc()
         caption = _track_caption(lang, track_info, bitrate)
         await callback.message.answer_audio(
             audio=file_id,
@@ -441,14 +455,19 @@ async def handle_track_select(
 
     status = await callback.message.answer(t(lang, "downloading"))
     await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+    cache_misses.inc()
 
     mp3_path: Path | None = None
 
     try:
-        mp3_path = await download_track(video_id, bitrate)
+        if track_info.get("source") == "vk" and track_info.get("vk_url"):
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            await download_vk(track_info["vk_url"], mp3_path)
+        else:
+            mp3_path = await download_track(video_id, bitrate)
         file_size = mp3_path.stat().st_size
 
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128:
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") != "vk":
             cleanup_file(mp3_path)
             mp3_path = None
             await status.edit_text(t(lang, "error_too_large"))
@@ -499,7 +518,7 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
         artist=track_info["uploader"],
         duration=track_info.get("duration"),
         file_id=file_id,
-        source="youtube",
+        source=track_info.get("source", "youtube"),
         channel="external",
     )
     await record_listening_event(

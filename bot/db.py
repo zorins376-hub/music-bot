@@ -1,6 +1,6 @@
 from aiogram.types import User as TgUser
-from datetime import datetime, timezone
-from sqlalchemy import case, select, update
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import case, desc, select, update
 from sqlalchemy.sql import func
 
 from bot.config import settings
@@ -150,6 +150,50 @@ async def upsert_track(
         await session.commit()
         await session.refresh(track)
         return track
+
+
+async def get_user_stats(user_id: int) -> dict:
+    """Return personal play statistics for a user."""
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(weeks=1)
+    async with async_session() as session:
+        total: int = (
+            await session.execute(
+                select(func.count(ListeningHistory.id)).where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                )
+            )
+        ).scalar() or 0
+
+        week: int = (
+            await session.execute(
+                select(func.count(ListeningHistory.id)).where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                    ListeningHistory.created_at >= week_ago,
+                )
+            )
+        ).scalar() or 0
+
+        top_row = (
+            await session.execute(
+                select(Track.artist, func.count(ListeningHistory.id).label("cnt"))
+                .join(Track, ListeningHistory.track_id == Track.id)
+                .where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                    Track.artist.isnot(None),
+                    Track.artist != "",
+                )
+                .group_by(Track.artist)
+                .order_by(desc("cnt"))
+                .limit(1)
+            )
+        ).first()
+        top_artist: str | None = top_row[0] if top_row else None
+
+    return {"total": total, "week": week, "top_artist": top_artist}
 
 
 async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:

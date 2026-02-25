@@ -117,6 +117,12 @@
   "captcha_ok": "✓ Текшерүү өттү!",
   "captcha_fail": "✗ Ката. Кайра аракет кылыңыз.",
 
+  "my_stats_header": "◎ <b>Менин статистикам</b>",
+  "my_stats_total": "▸ Жалпы жүктөлдү: <b>{count}</b> ыр",
+  "my_stats_week": "▸ Бу аптада: <b>{count}</b>",
+  "my_stats_top_artist": "▸ Көп ууган: <b>{artist}</b>",
+  "my_stats_since": "▸ Баштан бери: <b>{date}</b>",
+
   "shazam_recognizing": "◈ Ырды таанытып жатам...",
   "shazam_recognized": "◈ Таанытылды: <b>{artist}</b> — <b>{title}</b>\n\nИздеп жатам...",
   "shazam_not_recognized": "◈ Ырды таанытуу мүмкүн болгон жок. Узунураак фрагмент жөнөт (кеминде 5 секунд).",

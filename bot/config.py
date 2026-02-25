@@ -85,8 +85,16 @@ class Settings(BaseSettings):
 
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
+    # ── VK Music ───────────────────────────────────────────────────────────────
+    VK_TOKEN: Optional[str] = None       # Kate Mobile / VK Android token
+    VK_LOGIN: Optional[str] = None
+    VK_PASSWORD: Optional[str] = None
+
     # ── Sentry ───────────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
+
+    # ── Prometheus metrics ────────────────────────────────────────────
+    METRICS_PORT: int = 0   # 0 = disabled; set e.g. 9090 to enable
     # ── Premium (Telegram Stars) ─────────────────────────────────────────
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)
     PREMIUM_DAYS: int = 30

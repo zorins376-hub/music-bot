@@ -117,6 +117,12 @@
   "captcha_ok": "✓ Проверка пройдена!",
   "captcha_fail": "✗ Неправильно. Попробуй ещё.",
 
+  "my_stats_header": "◎ <b>Моя статистика</b>",
+  "my_stats_total": "▸ Скачано всего: <b>{count}</b> треков",
+  "my_stats_week": "▸ За эту неделю: <b>{count}</b>",
+  "my_stats_top_artist": "▸ Чаще всего слушаешь: <b>{artist}</b>",
+  "my_stats_since": "▸ В боте с: <b>{date}</b>",
+
   "shazam_recognizing": "◈ Распознаю трек...",
   "shazam_recognized": "◈ Распознано: <b>{artist}</b> — <b>{title}</b>\n\nИщу...",
   "shazam_not_recognized": "◈ Не удалось распознать трек. Попробуй отправить более длинный фрагмент (минимум 5 секунд).",
