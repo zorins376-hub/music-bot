@@ -49,11 +49,15 @@ class CaptchaMiddleware(BaseMiddleware):
         if db_user.captcha_passed:
             return await handler(event, data)
 
-        # /start is always allowed
+        # /start и successful_payment всегда пропускаем
         if event.text and event.text.strip().startswith("/start"):
             if not await cache.redis.exists(_challenge_key(tg_user.id)):
                 await _send_challenge(event, tg_user.id, db_user.language)
             return
+
+        # Платёж нельзя блокировать — деньги уже списаны
+        if event.successful_payment is not None:
+            return await handler(event, data)
 
         # Is there a pending challenge?
         answer = await cache.redis.get(_challenge_key(tg_user.id))

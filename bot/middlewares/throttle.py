@@ -22,6 +22,10 @@ class ThrottleMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
+        # Платёж нельзя блокировать в любом случае
+        if event.successful_payment is not None:
+            return await handler(event, data)
+
         flood_key = f"flood:{user.id}"
         if await cache.redis.exists(flood_key):
             # Молча игнорируем — не засоряем чат сообщениями об ошибке

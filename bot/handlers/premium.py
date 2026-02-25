@@ -4,7 +4,7 @@ premium.py — Premium-подписка через Telegram Stars.
 import logging
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -75,7 +75,7 @@ async def handle_pre_checkout(pre_checkout_query: PreCheckoutQuery) -> None:
     await pre_checkout_query.answer(ok=True)
 
 
-@router.message(lambda m: m.successful_payment is not None)
+@router.message(F.successful_payment)
 async def handle_successful_payment(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
