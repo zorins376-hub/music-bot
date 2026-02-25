@@ -190,15 +190,7 @@ async def _do_search(message: Message, query: str) -> None:
     if results:
         requests_total.labels(source="yandex").inc()
 
-    # STEP 3: YouTube search (with global query cache)
-    if not results:
-        results = await cache.get_query_cache(query, "youtube")
-        if results is None:
-            results = await search_tracks(query, max_results=max_results, source="youtube")
-            if results:
-                await cache.set_query_cache(query, results, "youtube")
-
-    # STEP 4: SoundCloud fallback if YouTube found nothing
+    # STEP 3: SoundCloud
     if not results:
         results = await cache.get_query_cache(query, "soundcloud")
         if results is None:
@@ -206,11 +198,19 @@ async def _do_search(message: Message, query: str) -> None:
             if results:
                 await cache.set_query_cache(query, results, "soundcloud")
 
-    # STEP 5: VK fallback — rare tracks not on YouTube/SoundCloud
+    # STEP 4: VK Music
     if not results:
         results = await search_vk(query, limit=max_results)
         if results:
             requests_total.labels(source="vk").inc()
+
+    # STEP 5: YouTube — последний резерв
+    if not results:
+        results = await cache.get_query_cache(query, "youtube")
+        if results is None:
+            results = await search_tracks(query, max_results=max_results, source="youtube")
+            if results:
+                await cache.set_query_cache(query, results, "youtube")
 
     if not results:
         await status.edit_text(t(lang, "no_results"))
