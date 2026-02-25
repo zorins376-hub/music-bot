@@ -87,35 +87,63 @@ def _parse_yt_entries(entries: list, cyrillic_only: bool = False) -> list[dict]:
 
 
 async def _fetch_apple_chart(storefront: str) -> list[dict]:
-    """Fetch Apple Music most-played chart (individual songs, ranked).
-    storefront: 'us' for Global, 'ru' for Russia, etc."""
-    url = f"https://rss.applemonitoring.com/api/v2/{storefront}/music/most-played/100/songs.json"
+    """Fetch Apple Music / iTunes top songs chart.
+    Uses official iTunes RSS API (itunes.apple.com) as primary.
+    storefront: 'us', 'ru', 'gb', 'de', etc."""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*",
     }
+
+    # Primary: official iTunes RSS API
+    itunes_url = f"https://itunes.apple.com/{storefront}/rss/topsongs/limit=50/json"
     try:
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    logger.warning("Apple Music RSS %s returned %s", storefront, resp.status)
-                    return []
-                data = await resp.json(content_type=None)
+            async with sess.get(itunes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    entries = data.get("feed", {}).get("entry", [])
+                    tracks = []
+                    for item in entries[:50]:
+                        title = (item.get("im:name") or {}).get("label", "Unknown")
+                        artist = (item.get("im:artist") or {}).get("label", "Unknown")
+                        if title and artist:
+                            tracks.append({
+                                "title": title,
+                                "artist": artist,
+                                "query": f"{artist} - {title}",
+                            })
+                    if tracks:
+                        return tracks
+                else:
+                    logger.warning("iTunes RSS %s returned HTTP %s", storefront, resp.status)
     except Exception as e:
-        logger.error("Apple Music RSS error (%s): %s", storefront, e)
-        return []
+        logger.warning("iTunes RSS error (%s): %s", storefront, e)
 
-    results = data.get("feed", {}).get("results", [])
-    tracks = []
-    for item in results[:50]:
-        artist = item.get("artistName", "Unknown")
-        title = item.get("name", "Unknown")
-        tracks.append({
-            "title": title,
-            "artist": artist,
-            "query": f"{artist} - {title}",
-        })
-    return tracks
+    # Fallback: Apple Music RSS v2 (unofficial mirror, may be down)
+    fallback_url = f"https://rss.applemonitoring.com/api/v2/{storefront}/music/most-played/100/songs.json"
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(fallback_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    results = data.get("feed", {}).get("results", [])
+                    tracks = []
+                    for item in results[:50]:
+                        artist = item.get("artistName", "Unknown")
+                        title = item.get("name", "Unknown")
+                        tracks.append({
+                            "title": title,
+                            "artist": artist,
+                            "query": f"{artist} - {title}",
+                        })
+                    if tracks:
+                        return tracks
+    except Exception as e:
+        logger.warning("Apple Music RSS mirror error (%s): %s", storefront, e)
+
+    return []
 
 
 def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 50, cyrillic_only: bool = False) -> list[dict]:
@@ -396,11 +424,124 @@ async def _fetch_rusradio() -> list[dict]:
     return []
 
 
+async def _fetch_europaplus_site() -> list[dict]:
+    """Scrape europaplus.ru TOP40 chart directly."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    }
+    urls = [
+        "https://www.europaplus.ru/top/top40/",
+        "https://www.europaplus.ru/top40/",
+        "https://europaplus.ru/top/top40/",
+    ]
+    tracks: list[dict] = []
+    seen: set[str] = set()
+
+    for url in urls:
+        html = await _fetch_html(url, headers)
+        if not html:
+            continue
+
+        # Strategy 1: JSON-LD structured data
+        for m in re.finditer(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            html, re.DOTALL | re.IGNORECASE
+        ):
+            try:
+                obj = json.loads(m.group(1))
+                items = obj if isinstance(obj, list) else [obj]
+                for item in items:
+                    if isinstance(item, dict) and item.get("@type") in ("MusicRecording", "Song"):
+                        artist = item.get("byArtist", {})
+                        if isinstance(artist, dict):
+                            artist = artist.get("name", "")
+                        title = item.get("name", "")
+                        if artist and title:
+                            key = f"{str(artist).lower()}\t{str(title).lower()}"
+                            if key not in seen:
+                                seen.add(key)
+                                tracks.append({"title": str(title), "artist": str(artist),
+                                               "query": f"{artist} - {title}"})
+            except Exception:
+                pass
+        if tracks:
+            return tracks
+
+        # Strategy 2: chart/track card blocks
+        card_re = re.compile(
+            r'class="[^"]*(?:top40|chart|track|song|item)[^"]*"[^>]*>(.*?)</(?:div|li|article)>',
+            re.DOTALL | re.IGNORECASE,
+        )
+        for m in card_re.finditer(html):
+            block = m.group(1)
+            text = re.sub(r"<[^>]+>", "\n", block)
+            lines = [
+                ln.strip() for ln in text.splitlines()
+                if ln.strip()
+                and re.search(r"[А-Яа-яA-Za-z]", ln)
+                and 2 <= len(ln.strip()) <= 80
+                and not ln.strip().startswith("http")
+                and not re.match(r"^\d+$", ln.strip())
+            ]
+            if len(lines) >= 2:
+                for i in range(len(lines) - 1):
+                    for sep in (" — ", " – ", " - "):
+                        if sep in lines[i]:
+                            parts = lines[i].split(sep, 1)
+                            key = f"{parts[0].lower()}\t{parts[1].lower()}"
+                            if key not in seen:
+                                seen.add(key)
+                                tracks.append({"title": parts[1], "artist": parts[0],
+                                               "query": f"{parts[0]} - {parts[1]}"})
+                            break
+                    else:
+                        key = f"{lines[i].lower()}\t{lines[i+1].lower()}"
+                        if key not in seen:
+                            seen.add(key)
+                            tracks.append({"title": lines[i + 1], "artist": lines[i],
+                                           "query": f"{lines[i]} - {lines[i+1]}"})
+            if len(tracks) >= 40:
+                break
+        if tracks:
+            return tracks
+
+        # Strategy 3: generic «Artist — Title» separator in text
+        for m in re.finditer(
+            r'(?:^|>)([А-ЯЁA-Z][^\n<>—–\-]{1,40})\s*[—–]\s*([^\n<>—–]{2,60})(?:$|<)',
+            html, re.MULTILINE
+        ):
+            artist, title = m.group(1).strip(), m.group(2).strip()
+            key = f"{artist.lower()}\t{title.lower()}"
+            if key not in seen:
+                seen.add(key)
+                tracks.append({"title": title, "artist": artist, "query": f"{artist} - {title}"})
+            if len(tracks) >= 40:
+                break
+        if tracks:
+            return tracks
+
+    return []
+
+
 async def _fetch_europa() -> list[dict]:
-    """Европа Плюс TOP40 — Apple Music Europe (gb→de→us) chart."""
-    for storefront in ("gb", "de", "us"):
+    """Европа Плюс TOP40 — прямой скрейпинг сайта, затем iTunes RSS."""
+    # Primary: scrape europaplus.ru
+    tracks = await _fetch_europaplus_site()
+    if tracks:
+        logger.info("Europa Plus: %d tracks from europaplus.ru", len(tracks))
+        return tracks
+
+    logger.warning("Europa Plus: site scraping failed, trying iTunes RSS")
+    # Fallback: iTunes RSS for European storefronts
+    for storefront in ("gb", "de", "fr", "us"):
         tracks = await _fetch_apple_chart(storefront)
         if tracks:
+            logger.info("Europa Plus fallback: %d tracks from iTunes %s", len(tracks), storefront)
             return tracks
     return []
 
