@@ -26,10 +26,12 @@ class ThrottleMiddleware(BaseMiddleware):
         if event.successful_payment is not None:
             return await handler(event, data)
 
-        flood_key = f"flood:{user.id}"
-        if await cache.redis.exists(flood_key):
-            # Молча игнорируем — не засоряем чат сообщениями об ошибке
-            return
-
-        await cache.redis.setex(flood_key, _FLOOD_WINDOW, "1")
+        try:
+            flood_key = f"flood:{user.id}"
+            if await cache.redis.exists(flood_key):
+                # Молча игнорируем — не засоряем чат сообщениями об ошибке
+                return
+            await cache.redis.setex(flood_key, _FLOOD_WINDOW, "1")
+        except Exception:
+            pass  # Redis unavailable → let request through
         return await handler(event, data)

@@ -6,7 +6,7 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, ErrorEvent
 
 from bot.config import settings as app_settings
 
@@ -64,15 +64,18 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
     ]
-    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+    try:
+        await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
 
-    # Register bot commands for group chats
-    group_commands = [
-        BotCommand(command="search", description="◈ Найти трек"),
-        BotCommand(command="video", description="🎦 Найти клип"),
-        BotCommand(command="top", description="◆ Топ треков"),
-    ]
-    await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+        # Register bot commands for group chats
+        group_commands = [
+            BotCommand(command="search", description="◈ Найти трек"),
+            BotCommand(command="video", description="🎦 Найти клип"),
+            BotCommand(command="top", description="◆ Топ треков"),
+        ]
+        await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+    except Exception as e:
+        logger.warning("Failed to set bot commands (non-fatal): %s", e)
 
     if app_settings.USE_WEBHOOK:
         await bot.set_webhook(
@@ -89,6 +92,24 @@ async def on_shutdown(bot: Bot) -> None:
         await bot.delete_webhook()
     await cache.close()
     logger.info("Bot stopped")
+
+
+async def _global_error_handler(event: ErrorEvent) -> bool:
+    """Catch-all: log every unhandled handler exception and reply to the user."""
+    logger.exception(
+        "Unhandled error on update %s: %s", event.update.update_id, event.exception
+    )
+    update = event.update
+    try:
+        if update.message:
+            await update.message.answer("\u26a0\ufe0f \u0427\u0442\u043e-\u0442\u043e \u043f\u043e\u0448\u043b\u043e \u043d\u0435 \u0442\u0430\u043a. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u0435\u0449\u0451 \u0440\u0430\u0437.")
+        elif update.callback_query:
+            await update.callback_query.answer(
+                "\u26a0\ufe0f \u041e\u0448\u0438\u0431\u043a\u0430. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u0441\u043d\u043e\u0432\u0430.", show_alert=True
+            )
+    except Exception:
+        pass
+    return True
 
 
 def build_dispatcher() -> Dispatcher:
@@ -112,6 +133,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(inline.router)
     dp.include_router(history.router)
 
+    dp.error.register(_global_error_handler)
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 

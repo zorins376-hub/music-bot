@@ -29,40 +29,58 @@ class Cache:
     # ── File ID cache ───────────────────────────────────────────────────────
 
     async def get_file_id(self, source_id: str, bitrate: int = 192) -> str | None:
-        return await self.redis.get(f"fid:{source_id}:{bitrate}")
+        try:
+            return await self.redis.get(f"fid:{source_id}:{bitrate}")
+        except Exception:
+            return None
 
     async def set_file_id(
         self, source_id: str, file_id: str, bitrate: int = 192
     ) -> None:
-        await self.redis.setex(
-            f"fid:{source_id}:{bitrate}", settings.CACHE_FILE_ID_TTL, file_id
-        )
+        try:
+            await self.redis.setex(
+                f"fid:{source_id}:{bitrate}", settings.CACHE_FILE_ID_TTL, file_id
+            )
+        except Exception:
+            pass
 
     # ── Search sessions ─────────────────────────────────────────────────────
 
     async def store_search(self, session_id: str, results: list[dict]) -> None:
-        await self.redis.setex(
-            f"search:{session_id}",
-            settings.SEARCH_SESSION_TTL,
-            json.dumps(results, ensure_ascii=False),
-        )
+        try:
+            await self.redis.setex(
+                f"search:{session_id}",
+                settings.SEARCH_SESSION_TTL,
+                json.dumps(results, ensure_ascii=False),
+            )
+        except Exception:
+            pass
 
     async def get_search(self, session_id: str) -> list[dict] | None:
-        data = await self.redis.get(f"search:{session_id}")
-        return json.loads(data) if data else None
+        try:
+            data = await self.redis.get(f"search:{session_id}")
+            return json.loads(data) if data else None
+        except Exception:
+            return None
 
     # ── Global search cache (by query string) ────────────────────────────
 
     async def get_query_cache(self, query: str, source: str = "youtube") -> list[dict] | None:
         """Return cached search results for a query, or None."""
-        key = f"qcache:{source}:{query.lower().strip()}"
-        data = await self.redis.get(key)
-        return json.loads(data) if data else None
+        try:
+            key = f"qcache:{source}:{query.lower().strip()}"
+            data = await self.redis.get(key)
+            return json.loads(data) if data else None
+        except Exception:
+            return None
 
     async def set_query_cache(self, query: str, results: list[dict], source: str = "youtube") -> None:
         """Cache search results for a query (120s TTL)."""
-        key = f"qcache:{source}:{query.lower().strip()}"
-        await self.redis.setex(key, 120, json.dumps(results, ensure_ascii=False))
+        try:
+            key = f"qcache:{source}:{query.lower().strip()}"
+            await self.redis.setex(key, 120, json.dumps(results, ensure_ascii=False))
+        except Exception:
+            pass
 
     # ── Rate limiting ────────────────────────────────────────────────────────
 
@@ -73,24 +91,28 @@ class Cache:
         Returns (allowed, cooldown_seconds).
         cooldown_seconds > 0 → слишком быстро.
         cooldown_seconds == 0 → превышен часовой лимит.
+        Redis unavailable → (True, 0) — allow all requests.
         """
-        cooldown_key = f"cd:{user_id}"
-        if await self.redis.exists(cooldown_key):
-            ttl = await self.redis.ttl(cooldown_key)
-            return False, max(ttl, 1)
+        try:
+            cooldown_key = f"cd:{user_id}"
+            if await self.redis.exists(cooldown_key):
+                ttl = await self.redis.ttl(cooldown_key)
+                return False, max(ttl, 1)
 
-        limit_key = f"limit:{user_id}"
-        count = await self.redis.incr(limit_key)
-        if count == 1:
-            await self.redis.expire(limit_key, 3600)
+            limit_key = f"limit:{user_id}"
+            count = await self.redis.incr(limit_key)
+            if count == 1:
+                await self.redis.expire(limit_key, 3600)
 
-        max_limit = settings.RATE_LIMIT_PREMIUM if is_premium else settings.RATE_LIMIT_REGULAR
-        if count > max_limit:
-            return False, 0
+            max_limit = settings.RATE_LIMIT_PREMIUM if is_premium else settings.RATE_LIMIT_REGULAR
+            if count > max_limit:
+                return False, 0
 
-        cooldown = settings.COOLDOWN_PREMIUM if is_premium else settings.COOLDOWN_REGULAR
-        await self.redis.setex(cooldown_key, cooldown, "1")
-        return True, 0
+            cooldown = settings.COOLDOWN_PREMIUM if is_premium else settings.COOLDOWN_REGULAR
+            await self.redis.setex(cooldown_key, cooldown, "1")
+            return True, 0
+        except Exception:
+            return True, 0  # Redis unavailable → allow all requests
 
     async def close(self) -> None:
         if self._redis:

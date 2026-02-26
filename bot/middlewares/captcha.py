@@ -55,8 +55,11 @@ class CaptchaMiddleware(BaseMiddleware):
 
         # /start и successful_payment всегда пропускаем
         if event.text and event.text.strip().startswith("/start"):
-            if not await cache.redis.exists(_challenge_key(tg_user.id)):
-                await _send_challenge(event, tg_user.id, db_user.language)
+            try:
+                if not await cache.redis.exists(_challenge_key(tg_user.id)):
+                    await _send_challenge(event, tg_user.id, db_user.language)
+            except Exception:
+                pass
             return
 
         # Платёж нельзя блокировать — деньги уже списаны
@@ -64,7 +67,12 @@ class CaptchaMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         # Is there a pending challenge?
-        answer = await cache.redis.get(_challenge_key(tg_user.id))
+        try:
+            answer = await cache.redis.get(_challenge_key(tg_user.id))
+        except Exception:
+            # Redis unavailable → skip captcha, let through
+            return await handler(event, data)
+
         if answer is None:
             await _send_challenge(event, tg_user.id, db_user.language)
             return
@@ -73,12 +81,18 @@ class CaptchaMiddleware(BaseMiddleware):
         text = (event.text or "").strip()
         if text == answer:
             # Mark as passed permanently in DB
-            async with async_session() as session:
-                await session.execute(
-                    update(User).where(User.id == tg_user.id).values(captcha_passed=True)
-                )
-                await session.commit()
-            await cache.redis.delete(_challenge_key(tg_user.id))
+            try:
+                async with async_session() as session:
+                    await session.execute(
+                        update(User).where(User.id == tg_user.id).values(captcha_passed=True)
+                    )
+                    await session.commit()
+            except Exception:
+                pass
+            try:
+                await cache.redis.delete(_challenge_key(tg_user.id))
+            except Exception:
+                pass
             await event.answer(t(db_user.language, "captcha_ok"), parse_mode="HTML")
             return
         else:
@@ -90,7 +104,10 @@ async def _send_challenge(event: Message, user_id: int, lang: str) -> None:
     a = random.randint(1, 20)
     b = random.randint(1, 20)
     answer = str(a + b)
-    await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, answer)
+    try:
+        await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, answer)
+    except Exception:
+        pass
     await event.answer(
         t(lang, "captcha_prompt", a=a, b=b), parse_mode="HTML"
     )

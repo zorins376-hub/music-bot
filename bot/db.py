@@ -1,9 +1,13 @@
+import logging
+
 from aiogram.types import User as TgUser
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, desc, select, update
 from sqlalchemy.sql import func
 
 from bot.config import settings
+
+logger = logging.getLogger(__name__)
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
@@ -71,13 +75,16 @@ async def get_or_create_user(tg_user: TgUser) -> User:
 
 
 async def increment_request_count(user_id: int) -> None:
-    async with async_session() as session:
-        await session.execute(
-            update(User)
-            .where(User.id == user_id)
-            .values(request_count=User.request_count + 1)
-        )
-        await session.commit()
+    try:
+        async with async_session() as session:
+            await session.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(request_count=User.request_count + 1)
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning("increment_request_count failed for %s: %s", user_id, e)
 
 
 async def record_listening_event(
@@ -88,18 +95,21 @@ async def record_listening_event(
     source: str = "search",
     listen_duration: int | None = None,
 ) -> None:
-    async with async_session() as session:
-        session.add(
-            ListeningHistory(
-                user_id=user_id,
-                track_id=track_id,
-                query=query,
-                action=action,
-                source=source,
-                listen_duration=listen_duration,
+    try:
+        async with async_session() as session:
+            session.add(
+                ListeningHistory(
+                    user_id=user_id,
+                    track_id=track_id,
+                    query=query,
+                    action=action,
+                    source=source,
+                    listen_duration=listen_duration,
+                )
             )
-        )
-        await session.commit()
+            await session.commit()
+    except Exception as e:
+        logger.warning("record_listening_event failed for user %s: %s", user_id, e)
 
 
 async def upsert_track(

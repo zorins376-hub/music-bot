@@ -113,7 +113,11 @@ def _build_results_keyboard(results: list[dict], session_id: str) -> InlineKeybo
 
 
 async def _do_search(message: Message, query: str) -> None:
-    user = await get_or_create_user(message.from_user)
+    try:
+        user = await get_or_create_user(message.from_user)
+    except Exception:
+        await message.answer("⚠️ Сервис временно недоступен. Попробуй снова.")
+        return
     lang = user.language
 
     if user.is_banned:
@@ -403,7 +407,11 @@ async def handle_track_select(
 ) -> None:
     await callback.answer()
 
-    user = await get_or_create_user(callback.from_user)
+    try:
+        user = await get_or_create_user(callback.from_user)
+    except Exception:
+        await callback.message.answer("⚠️ Сервис временно недоступен. Попробуй снова.")
+        return
     lang = user.language
     is_group = callback.message.chat.type in ("group", "supergroup")
 
@@ -523,17 +531,21 @@ async def handle_track_select(
 
 
 async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: int) -> int:
-    """Записывает трек в БД и событие в историю прослушивания. Returns track DB id."""
+    """Records track in DB and listening event. Returns track DB id (0 on DB error)."""
     await increment_request_count(user_id)
-    track = await upsert_track(
-        source_id=track_info["video_id"],
-        title=track_info["title"],
-        artist=track_info["uploader"],
-        duration=track_info.get("duration"),
-        file_id=file_id,
-        source=track_info.get("source", "youtube"),
-        channel="external",
-    )
+    try:
+        track = await upsert_track(
+            source_id=track_info["video_id"],
+            title=track_info["title"],
+            artist=track_info["uploader"],
+            duration=track_info.get("duration"),
+            file_id=file_id,
+            source=track_info.get("source", "youtube"),
+            channel="external",
+        )
+    except Exception as e:
+        logger.warning("_post_download: upsert_track failed: %s", e)
+        return 0
     await record_listening_event(
         user_id=user_id,
         track_id=track.id,
@@ -541,17 +553,20 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
         source="search",
     )
     # Auto-update user taste profile every 10 listens
-    from bot.models.base import async_session as _async_session
-    from bot.models.user import User as _User
-    async with _async_session() as session:
-        from sqlalchemy import select as _sel
-        u = (await session.execute(_sel(_User).where(_User.id == user_id))).scalar()
-        if u and u.request_count and u.request_count % 10 == 0:
-            from recommender.ai_dj import update_user_profile
-            try:
-                await update_user_profile(user_id)
-            except Exception:
-                pass
+    try:
+        from bot.models.base import async_session as _async_session
+        from bot.models.user import User as _User
+        async with _async_session() as session:
+            from sqlalchemy import select as _sel
+            u = (await session.execute(_sel(_User).where(_User.id == user_id))).scalar()
+            if u and u.request_count and u.request_count % 10 == 0:
+                from recommender.ai_dj import update_user_profile
+                try:
+                    await update_user_profile(user_id)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning("_post_download: profile update failed: %s", e)
     return track.id
 
 
@@ -581,7 +596,11 @@ def _feedback_keyboard(track_id: int) -> InlineKeyboardMarkup:
 async def handle_feedback(
     callback: CallbackQuery, callback_data: FeedbackCallback
 ) -> None:
-    user = await get_or_create_user(callback.from_user)
+    try:
+        user = await get_or_create_user(callback.from_user)
+    except Exception:
+        await callback.answer()
+        return
     await record_listening_event(
         user_id=user.id,
         track_id=callback_data.tid,
