@@ -1,20 +1,21 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from bot.config import settings
 
 _is_pg = settings.DATABASE_URL.startswith("postgresql")
 _engine_kwargs: dict = {"echo": False}
 if _is_pg:
+    # Supabase uses PgBouncer in transaction mode (port 6543).
+    # SQLAlchemy's own pool + asyncpg = stale "ConnectionDoesNotExistError".
+    # NullPool: every async_session() gets a fresh PgBouncer connection;
+    # PgBouncer handles the actual server-side pool itself.
     _engine_kwargs.update(
-        pool_size=3,        # Supabase free tier PgBouncer: keep small
-        max_overflow=7,     # max 10 total connections
-        pool_timeout=15,    # fail fast instead of queueing forever
-        pool_recycle=300,
-        pool_pre_ping=True,
+        poolclass=NullPool,
         connect_args={
             "statement_cache_size": 0,
-            "command_timeout": 15,  # per-query timeout
+            "command_timeout": 15,
         },
     )
 
