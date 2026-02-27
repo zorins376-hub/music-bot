@@ -24,7 +24,33 @@
     "Tee-Object": true,
     "git add": true,
     "git commit": true,
-    "git push": true
+    "git push": true,
+    "/^python -m py_compile bot/handlers/charts\\.py ; echo \"OK\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "railway": true,
+    "/^railway variables --json 2>&1 \\| python -c \"import sys,json; d=json\\.load\\(sys\\.stdin\\); \\[print\\(k,'=',v\\) for k,v in d\\.items\\(\\) if 'redis' in k\\.lower\\(\\)\\]\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^python -m py_compile bot/handlers/search\\.py ; echo OK$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "pip3": true,
+    "/^cd c:\\\\Users\\\\sherh\\\\music-bot ; python -c \"\nimport ast, sys\nfiles = \\[\n    'bot/services/yandex_provider\\.py',\n    'bot/handlers/search\\.py',\n\\]\nok = True\nfor f in files:\n    try:\n        ast\\.parse\\(open\\(f, encoding='utf-8'\\)\\.read\\(\\)\\)\n        print\\(f'OK  \\{f\\}'\\)\n    except SyntaxError as e:\n        print\\(f'ERR \\{f\\}: \\{e\\}'\\)\n        ok = False\nsys\\.exit\\(0 if ok else 1\\)\n\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^cd c:\\\\Users\\\\sherh\\\\music-bot ; python -c \"\nimport json, sys\nfor f in \\['bot/i18n/ru\\.json', 'bot/i18n/en\\.json', 'bot/i18n/kg\\.json'\\]:\n    try:\n        json\\.load\\(open\\(f, encoding='utf-8'\\)\\)\n        print\\(f'OK  \\{f\\}'\\)\n    except Exception as e:\n        print\\(f'ERR \\{f\\}: \\{e\\}'\\)\n        sys\\.exit\\(1\\)\n\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^cd c:\\\\Users\\\\sherh\\\\music-bot ; python -c \"\nfrom bot\\.services\\.yandex_provider import is_yandex_music_url, _YANDEX_TRACK_RE\ntests = \\[\n    \\('https://music\\.yandex\\.ru/album/36480973/track/138819422', True, '138819422'\\),\n    \\('https://music\\.yandex\\.ru/album/36480973/track/138819422\\?utm_medium=copy_link&ref_id=abc', True, '138819422'\\),\n    \\('https://music\\.yandex\\.com/album/123/track/456', True, '456'\\),\n    \\('https://music\\.yandex\\.kz/album/99/track/77', True, '77'\\),\n    \\('https://open\\.spotify\\.com/track/abc123', False, None\\),\n    \\('just some text', False, None\\),\n\\]\nok = True\nfor url, expected, expected_id in tests:\n    result = is_yandex_music_url\\(url\\)\n    if result != expected:\n        print\\(f'FAIL: \\{url\\} -> \\{result\\} \\(expected \\{expected\\}\\)'\\)\n        ok = False\n    elif expected_id:\n        m = _YANDEX_TRACK_RE\\.search\\(url\\)\n        tid = m\\.group\\(1\\)\n        if tid != expected_id:\n            print\\(f'FAIL ID: \\{url\\} -> \\{tid\\} \\(expected \\{expected_id\\}\\)'\\)\n            ok = False\n        else:\n            print\\(f'OK: \\{url\\} -> track_id=\\{tid\\}'\\)\n    else:\n        print\\(f'OK: \\{url\\} -> not a YM link'\\)\nif ok:\n    print\\('All tests passed!'\\)\n\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   },
   "python-envs.defaultEnvManager": "ms-python.python:system"
 }
