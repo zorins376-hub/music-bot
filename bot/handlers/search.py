@@ -19,7 +19,8 @@ from bot.config import settings
 from bot.db import get_or_create_user, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
-from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
+from bot.services.downloader import cleanup_file, download_track, search_tracks
+from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, search_spotify
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
@@ -135,15 +136,32 @@ async def _do_search(message: Message, query: str) -> None:
                 await message.answer(t(lang, "rate_limit_exceeded"))
             return
 
-    # Spotify link → extract metadata → YouTube search
+    # Spotify link → resolve via Spotify API, show track directly
     if is_spotify_url(query):
         status = await message.answer(t(lang, "spotify_detected"))
-        resolved = await resolve_spotify(query)
-        if resolved:
-            query = resolved
-        else:
+        track_info = await resolve_spotify_url(query)
+        if not track_info:
             await status.edit_text(t(lang, "no_results"))
             return
+        await record_listening_event(
+            user_id=user.id, query=query[:500], action="search", source="spotify"
+        )
+        requests_total.labels(source="spotify").inc()
+        is_group = message.chat.type in ("group", "supergroup")
+        if is_group:
+            await _group_auto_play(message, status, user, track_info)
+        else:
+            session_id = secrets.token_urlsafe(6)
+            await cache.store_search(session_id, [track_info])
+            keyboard = _build_results_keyboard([track_info], session_id)
+            await status.edit_text(
+                f"{_SEARCH_LOGO}\n\n"
+                f"▸ Spotify\n"
+                f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        return
     # Yandex Music link → fetch track directly, skip search
     elif is_yandex_music_url(query):
         status = await message.answer(t(lang, "yandex_link_detected"))
@@ -220,7 +238,13 @@ async def _do_search(message: Message, query: str) -> None:
     if results:
         requests_total.labels(source="yandex").inc()
 
-    # STEP 3: SoundCloud
+    # STEP 3: Spotify
+    if not results:
+        results = await search_spotify(query, limit=max_results)
+        if results:
+            requests_total.labels(source="spotify").inc()
+
+    # STEP 4: SoundCloud
     if not results:
         results = await cache.get_query_cache(query, "soundcloud")
         if results is None:
@@ -228,13 +252,13 @@ async def _do_search(message: Message, query: str) -> None:
             if results:
                 await cache.set_query_cache(query, results, "soundcloud")
 
-    # STEP 4: VK Music
+    # STEP 5: VK Music
     if not results:
         results = await search_vk(query, limit=max_results)
         if results:
             requests_total.labels(source="vk").inc()
 
-    # STEP 5: YouTube — последний резерв
+    # STEP 6: YouTube — последний резерв
     if not results:
         results = await cache.get_query_cache(query, "youtube")
         if results is None:
@@ -259,7 +283,7 @@ async def _do_search(message: Message, query: str) -> None:
     await cache.store_search(session_id, results)
     keyboard = _build_results_keyboard(results, session_id)
     _src = results[0].get("source", "youtube")
-    source_tag = {"soundcloud": "▸ SoundCloud", "vk": "▸ VK Music", "yandex": "▸ Яндекс.Музыка"}.get(_src, "▸ YouTube")
+    source_tag = {"soundcloud": "▸ SoundCloud", "vk": "▸ VK Music", "yandex": "▸ Яндекс.Музыка", "spotify": "▸ Spotify"}.get(_src, "▸ YouTube")
     await status.edit_text(
         f"{_SEARCH_LOGO}\n\n"
         f"<b>{t(lang, 'search_results')}:</b> {query}\n"
@@ -267,6 +291,26 @@ async def _do_search(message: Message, query: str) -> None:
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+
+async def _download_spotify_track(track_info: dict, bitrate: int) -> Path:
+    """Download a Spotify track via Yandex Music (preferred) or YouTube fallback."""
+    query = track_info.get("yt_query") or f"{track_info['uploader']} - {track_info['title']}"
+    video_id = track_info["video_id"]
+
+    # Try Yandex first — best quality
+    ym_results = await search_yandex(query, limit=1)
+    if ym_results and ym_results[0].get("ym_track_id"):
+        dest = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+        await download_yandex(ym_results[0]["ym_track_id"], dest, bitrate)
+        return dest
+
+    # Fallback: search YouTube and download
+    yt_results = await search_tracks(query, max_results=1, source="youtube")
+    if yt_results:
+        return await download_track(yt_results[0]["video_id"], bitrate)
+
+    raise RuntimeError(f"No downloadable source found for Spotify track: {query}")
 
 
 async def _group_auto_play(
@@ -319,6 +363,8 @@ async def _group_auto_play(
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
+        elif track_info.get("source") == "spotify":
+            mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
             mp3_path = await download_track(video_id, bitrate)
         file_size = mp3_path.stat().st_size
@@ -510,6 +556,8 @@ async def handle_track_select(
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
+        elif track_info.get("source") == "spotify":
+            mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
             mp3_path = await download_track(video_id, bitrate)
         file_size = mp3_path.stat().st_size

@@ -19,6 +19,7 @@ redis[asyncio]>=5.0.0
 fakeredis>=2.0.0
 # ── Music APIs ────────────────────────────────────────────
 yandex-music>=2.0.0
+spotipy>=2.23.0
 
 # ── Recognition ───────────────────────────────────────────
 shazamio>=0.4.0

@@ -63,7 +63,7 @@
   "automix_done": "✦ <b>AUTO MIX</b> ready!\n\nTracks: {count} · Crossfade: {crossfade}s",
   "automix_error": "Failed to create mix. Try again later.",
 
-  "spotify_detected": "● Spotify link detected. Searching on YouTube...",
+  "spotify_detected": "● Spotify link detected. Loading track...",
   "yandex_link_detected": "● Yandex Music link detected. Loading track...",
   "found_local": "▹ Found in channel database:",
   "quality_premium_only": "▣ 320 kbps is available only for Premium subscribers",
@@ -134,7 +134,7 @@
   "faq_title": "◌ <b>FAQ — Complete Bot Guide</b>",
   "faq_sections": "\nChoose a section:",
   "faq_search_title": "◈ <b>Search & Download</b>",
-  "faq_search_text": "<b>In DM:</b>\nJust type a track name or artist — the bot will find results. Pick one — it'll be downloaded and sent.\n\n<b>Command /search:</b>\n<code>/search Imagine Dragons</code>\n\n<b>Links:</b>\n• <b>Yandex Music</b> — paste a link like <code>https://music.yandex.ru/album/.../track/...</code> — bot downloads that exact track at 320 kbps\n• <b>Spotify</b> — paste a track link — bot finds it on YouTube\n\n<b>Sources (searched in order):</b>\n1. Local DB (TEQUILA / FULLMOON channels)\n2. Yandex Music — up to 320 kbps\n3. SoundCloud\n4. VK Music\n5. YouTube — last resort\n\n<b>Limits:</b>\n• Max duration — 10 minutes\n• Max file size — 45 MB\n• If too large, bitrate is automatically reduced",
+  "faq_search_text": "<b>In DM:</b>\nJust type a track name or artist — the bot will find results. Pick one — it'll be downloaded and sent.\n\n<b>Command /search:</b>\n<code>/search Imagine Dragons</code>\n\n<b>Links:</b>\n• <b>Yandex Music</b> — paste a link like <code>https://music.yandex.ru/album/.../track/...</code> — bot downloads that exact track at 320 kbps\n• <b>Spotify</b> — paste a track link — bot finds and downloads it\n\n<b>Sources (searched in order):</b>\n1. Local DB (TEQUILA / FULLMOON channels)\n2. Yandex Music — up to 320 kbps\n3. Spotify\n4. SoundCloud\n5. VK Music\n6. YouTube — last resort\n\n<b>Limits:</b>\n• Max duration — 10 minutes\n• Max file size — 45 MB\n• If too large, bitrate is automatically reduced",
   "faq_group_title": "💬 <b>Bot in Groups</b>",
   "faq_group_text": "Add the bot to a group chat for everyone to search music.\n\n<b>Triggers:</b>\n• <code>/search Drake</code>\n• <code>play Imagine Dragons</code>\n• <code>@TSmymusicbot_bot query</code>\n\n<b>How it works:</b>\n• Bot auto-downloads the first match\n• Cleans up messages after sending\n• Ignores random messages without triggers",
   "faq_inline_title": "◎ <b>Inline Mode</b>",
