@@ -21,7 +21,7 @@ from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, is_spotify_url, resolve_spotify, search_tracks
 from bot.services.vk_provider import download_vk, search_vk
-from bot.services.yandex_provider import download_yandex, search_yandex
+from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 
 logger = logging.getLogger(__name__)
@@ -144,6 +144,32 @@ async def _do_search(message: Message, query: str) -> None:
         else:
             await status.edit_text(t(lang, "no_results"))
             return
+    # Yandex Music link → fetch track directly, skip search
+    elif is_yandex_music_url(query):
+        status = await message.answer(t(lang, "yandex_link_detected"))
+        track_info = await resolve_yandex_url(query)
+        if not track_info:
+            await status.edit_text(t(lang, "no_results"))
+            return
+        await record_listening_event(
+            user_id=user.id, query=query[:500], action="search", source="yandex"
+        )
+        requests_total.labels(source="yandex").inc()
+        is_group = message.chat.type in ("group", "supergroup")
+        if is_group:
+            await _group_auto_play(message, status, user, track_info)
+        else:
+            session_id = secrets.token_urlsafe(6)
+            await cache.store_search(session_id, [track_info])
+            keyboard = _build_results_keyboard([track_info], session_id)
+            await status.edit_text(
+                f"{_SEARCH_LOGO}\n\n"
+                f"▸ Яндекс.Музыка\n"
+                f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        return
     else:
         await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
         status = await message.answer(t(lang, "searching"))

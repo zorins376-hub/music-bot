@@ -64,6 +64,7 @@
   "automix_error": "Не удалось создать микс. Попробуй позже.",
 
   "spotify_detected": "● Spotify ссылка обнаружена. Ищу на YouTube...",
+  "yandex_link_detected": "● Ссылка Яндекс.Музыки обнаружена. Загружаю трек...",
   "found_local": "▹ Найдено в базе каналов:",
   "quality_premium_only": "▣ 320 kbps доступно только для Premium-подписчиков",
   "top_period_today": "сегодня",

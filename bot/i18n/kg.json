@@ -64,6 +64,7 @@
   "automix_error": "Микс жасоо мүмкүн болгон жок. Кийинчерээк аракет кылыңыз.",
 
   "spotify_detected": "● Spotify шилтемеси табылды. YouTube'дан издеп жатам...",
+  "yandex_link_detected": "● Яндекс.Музыка шилтемеси табылды. Трек жүктөлүүдө...",
   "found_local": "▹ Канал базасынан табылды:",
   "quality_premium_only": "▣ 320 kbps Premium колдонуучулар үчүн гана",
   "top_period_today": "бүгүн",

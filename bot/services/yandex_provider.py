@@ -10,6 +10,7 @@
 import asyncio
 import itertools
 import logging
+import re
 import tempfile
 from pathlib import Path
 
@@ -174,3 +175,48 @@ async def download_yandex(track_id: int, dest: Path, bitrate: int = 320) -> Path
     if not dest.exists() or dest.stat().st_size < 1024:
         raise RuntimeError(f"Downloaded file too small or missing: {dest}")
     return dest
+
+
+# ── Yandex Music link resolver ───────────────────────────────────────────
+
+_YANDEX_TRACK_RE = re.compile(
+    r"https?://music\.yandex\.(?:ru|com|kz|by|uz)/album/\d+/track/(\d+)"
+)
+
+
+def is_yandex_music_url(text: str) -> bool:
+    return bool(_YANDEX_TRACK_RE.search(text))
+
+
+async def resolve_yandex_url(url: str) -> dict | None:
+    """Resolve a Yandex Music track URL to an internal track dict.
+
+    Returns a dict compatible with search results (video_id, ym_track_id,
+    title, uploader, duration, source='yandex') or None on failure.
+    """
+    m = _YANDEX_TRACK_RE.search(url)
+    if not m:
+        return None
+    track_id = int(m.group(1))
+
+    token = _next_token()
+    if not token:
+        logger.warning("resolve_yandex_url: no Yandex token configured")
+        return None
+    try:
+        from yandex_music import ClientAsync  # noqa: F401
+    except ImportError:
+        return None
+
+    try:
+        client = await _get_client(token)
+        if client is None:
+            return None
+        tracks = await client.tracks([track_id])
+        if not tracks:
+            return None
+        return _track_to_dict(tracks[0], source_id=f"ym_{track_id}")
+    except Exception as e:
+        logger.error("resolve_yandex_url error for track %s: %s", track_id, e)
+        _clients.pop(token, None)
+        return None

@@ -64,6 +64,7 @@
   "automix_error": "Failed to create mix. Try again later.",
 
   "spotify_detected": "● Spotify link detected. Searching on YouTube...",
+  "yandex_link_detected": "● Yandex Music link detected. Loading track...",
   "found_local": "▹ Found in channel database:",
   "quality_premium_only": "▣ 320 kbps is available only for Premium subscribers",
   "top_period_today": "today",
