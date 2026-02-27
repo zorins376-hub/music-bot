@@ -14,7 +14,7 @@ if app_settings.SENTRY_DSN:
     import sentry_sdk
     sentry_sdk.init(dsn=app_settings.SENTRY_DSN, traces_sample_rate=0.05)
 
-from bot.handlers import admin, charts, history, inline, search, start, video
+from bot.handlers import admin, charts, faq, history, inline, search, start, video
 from bot.handlers import radio, premium, recommend, playlist, recognize
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
@@ -63,6 +63,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="profile", description="◉ Мой профиль"),
         BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
+        BotCommand(command="faq", description="❓ FAQ"),
     ]
     try:
         await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
@@ -125,6 +126,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ
+    dp.include_router(faq.router)                # FAQ
     dp.include_router(settings_handler.router)  # /settings (quality)
     dp.include_router(charts.router)              # Top charts
     dp.include_router(video.router)                # Video search & download

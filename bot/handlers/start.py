@@ -37,6 +37,7 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
+            InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
         ],
     ]
     if admin:
@@ -111,6 +112,14 @@ async def handle_charts_button(callback: CallbackQuery) -> None:
     from bot.handlers.charts import cmd_charts
     await callback.answer()
     await cmd_charts(callback.message)
+
+
+@router.callback_query(lambda c: c.data == "action:faq")
+async def handle_faq_button(callback: CallbackQuery) -> None:
+    from bot.handlers.faq import send_faq
+    user = await get_or_create_user(callback.from_user)
+    await callback.answer()
+    await send_faq(callback.message, user.language)
 
 
 @router.callback_query(lambda c: c.data == "action:menu")
