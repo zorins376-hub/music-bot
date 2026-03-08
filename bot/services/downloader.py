@@ -156,6 +156,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "no_warnings": True,
         "default_search": search_prefix,
         "socket_timeout": 15,
+        "ignore_no_formats_error": True,
         **_base_opts(),
     }
     try:
@@ -283,7 +284,7 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
     height = int(quality)
     output_template = str(output_dir / f"{video_id}_v{quality}.%(ext)s")
     ydl_opts = {
-        "format": f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best[height<={height}]",
+        "format": f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]",
         "outtmpl": output_template,
         "merge_output_format": "mp4",
         "postprocessors": [{"key": "FFmpegMetadata"}],
