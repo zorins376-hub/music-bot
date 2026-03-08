@@ -2,13 +2,14 @@ import logging
 
 from aiogram.types import User as TgUser
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import case, desc, select, update
+from sqlalchemy import case, desc, or_, select, text, update
 from sqlalchemy.sql import func
 
 from bot.config import settings
 
 logger = logging.getLogger(__name__)
 from bot.models.base import async_session
+from bot.models.admin_log import AdminLog
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
 
@@ -214,24 +215,101 @@ async def get_user_stats(user_id: int) -> dict:
 
 
 async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:
-    """Search tracks in local DB (channels TEQUILA / FULLMOON first, then all)."""
-    q = f"%{query}%"
+    """Search tracks in local DB with fuzzy matching + transliteration."""
+    from bot.models.base import _is_pg
+    from bot.services.search_engine import (
+        detect_script, normalize_query, transliterate_cyr_to_lat, transliterate_lat_to_cyr,
+    )
+
+    norm = normalize_query(query)
+    queries = [norm]
+    script = detect_script(norm)
+    if script == "cyrillic":
+        queries.append(transliterate_cyr_to_lat(norm))
+    elif script == "latin":
+        queries.append(transliterate_lat_to_cyr(norm))
+
     async with async_session() as session:
-        # Priority: channel tracks first, then external
+        if _is_pg:
+            # PostgreSQL: use pg_trgm similarity for fuzzy matching
+            combined = func.lower(func.concat(func.coalesce(Track.artist, ''), ' ', func.coalesce(Track.title, '')))
+            conditions = []
+            for q in queries:
+                conditions.append(func.similarity(combined, q) > 0.15)
+                conditions.append(combined.ilike(f"%{q}%"))
+            result = await session.execute(
+                select(Track)
+                .where(or_(*conditions))
+                .order_by(
+                    case(
+                        (Track.channel == "tequila", 0),
+                        (Track.channel == "fullmoon", 1),
+                        else_=2,
+                    ),
+                    func.similarity(combined, norm).desc(),
+                    Track.downloads.desc(),
+                )
+                .limit(limit)
+            )
+        else:
+            # SQLite fallback: ILIKE on all query variants
+            conditions = []
+            for q in queries:
+                pat = f"%{q}%"
+                conditions.append(Track.title.ilike(pat))
+                conditions.append(Track.artist.ilike(pat))
+            result = await session.execute(
+                select(Track)
+                .where(or_(*conditions))
+                .order_by(
+                    case(
+                        (Track.channel == "tequila", 0),
+                        (Track.channel == "fullmoon", 1),
+                        else_=2,
+                    ),
+                    Track.downloads.desc(),
+                )
+                .limit(limit)
+            )
+        return list(result.scalars().all())
+
+
+async def get_popular_titles(limit: int = 500) -> list[str]:
+    """Return popular 'artist - title' strings for suggestion corpus."""
+    async with async_session() as session:
         result = await session.execute(
-            select(Track)
-            .where(
-                (Track.title.ilike(q)) | (Track.artist.ilike(q))
+            select(
+                func.coalesce(Track.artist, ''),
+                func.coalesce(Track.title, ''),
             )
-            .order_by(
-                # channel tracks first (tequila/fullmoon), then external
-                case(
-                    (Track.channel == "tequila", 0),
-                    (Track.channel == "fullmoon", 1),
-                    else_=2,
-                ),
-                Track.downloads.desc(),
-            )
+            .order_by(Track.downloads.desc())
             .limit(limit)
+        )
+        return [
+            f"{artist} - {title}".strip(" -")
+            for artist, title in result.all()
+            if artist or title
+        ]
+
+
+async def log_admin_action(
+    admin_id: int, action: str, target_user_id: int | None = None, details: str | None = None,
+) -> None:
+    """Write an admin audit log entry."""
+    async with async_session() as session:
+        session.add(AdminLog(
+            admin_id=admin_id,
+            action=action,
+            target_user_id=target_user_id,
+            details=details,
+        ))
+        await session.commit()
+
+
+async def get_admin_logs(limit: int = 20) -> list[AdminLog]:
+    """Return the most recent admin log entries."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(AdminLog).order_by(AdminLog.created_at.desc()).limit(limit)
         )
         return list(result.scalars().all())

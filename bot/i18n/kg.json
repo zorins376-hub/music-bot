@@ -4,6 +4,7 @@
   "search_prompt": "Ырдын атын же аткаруучуну жаз:",
   "searching": "◈ Издеп жатам...",
   "no_results": "Эч нерсе табылган жок. Суроону так жаз.",
+  "did_you_mean": "Балким, сиз муну айткыңыз келген:",
   "downloading": "▽ Жүктөп жатам...",
   "error_download": "Ырды жүктөп алуу мүмкүн болгон жок. Башка ырды сынап көр.",
   "error_age_restricted": "△ Бул ырда жаш чектөөсү бар (18+). Башка ырды сынаңыз.",
@@ -129,7 +130,8 @@
   "my_stats_since": "▸ Баштан бери: <b>{date}</b>",
 
   "shazam_recognizing": "◈ Ырды таанытып жатам...",
-  "shazam_recognized": "◈ Таанытылды: <b>{artist}</b> — <b>{title}</b>\n\nИздеп жатам...",
+  "shazam_recognized": "◈ Таанытылды: <b>{artist}</b> — <b>{title}</b>",
+  "shazam_other_versions": "Башка версиялар",
   "shazam_not_recognized": "◈ Ырды таанытуу мүмкүн болгон жок. Узунураак фрагмент жөнөт (кеминде 5 секунд).",
   "shazam_error": "◈ Таанытуу катасы. Кийинчерек аракет кылыңыз.",
   "shazam_too_short": "◈ Фрагмент өтө кыска. Кеминде 5 секунд.",
@@ -163,5 +165,14 @@
   "faq_profile_text": "/profile · /stats · /history · /top",
   "faq_commands_title": "⌘ <b>Бардык буйруктар</b>",
   "faq_commands_text": "/start · /search · /video · /charts · /playlist · /top · /history · /stats · /profile · /settings · /lang · /help · /faq\n\nИнлайн: @TSmymusicbot_bot суроо",
-  "faq_back": "◁ FAQ'га кайтуу"
+  "faq_back": "◁ FAQ'га кайтуу",
+  "queue_empty": "Кезек бош. Трек жүктөп, ➕ баскычын басыңыз",
+  "queue_added": "✅ Кезекке кошулду: {title}",
+  "queue_full": "Кезек толук (макс. 50 трек)",
+  "queue_header": "🎶 <b>Кезек ({count})</b>",
+  "queue_cleared": "🗑 Кезек тазаланды",
+  "queue_shuffled": "🔀 Кезек аралаштырылды",
+  "queue_no_next": "Кезек бош — кийинки трек жок",
+  "lyrics_not_found": "📝 Ыр тексти табылган жок",
+  "lyrics_full_link": "Genius'те толук текст ➜"
 }

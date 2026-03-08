@@ -2,7 +2,7 @@
 recommend.py — AI DJ «По вашему вкусу» + Onboarding.
 
 Onboarding: 3 вопроса для новых пользователей (стиль, вайб, артисты).
-Recommendations: на основе истории + профиля пользователя.
+Recommendations: на основе истории + профиля пользователя (via recommender/ai_dj.py).
 """
 import secrets
 
@@ -18,7 +18,10 @@ from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
 from bot.services.cache import cache
+from bot.callbacks import TrackCallback
+from bot.utils import fmt_duration
 from bot.services.downloader import search_tracks
+from recommender.ai_dj import get_recommendations
 
 router = Router()
 
@@ -162,82 +165,30 @@ async def handle_artists_input(message: Message, state: FSMContext) -> None:
 async def _show_recommendations(message: Message, user: User) -> None:
     lang = user.language
 
-    async with async_session() as session:
-        # Recommendations based on user's most played tracks
-        result = await session.execute(
-            select(Track, func.count(ListeningHistory.id).label("cnt"))
-            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-            .where(
-                ListeningHistory.user_id == user.id,
-                ListeningHistory.action == "play",
-            )
-            .group_by(Track.id)
-            .order_by(desc("cnt"))
-            .limit(5)
-        )
-        personal_rows = result.all()
+    # Use AI DJ engine (collaborative + content-based + fallback)
+    all_tracks = await get_recommendations(user.id, limit=10)
 
-        # If user has genres set, also find popular tracks in those genres
-        genre_tracks = []
-        if user.fav_genres:
-            genre_result = await session.execute(
-                select(Track)
-                .where(Track.genre.in_(user.fav_genres))
-                .order_by(Track.downloads.desc())
-                .limit(5)
-            )
-            genre_tracks = genre_result.scalars().all()
-
-    # Build combined track list
-    all_tracks: list[dict] = []
-    seen_ids: set[str] = set()
-
-    for track, _cnt in personal_rows:
-        if track.source_id not in seen_ids:
-            seen_ids.add(track.source_id)
-            all_tracks.append({
-                "video_id": track.source_id,
-                "title": track.title or "Unknown",
-                "uploader": track.artist or "Unknown",
-                "duration": track.duration or 0,
-                "duration_fmt": _fmt_dur(track.duration),
-                "source": track.source or "youtube",
-                "file_id": track.file_id,
-            })
-
-    for track in genre_tracks:
-        if track.source_id not in seen_ids and len(all_tracks) < 10:
-            seen_ids.add(track.source_id)
-            all_tracks.append({
-                "video_id": track.source_id,
-                "title": track.title or "Unknown",
-                "uploader": track.artist or "Unknown",
-                "duration": track.duration or 0,
-                "duration_fmt": _fmt_dur(track.duration),
-                "source": track.source or "youtube",
-                "file_id": track.file_id,
-            })
-
-    # If nothing found in DB, search YouTube by fav artists/genres
-    if not all_tracks and user.fav_artists:
-        query = " ".join(user.fav_artists[:2])
-        yt_results = await search_tracks(query, max_results=5, source="youtube")
-        all_tracks.extend(yt_results)
-    elif not all_tracks and user.fav_genres:
-        genre_to_query = {
-            "electro": "electronic music mix",
-            "hiphop": "hip hop trending",
-            "pop": "pop hits 2026",
-            "rock": "rock music",
-            "rnb": "r&b music",
-            "lofi": "lo-fi chill beats",
-            "latin": "latin music hits",
-            "classical": "classical music",
-        }
-        genre_key = user.fav_genres[0] if user.fav_genres else "pop"
-        query = genre_to_query.get(genre_key, "trending music")
-        yt_results = await search_tracks(query, max_results=5, source="youtube")
-        all_tracks.extend(yt_results)
+    # If AI DJ returns nothing, try YouTube search by fav artists/genres
+    if not all_tracks:
+        if user.fav_artists:
+            query = " ".join(user.fav_artists[:2])
+            yt_results = await search_tracks(query, max_results=5, source="youtube")
+            all_tracks.extend(yt_results)
+        elif user.fav_genres:
+            genre_to_query = {
+                "electro": "electronic music mix",
+                "hiphop": "hip hop trending",
+                "pop": "pop hits 2025",
+                "rock": "rock music",
+                "rnb": "r&b music",
+                "lofi": "lo-fi chill beats",
+                "latin": "latin music hits",
+                "classical": "classical music",
+            }
+            genre_key = user.fav_genres[0] if user.fav_genres else "pop"
+            query = genre_to_query.get(genre_key, "trending music")
+            yt_results = await search_tracks(query, max_results=5, source="youtube")
+            all_tracks.extend(yt_results)
 
     if not all_tracks:
         await message.answer(t(lang, "recommend_no_history"), parse_mode="HTML")
@@ -249,9 +200,6 @@ async def _show_recommendations(message: Message, user: User) -> None:
     await record_listening_event(
         user_id=user.id, action="search", source="recommend"
     )
-
-    # Build clickable keyboard (import TrackCallback from search handler)
-    from bot.handlers.search import TrackCallback
 
     buttons = []
     for i, tr in enumerate(all_tracks[:10]):
@@ -270,10 +218,3 @@ async def _show_recommendations(message: Message, user: User) -> None:
         reply_markup=keyboard,
         parse_mode="HTML",
     )
-
-
-def _fmt_dur(seconds: int | None) -> str:
-    if not seconds:
-        return "?:??"
-    m, s = divmod(seconds, 60)
-    return f"{m}:{s:02d}"

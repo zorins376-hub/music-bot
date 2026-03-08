@@ -4,6 +4,7 @@
   "search_prompt": "Type a track name or artist:",
   "searching": "◈ Searching...",
   "no_results": "Nothing found. Try a different query.",
+  "did_you_mean": "Did you mean:",
   "downloading": "▽ Downloading...",
   "error_download": "Failed to download the track. Try another one.",
   "error_age_restricted": "△ This track is age-restricted (18+). Try another one.",
@@ -129,7 +130,8 @@
   "my_stats_since": "▸ Member since: <b>{date}</b>",
 
   "shazam_recognizing": "◈ Recognizing track...",
-  "shazam_recognized": "◈ Recognized: <b>{artist}</b> — <b>{title}</b>\n\nSearching...",
+  "shazam_recognized": "◈ Recognized: <b>{artist}</b> — <b>{title}</b>",
+  "shazam_other_versions": "Other versions",
   "shazam_not_recognized": "◈ Could not recognize the track. Try sending a longer fragment (at least 5 seconds).",
   "shazam_error": "◈ Recognition error. Try again later.",
   "shazam_too_short": "◈ Fragment too short. Minimum 5 seconds.",
@@ -163,5 +165,14 @@
   "faq_profile_text": "/profile — your profile\n/stats — download statistics\n/history — recent searches\n/top — global top tracks",
   "faq_commands_title": "⌘ <b>All Commands</b>",
   "faq_commands_text": "/start · /search · /video · /charts · /playlist · /top · /history · /stats · /profile · /settings · /lang · /help · /faq\n\nInline: @TSmymusicbot_bot query",
-  "faq_back": "◁ Back to FAQ"
+  "faq_back": "◁ Back to FAQ",
+  "queue_empty": "Queue is empty. Download a track and add it with ➕",
+  "queue_added": "✅ Added to queue: {title}",
+  "queue_full": "Queue is full (max 50 tracks)",
+  "queue_header": "🎶 <b>Queue ({count})</b>",
+  "queue_cleared": "🗑 Queue cleared",
+  "queue_shuffled": "🔀 Queue shuffled",
+  "queue_no_next": "Queue is empty — no next track",
+  "lyrics_not_found": "📝 Lyrics not found",
+  "lyrics_full_link": "Full lyrics on Genius ➜"
 }

@@ -1,14 +1,15 @@
+import io
 import json
 import logging
 
 from aiogram import Bot, F, Router
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import func, select, update
 
 from bot.config import settings
-from bot.db import get_or_create_user, is_admin, upsert_track
+from bot.db import get_admin_logs, get_or_create_user, is_admin, log_admin_action, upsert_track
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Payment, Track
@@ -90,13 +91,19 @@ async def _build_detailed_stats() -> str:
             select(func.count()).select_from(User)
             .where(User.created_at >= week_ago)
         ) or 0
-        active_today = await session.scalar(
+
+        # ── DAU / WAU / MAU ───────────────────────
+        dau = await session.scalar(
             select(func.count()).select_from(User)
             .where(User.last_active >= today_start)
         ) or 0
-        active_week = await session.scalar(
+        wau = await session.scalar(
             select(func.count()).select_from(User)
             .where(User.last_active >= week_ago)
+        ) or 0
+        mau = await session.scalar(
+            select(func.count()).select_from(User)
+            .where(User.last_active >= month_ago)
         ) or 0
         banned_count = await session.scalar(
             select(func.count()).select_from(User)
@@ -108,7 +115,6 @@ async def _build_detailed_stats() -> str:
             select(func.count()).select_from(User)
             .where(User.is_premium == True)  # noqa: E712
         ) or 0
-        # Admin-granted premium = admins with premium (no premium_until)
         admin_premium = await session.scalar(
             select(func.count()).select_from(User)
             .where(User.is_premium == True, User.premium_until == None)  # noqa: E711,E712
@@ -160,6 +166,29 @@ async def _build_detailed_stats() -> str:
             .where(ListeningHistory.action == "dislike")
         ) or 0
 
+        # ── Source breakdown ──────────────────────
+        source_result = await session.execute(
+            select(ListeningHistory.source, func.count().label("cnt"))
+            .where(ListeningHistory.action == "play")
+            .group_by(ListeningHistory.source)
+        )
+        source_stats = {row[0] or "unknown": row[1] for row in source_result.all()}
+        total_plays_all = sum(source_stats.values()) or 1
+
+        # ── Top-10 queries today ──────────────────
+        top_queries_r = await session.execute(
+            select(ListeningHistory.query, func.count().label("cnt"))
+            .where(
+                ListeningHistory.action == "search",
+                ListeningHistory.created_at >= today_start,
+                ListeningHistory.query.is_not(None),
+            )
+            .group_by(ListeningHistory.query)
+            .order_by(func.count().desc())
+            .limit(10)
+        )
+        top_queries = top_queries_r.all()
+
         # ── Top 5 tracks ─────────────────────────
         top_tracks_result = await session.execute(
             select(Track.artist, Track.title, Track.downloads)
@@ -183,8 +212,7 @@ async def _build_detailed_stats() -> str:
         f"  Всего: <b>{user_total}</b>",
         f"  Новых сегодня: <b>{users_today}</b>",
         f"  Новых за неделю: <b>{users_week}</b>",
-        f"  Активных сегодня: <b>{active_today}</b>",
-        f"  Активных за неделю: <b>{active_week}</b>",
+        f"  DAU: <b>{dau}</b> | WAU: <b>{wau}</b> | MAU: <b>{mau}</b>",
         f"  Забанено: <b>{banned_count}</b>",
         "",
         "<b>◇ Premium:</b>",
@@ -208,11 +236,23 @@ async def _build_detailed_stats() -> str:
         f"  Поисков сегодня: <b>{searches_today}</b>",
         f"  Лайков: <b>{likes}</b> | Дизлайков: <b>{dislikes}</b>",
         "",
-        "<b>○ Языки:</b>",
+        "<b>📊 Источники (play):</b>",
     ]
+    for src, cnt in sorted(source_stats.items(), key=lambda x: -x[1]):
+        pct = cnt * 100 / total_plays_all
+        lines.append(f"  {src}: <b>{cnt}</b> ({pct:.1f}%)")
+
+    lines.append("")
+    lines.append("<b>○ Языки:</b>")
     for lang_code, count in sorted(lang_stats.items(), key=lambda x: -x[1]):
         flag = {"ru": "🇷🇺", "kg": "🇰🇬", "en": "🇬🇧"}.get(lang_code, "?")
         lines.append(f"  {flag} {lang_code}: <b>{count}</b>")
+
+    if top_queries:
+        lines.append("")
+        lines.append("<b>🔍 Топ запросы сегодня:</b>")
+        for i, (query, cnt) in enumerate(top_queries, 1):
+            lines.append(f"  {i}. {(query or '?')[:40]} ({cnt})")
 
     if top_tracks:
         lines.append("")
@@ -221,6 +261,64 @@ async def _build_detailed_stats() -> str:
             lines.append(f"  {i}. {artist or '?'} — {title or '?'} ({downloads} скач.)")
 
     return "\n".join(lines)
+
+
+async def _export_stats_csv(message: Message) -> None:
+    """Export users, tracks and recent activity as CSV."""
+    import csv
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    async with async_session() as session:
+        # ── Users sheet ──
+        buf.write("# USERS\n")
+        writer.writerow(["id", "username", "first_name", "language", "quality",
+                         "is_premium", "is_banned", "request_count", "created_at", "last_active"])
+        users = (await session.execute(select(User).order_by(User.created_at.desc()))).scalars().all()
+        for u in users:
+            writer.writerow([
+                u.id, u.username or "", u.first_name or "", u.language,
+                u.quality, u.is_premium, u.is_banned, u.request_count,
+                str(u.created_at)[:19], str(u.last_active)[:19],
+            ])
+
+        # ── Tracks sheet ──
+        buf.write("\n# TRACKS\n")
+        writer.writerow(["id", "source_id", "source", "artist", "title",
+                         "genre", "duration", "downloads", "created_at"])
+        tracks = (await session.execute(
+            select(Track).order_by(Track.downloads.desc()).limit(500)
+        )).scalars().all()
+        for tr in tracks:
+            writer.writerow([
+                tr.id, tr.source_id, tr.source, tr.artist or "",
+                tr.title or "", tr.genre or "", tr.duration or "",
+                tr.downloads, str(tr.created_at)[:19],
+            ])
+
+        # ── Recent activity ──
+        buf.write("\n# LISTENING_HISTORY (last 7 days)\n")
+        writer.writerow(["user_id", "track_id", "action", "source", "query", "created_at"])
+        events = (await session.execute(
+            select(ListeningHistory)
+            .where(ListeningHistory.created_at >= week_ago)
+            .order_by(ListeningHistory.created_at.desc())
+            .limit(2000)
+        )).scalars().all()
+        for ev in events:
+            writer.writerow([
+                ev.user_id, ev.track_id or "", ev.action,
+                ev.source or "", (ev.query or "")[:80],
+                str(ev.created_at)[:19],
+            ])
+
+    data = buf.getvalue().encode("utf-8")
+    doc = BufferedInputFile(data, filename=f"stats_{now.strftime('%Y%m%d_%H%M')}.csv")
+    await message.answer_document(doc, caption="📊 Экспорт статистики")
 
 
 def _admin_panel_keyboard() -> InlineKeyboardMarkup:
@@ -341,6 +439,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         label = f"@{target.username}" if target.username else str(target.id)
         await message.answer(f"Пользователь {label} заблокирован.")
         logger.info("Admin %s banned user %s", message.from_user.id, target.id)
+        await log_admin_action(message.from_user.id, "ban", target.id)
 
     # /admin unban <user_id | @username>
     elif subcmd == "unban":
@@ -358,6 +457,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             await session.commit()
         label = f"@{target.username}" if target.username else str(target.id)
         await message.answer(f"Пользователь {label} разблокирован.")
+        await log_admin_action(message.from_user.id, "unban", target.id)
 
     # /admin broadcast <текст>
     elif subcmd == "broadcast":
@@ -366,6 +466,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             return
         text = args[2]
         await _broadcast(bot, message, text)
+        await log_admin_action(message.from_user.id, "broadcast", details=text[:200])
 
     # /admin premium <user_id | @username>  — выдать premium вручную
     elif subcmd == "premium":
@@ -383,6 +484,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             await session.commit()
         label = f"@{target.username}" if target.username else str(target.id)
         await message.answer(f"Premium выдан пользователю {label}.")
+        await log_admin_action(message.from_user.id, "premium", target.id)
 
     # /admin queue — текущая очередь эфира
     elif subcmd == "queue":
@@ -458,6 +560,24 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             return
         await _load_channel_tracks(bot, message, channel_ref, label)
 
+    # /admin audit — last 20 admin actions
+    elif subcmd == "audit":
+        logs = await get_admin_logs(limit=20)
+        if not logs:
+            await message.answer("Журнал пуст.")
+            return
+        lines = ["<b>📋 Журнал действий:</b>\n"]
+        for entry in logs:
+            ts = entry.created_at.strftime("%d.%m %H:%M") if entry.created_at else "?"
+            target = f" → {entry.target_user_id}" if entry.target_user_id else ""
+            detail = f" | {entry.details[:60]}" if entry.details else ""
+            lines.append(f"<code>{ts}</code> [{entry.action}] admin:{entry.admin_id}{target}{detail}")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    # /admin export — CSV stats export
+    elif subcmd == "export":
+        await _export_stats_csv(message)
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -470,7 +590,9 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin skip — пропустить трек\n"
             "/admin mode &lt;режим&gt; — режим эфира\n"
             "/admin tracks &lt;tequila|fullmoon&gt; — управление треками\n"
-            "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить из канала",
+            "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить из канала\n"
+            "/admin audit — журнал действий\n"
+            "/admin export — экспорт статистики CSV",
             parse_mode="HTML",
         )
 
@@ -649,6 +771,7 @@ async def handle_grant_premium(callback: CallbackQuery, callback_data: AdmUserCb
             update(User).where(User.id == callback_data.uid).values(is_premium=True)
         )
         await session.commit()
+    await log_admin_action(callback.from_user.id, "premium", callback_data.uid)
     await callback.answer("\u25c7 Premium \u0432\u044b\u0434\u0430\u043d", show_alert=False)
     text, kb = await _build_user_list_kb(callback_data.p)
     try:
@@ -667,6 +790,7 @@ async def handle_revoke_premium(callback: CallbackQuery, callback_data: AdmUserC
             update(User).where(User.id == callback_data.uid).values(is_premium=False, premium_until=None)
         )
         await session.commit()
+    await log_admin_action(callback.from_user.id, "unprem", callback_data.uid)
     await callback.answer("\u2717 Premium \u0441\u043d\u044f\u0442", show_alert=False)
     text, kb = await _build_user_list_kb(callback_data.p)
     try:

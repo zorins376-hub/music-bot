@@ -47,10 +47,7 @@ def _get_client():
         return None
 
 
-def _fmt_dur(ms: int) -> str:
-    s = ms // 1000
-    m, sec = divmod(s, 60)
-    return f"{m}:{sec:02d}"
+from bot.utils import fmt_duration_ms as _fmt_dur
 
 
 def _track_to_dict(track: dict) -> dict | None:

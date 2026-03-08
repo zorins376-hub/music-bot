@@ -62,10 +62,7 @@ async def _get_client(token: str):
         return None
 
 
-def _fmt_dur(ms: int) -> str:
-    s = ms // 1000
-    m, sec = divmod(s, 60)
-    return f"{m}:{sec:02d}"
+# _fmt_dur removed — yandex uses inline formatting in _track_to_dict
 
 
 def _track_to_dict(track, source_id: str | None = None) -> dict | None:

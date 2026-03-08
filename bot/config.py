@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     # ── Sentry ───────────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
 
+    # ── Genius (lyrics) ──────────────────────────────────────────────────
+    GENIUS_TOKEN: Optional[str] = None
+
     # ── Prometheus metrics ────────────────────────────────────────────
     METRICS_PORT: int = 0   # 0 = disabled; set e.g. 9090 to enable
     # ── Premium (Telegram Stars) ─────────────────────────────────────────

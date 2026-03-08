@@ -5,9 +5,9 @@ import tempfile
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.db import get_or_create_user
+from bot.db import get_or_create_user, record_listening_event
 from bot.i18n import t
 
 logger = logging.getLogger(__name__)
@@ -89,8 +89,29 @@ async def _recognize_and_search(message: Message, file_id: str, suffix: str) -> 
             await status.edit_text(t(lang, "shazam_not_recognized"))
             return
 
-        await status.edit_text(t(lang, "shazam_recognized", artist=artist, title=title))
-        await _do_search(message, f"{artist} - {title}")
+        # TASK-018: Show preview with action buttons
+        search_query = f"{artist} - {title}"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🔍 {t(lang, 'shazam_other_versions')}",
+                    switch_inline_query_current_chat=search_query,
+                ),
+            ],
+        ])
+        await status.edit_text(
+            f"🎵 {t(lang, 'shazam_recognized', artist=artist, title=title)}",
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+
+        # Record recognition event
+        await record_listening_event(
+            user_id=user.id, query=search_query[:500], action="search", source="shazam",
+        )
+
+        # Auto-search for download
+        await _do_search(message, search_query)
 
     except Exception as e:
         logger.error("Shazam recognition failed: %s", e)

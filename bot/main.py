@@ -15,7 +15,7 @@ if app_settings.SENTRY_DSN:
     sentry_sdk.init(dsn=app_settings.SENTRY_DSN, traces_sample_rate=0.05)
 
 from bot.handlers import admin, charts, faq, history, inline, search, start, video
-from bot.handlers import radio, premium, recommend, playlist, recognize
+from bot.handlers import radio, premium, recommend, playlist, recognize, queue
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
@@ -133,6 +133,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ
+    dp.include_router(queue.router)      # Queue
     dp.include_router(faq.router)                # FAQ
     dp.include_router(settings_handler.router)  # /settings (quality)
     dp.include_router(charts.router)              # Top charts

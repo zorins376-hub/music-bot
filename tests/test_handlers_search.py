@@ -85,7 +85,7 @@ class TestFmtDuration:
 
     def test_zero(self):
         from bot.handlers.search import _fmt_duration
-        assert _fmt_duration(0) == "?:??"
+        assert _fmt_duration(0) == "0:00"
 
     def test_none(self):
         from bot.handlers.search import _fmt_duration
@@ -107,7 +107,8 @@ class TestFeedbackKeyboard:
         from bot.handlers.search import _feedback_keyboard
         kb = _feedback_keyboard(42)
         row = kb.inline_keyboard[0]
-        assert len(row) == 3  # like, dislike, add to playlist
+        assert len(row) == 4  # like, dislike, add to playlist, add to queue
+        assert len(kb.inline_keyboard) == 2  # row2 = lyrics button
 
 
 # ── cmd_search ───────────────────────────────────────────────────────────

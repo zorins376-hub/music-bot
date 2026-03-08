@@ -1,12 +1,14 @@
+import io
+import json as _json
 import logging
 import random as _random
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -19,6 +21,7 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.playlist import Playlist, PlaylistTrack
 from bot.models.track import Track
+from bot.callbacks import AddToPlCb
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -26,6 +29,8 @@ router = Router()
 MAX_PLAYLISTS = 20
 MAX_TRACKS_PER_PLAYLIST = 50
 
+
+from aiogram.filters.callback_data import CallbackData
 
 class PlCb(CallbackData, prefix="pl"):
     """Playlist action callback."""
@@ -103,6 +108,10 @@ def _playlist_view_kb(
         InlineKeyboardButton(
             text=t(lang, "pl_delete_btn"),
             callback_data=PlCb(act="del", id=pl_id).pack(),
+        ),
+        InlineKeyboardButton(
+            text="📤 Export",
+            callback_data=PlCb(act="exp", id=pl_id).pack(),
         ),
         InlineKeyboardButton(
             text=t(lang, "pl_back_btn"),
@@ -355,13 +364,47 @@ async def cb_shuffle(callback: CallbackQuery, callback_data: PlCb) -> None:
     await _send_playlist_tracks(callback, callback_data.id, shuffle=True)
 
 
+# ── Export playlist (TASK-017) ───────────────────────────────────────────
+
+
+@router.callback_query(PlCb.filter(F.act == "exp"))
+async def cb_export(callback: CallbackQuery, callback_data: PlCb) -> None:
+    """Export playlist as TXT file."""
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
+    async with async_session() as session:
+        pl = await session.get(Playlist, callback_data.id)
+        if not pl or pl.user_id != user.id:
+            await callback.message.answer(t(user.language, "pl_not_found"))
+            return
+        result = await session.execute(
+            select(Track)
+            .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+            .where(PlaylistTrack.playlist_id == pl.id)
+            .order_by(PlaylistTrack.position)
+        )
+        tracks = list(result.scalars().all())
+
+    if not tracks:
+        await callback.message.answer(t(user.language, "pl_empty"))
+        return
+
+    lines = [f"# {pl.name}\n"]
+    for i, tr in enumerate(tracks, 1):
+        dur = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else "?:??"
+        lines.append(f"{i}. {tr.artist or '?'} - {tr.title or '?'} ({dur})")
+
+    txt_content = "\n".join(lines).encode("utf-8")
+    safe_name = pl.name.replace(" ", "_")[:30]
+    await callback.message.answer_document(
+        document=BufferedInputFile(txt_content, filename=f"playlist_{safe_name}.txt"),
+        caption=f"📤 {pl.name} — {len(tracks)} треков",
+    )
+
+
 # ── Add track to playlist (called from search after download) ────────────
 
-
-class AddToPlCb(CallbackData, prefix="apl"):
-    """Add to playlist callback."""
-    tid: int   # track DB id
-    pid: int = 0   # playlist id (0 = pick playlist)
+# AddToPlCb imported from bot.callbacks
 
 
 @router.callback_query(AddToPlCb.filter(F.pid == 0))

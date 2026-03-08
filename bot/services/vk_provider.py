@@ -12,6 +12,7 @@ from pathlib import Path
 import aiohttp
 
 from bot.config import settings
+from bot.utils import fmt_duration as _fmt_dur
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,7 @@ def _get_vk_audio():
     return None
 
 
-def _fmt_dur(s: int) -> str:
-    m, sec = divmod(s, 60)
-    return f"{m}:{sec:02d}"
+# _fmt_dur imported from bot.utils
 
 
 def _search_vk_sync(query: str, limit: int) -> list[dict]:

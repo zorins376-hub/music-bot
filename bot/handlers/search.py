@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import secrets
+import time
 from pathlib import Path
 
 from aiogram import Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
-from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 
 from bot.config import settings
-from bot.db import get_or_create_user, increment_request_count, record_listening_event, search_local_tracks, upsert_track
+from bot.db import get_or_create_user, get_popular_titles, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, search_tracks, is_youtube_url, extract_youtube_video_id, resolve_youtube_url
@@ -24,6 +24,9 @@ from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, s
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
+from bot.services.search_engine import deduplicate_results, suggest_query
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb
+from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,64 @@ _GROUP_CLEANUP_SEC = 60
 
 # Search result limits
 _MAX_RESULTS_GROUP = 1      # In groups — just one track
+
+# ── Download progress ─────────────────────────────────────────────────────
+
+_PROGRESS_BARS = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
+
+
+def _make_progress_bar(pct: int) -> str:
+    """Build a compact 10-char progress bar from percentage."""
+    filled = pct // 10
+    return "█" * filled + "░" * (10 - filled)
+
+
+def _make_progress_cb(status_msg, lang: str):
+    """Create a thread-safe progress callback that throttles Telegram edits.
+
+    Returns (callback_fn, last_edit_state_dict).
+    The callback can be invoked from a worker thread — it schedules edits on the event loop.
+    """
+    loop = asyncio.get_event_loop()
+    state = {"last_pct": -1, "last_edit": 0.0}
+
+    def _on_progress(downloaded: int, total: int) -> None:
+        pct = int(downloaded * 100 / total) if total else 0
+        now = time.monotonic()
+        # Only update every 20% or every 3 seconds (Telegram rate limits)
+        if pct - state["last_pct"] < 20 and now - state["last_edit"] < 3:
+            return
+        state["last_pct"] = pct
+        state["last_edit"] = now
+        bar = _make_progress_bar(pct)
+        mb_dl = downloaded / (1024 * 1024)
+        mb_tt = total / (1024 * 1024)
+        text = f"⬇ {t(lang, 'downloading')} {pct}%\n{bar}  {mb_dl:.1f} / {mb_tt:.1f} MB"
+        asyncio.run_coroutine_threadsafe(_safe_edit(status_msg, text), loop)
+
+    return _on_progress
+
+
+async def _safe_edit(msg, text: str) -> None:
+    """Edit message text, ignoring any Telegram errors."""
+    try:
+        await msg.edit_text(text)
+    except Exception:
+        pass
+
+
+def _smart_bitrate(source: str | None, duration: int | None, default_br: int) -> int:
+    """TASK-024: Choose bitrate based on source and duration.
+
+    - Yandex → 320 (native)
+    - Duration > 300s (5 min) → 192 to save traffic
+    - Otherwise use default_br
+    """
+    if source == "yandex":
+        return 320
+    if duration and duration > 300:
+        return min(default_br, 192)
+    return default_br
 
 
 async def _get_bot_setting(key: str, default: str) -> str:
@@ -90,14 +151,7 @@ async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> N
             pass
 
 
-class TrackCallback(CallbackData, prefix="t"):
-    sid: str  # session ID
-    i: int    # result index
-
-
-class FeedbackCallback(CallbackData, prefix="fb"):
-    tid: int    # track DB id
-    act: str    # like / dislike
+# TrackCallback, FeedbackCallback, AddToPlCb imported from bot.callbacks
 
 
 def _track_caption(lang: str, track_info: dict, bitrate: int) -> str:
@@ -273,53 +327,62 @@ async def _do_search(message: Message, query: str) -> None:
         )
         return
 
-    # STEP 2: Яндекс.Музыка — 320 kbps, если токен есть
-    results = await cache.get_query_cache(query, "yandex")
-    if results is None:
-        results = await search_yandex(query, limit=max_results)
-        if results:
-            await cache.set_query_cache(query, results, "yandex")
-    if results:
-        requests_total.labels(source="yandex").inc()
+    # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
+    async def _search_source(source: str, search_fn, limit: int) -> list[dict]:
+        """Search a single source with cache and 8s timeout."""
+        try:
+            cached = await cache.get_query_cache(query, source)
+            if cached is not None:
+                return cached
+            res = await asyncio.wait_for(search_fn(query, limit=limit), timeout=8)
+            if res:
+                await cache.set_query_cache(query, res, source)
+                requests_total.labels(source=source).inc()
+            return res or []
+        except Exception:
+            logger.debug("search source %s failed", source, exc_info=True)
+            return []
 
-    # STEP 3: Spotify
-    if not results:
-        results = await cache.get_query_cache(query, "spotify")
-        if results is None:
-            results = await search_spotify(query, limit=max_results)
-            if results:
-                await cache.set_query_cache(query, results, "spotify")
-        if results:
-            requests_total.labels(source="spotify").inc()
+    async def _search_sc(query_: str, limit: int = 5) -> list[dict]:
+        return await search_tracks(query_, max_results=limit, source="soundcloud")
 
-    # STEP 4: SoundCloud
-    if not results:
-        results = await cache.get_query_cache(query, "soundcloud")
-        if results is None:
-            results = await search_tracks(query, max_results=max_results, source="soundcloud")
-            if results:
-                await cache.set_query_cache(query, results, "soundcloud")
+    async def _search_yt(query_: str, limit: int = 5) -> list[dict]:
+        return await search_tracks(query_, max_results=limit, source="youtube")
 
-    # STEP 5: VK Music
-    if not results:
-        results = await cache.get_query_cache(query, "vk")
-        if results is None:
-            results = await search_vk(query, limit=max_results)
-            if results:
-                await cache.set_query_cache(query, results, "vk")
-        if results:
-            requests_total.labels(source="vk").inc()
+    tasks = [
+        _search_source("yandex", search_yandex, max_results),
+        _search_source("spotify", search_spotify, max_results),
+        _search_source("soundcloud", _search_sc, max_results),
+        _search_source("vk", search_vk, max_results),
+        _search_source("youtube", _search_yt, max_results),
+    ]
+    source_results = await asyncio.gather(*tasks)
+    all_results: list[dict] = []
+    for batch in source_results:
+        all_results.extend(batch)
 
-    # STEP 6: YouTube — последний резерв
-    if not results:
-        results = await cache.get_query_cache(query, "youtube")
-        if results is None:
-            results = await search_tracks(query, max_results=max_results, source="youtube")
-            if results:
-                await cache.set_query_cache(query, results, "youtube")
+    # Deduplicate across sources
+    results = deduplicate_results(all_results)[:max_results] if all_results else []
 
     if not results:
-        await status.edit_text(t(lang, "no_results"))
+        # TASK-012: "Did you mean?" suggestions
+        try:
+            corpus = await get_popular_titles(limit=500)
+            suggestions = suggest_query(query, corpus, max_suggestions=1)
+        except Exception:
+            suggestions = []
+        if suggestions:
+            sug = suggestions[0]
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=f'🔍 "{sug}"', switch_inline_query_current_chat=sug),
+            ]])
+            await status.edit_text(
+                f"{t(lang, 'no_results')}\n\n💡 {t(lang, 'did_you_mean')}",
+                reply_markup=kb,
+                parse_mode="HTML",
+            )
+        else:
+            await status.edit_text(t(lang, "no_results"))
         return
 
     await record_listening_event(
@@ -334,12 +397,19 @@ async def _do_search(message: Message, query: str) -> None:
     session_id = secrets.token_urlsafe(6)
     await cache.store_search(session_id, results)
     keyboard = _build_results_keyboard(results, session_id)
-    _src = results[0].get("source", "youtube")
-    source_tag = {"soundcloud": "▸ SoundCloud", "vk": "▸ VK Music", "yandex": "▸ Яндекс.Музыка", "spotify": "▸ Spotify"}.get(_src, "▸ YouTube")
+    # Collect unique sources
+    _source_tags = {"soundcloud": "SoundCloud", "vk": "VK Music", "yandex": "Яндекс.Музыка", "spotify": "Spotify", "youtube": "YouTube", "channel": "Каталог"}
+    sources_used = []
+    for r in results:
+        s = r.get("source", "youtube")
+        tag = _source_tags.get(s, s)
+        if tag not in sources_used:
+            sources_used.append(tag)
+    source_line = " · ".join(sources_used) if sources_used else "YouTube"
     await status.edit_text(
         f"{_SEARCH_LOGO}\n\n"
         f"<b>{t(lang, 'search_results')}:</b> {query}\n"
-        f"{source_tag} \u00b7 {len(results)} \u0442\u0440\u0435\u043a\u043e\u0432",
+        f"▸ {source_line} · {len(results)} треков",
         reply_markup=keyboard,
         parse_mode="HTML",
     )
@@ -371,7 +441,9 @@ async def _group_auto_play(
     """In groups: download and send the first track immediately, then clean up."""
     lang = user.language
     default_br = int(await _get_bot_setting("default_bitrate", "192"))
-    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else default_br
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else _smart_bitrate(
+        track_info.get("source"), track_info.get("duration"), default_br
+    )
     video_id = track_info["video_id"]
 
     # Local file_id (channel tracks)
@@ -465,11 +537,8 @@ async def _delete_msgs(bot, chat_id: int, msg_ids: list[int]) -> None:
                 pass
 
 
-def _fmt_duration(seconds: int | None) -> str:
-    if not seconds:
-        return "?:??"
-    m, s = divmod(seconds, 60)
-    return f"{m}:{s:02d}"
+# fmt_duration imported from bot.utils
+_fmt_duration = fmt_duration
 
 
 @router.message(Command("search"))
@@ -557,7 +626,9 @@ async def handle_track_select(
     track_info = results[callback_data.i]
     video_id = track_info["video_id"]
     default_br = int(await _get_bot_setting("default_bitrate", "192"))
-    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else default_br
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else _smart_bitrate(
+        track_info.get("source"), track_info.get("duration"), default_br
+    )
 
     # If track already has a file_id from local DB (channel tracks)
     local_fid = track_info.get("file_id")
@@ -606,6 +677,7 @@ async def handle_track_select(
     await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     cache_misses.inc()
 
+    progress_cb = _make_progress_cb(status, lang)
     mp3_path: Path | None = None
 
     try:
@@ -618,7 +690,7 @@ async def handle_track_select(
         elif track_info.get("source") == "spotify":
             mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
-            mp3_path = await download_track(video_id, bitrate)
+            mp3_path = await download_track(video_id, bitrate, progress_cb=progress_cb)
         file_size = mp3_path.stat().st_size
 
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
@@ -708,7 +780,6 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
 
 
 def _feedback_keyboard(track_id: int) -> InlineKeyboardMarkup:
-    from bot.handlers.playlist import AddToPlCb
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -724,7 +795,17 @@ def _feedback_keyboard(track_id: int) -> InlineKeyboardMarkup:
                     text="+ \u25b8",
                     callback_data=AddToPlCb(tid=track_id).pack(),
                 ),
-            ]
+                InlineKeyboardButton(
+                    text="+ \u25b6",
+                    callback_data=AddToQueueCb(tid=track_id).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="\ud83d\udcdd \u0422\u0435\u043a\u0441\u0442",
+                    callback_data=LyricsCb(tid=track_id).pack(),
+                ),
+            ],
         ]
     )
 
@@ -748,4 +829,52 @@ async def handle_feedback(
     await callback.answer(t(user.language, "feedback_recorded", emoji=emoji))
     await callback.message.edit_text(
         t(user.language, "feedback_saved", emoji=emoji), reply_markup=None
+    )
+
+
+@router.callback_query(LyricsCb.filter())
+async def handle_lyrics(callback: CallbackQuery, callback_data: LyricsCb) -> None:
+    """Fetch and display lyrics for a track."""
+    from bot.services.lyrics_provider import get_lyrics
+    from bot.models.base import async_session
+    from bot.models.track import Track
+
+    try:
+        user = await get_or_create_user(callback.from_user)
+    except Exception:
+        await callback.answer()
+        return
+    lang = user.language
+    await callback.answer()
+
+    async with async_session() as session:
+        from sqlalchemy import select as _sel
+        result = await session.execute(
+            _sel(Track).where(Track.id == callback_data.tid)
+        )
+        track = result.scalar_one_or_none()
+
+    if not track:
+        await callback.message.answer(t(lang, "lyrics_not_found"))
+        return
+
+    artist = track.artist or ""
+    title = track.title or ""
+    lyrics_data = await get_lyrics(artist, title)
+
+    if not lyrics_data or not lyrics_data.get("lines"):
+        await callback.message.answer(t(lang, "lyrics_not_found"))
+        return
+
+    lines = lyrics_data["lines"]
+    url = lyrics_data.get("url", "")
+    text_parts = [f"📝 <b>{artist} — {title}</b>\n"]
+    text_parts.extend(lines)
+    if url:
+        text_parts.append(f"\n<a href=\"{url}\">{t(lang, 'lyrics_full_link')}</a>")
+
+    await callback.message.answer(
+        "\n".join(text_parts),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
     )

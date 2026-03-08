@@ -9,6 +9,7 @@ from pathlib import Path
 import yt_dlp
 
 from bot.config import settings, _COOKIES_PATH
+from bot.utils import fmt_duration as _fmt_duration
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +179,7 @@ def _parse_artist_title(raw_title: str, uploader: str) -> tuple[str, str]:
     return artist, cleaned or raw_title
 
 
-def _fmt_duration(seconds: int) -> str:
-    m, s = divmod(seconds, 60)
-    return f"{m}:{s:02d}"
+# _fmt_duration imported from bot.utils
 
 
 def _extract_year(entry: dict) -> str | None:
@@ -290,9 +289,17 @@ def _list_formats_debug(video_id: str) -> None:
         logger.error("DEBUG list-formats failed for %s: %s", video_id, e)
 
 
-def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
+def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=None) -> Path:
     url = f"https://www.youtube.com/watch?v={video_id}"
     output_template = str(output_dir / f"{video_id}.%(ext)s")
+
+    def _hook(d: dict) -> None:
+        if progress_cb and d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            downloaded = d.get("downloaded_bytes", 0)
+            if total > 0:
+                progress_cb(downloaded, total)
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
@@ -310,6 +317,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int) -> Path:
         "no_warnings": True,
         "socket_timeout": 20,
         "concurrent_fragment_downloads": 4,
+        "progress_hooks": [_hook],
         **_base_opts(),
         "match_filter": yt_dlp.utils.match_filter_func(
             f"duration <= {settings.MAX_DURATION}"
@@ -340,10 +348,10 @@ async def resolve_spotify(url: str) -> str | None:
     return await loop.run_in_executor(_ytdl_pool, _extract_spotify_meta, url)
 
 
-async def download_track(video_id: str, bitrate: int = 192) -> Path:
+async def download_track(video_id: str, bitrate: int = 192, progress_cb=None) -> Path:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        _ytdl_pool, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate
+        _ytdl_pool, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate, progress_cb
     )
 
 

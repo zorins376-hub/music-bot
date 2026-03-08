@@ -179,21 +179,43 @@ class TestHandleArtistsInput:
         state.clear.assert_called_once()
 
 
-# ── _fmt_dur ─────────────────────────────────────────────────────────────
+# ── _show_recommendations ────────────────────────────────────────────────
 
-class TestFmtDur:
-    def test_normal(self):
-        from bot.handlers.recommend import _fmt_dur
-        assert _fmt_dur(200) == "3:20"
+class TestShowRecommendations:
+    @pytest.mark.asyncio
+    @patch("bot.handlers.recommend.cache")
+    @patch("bot.handlers.recommend.record_listening_event", new_callable=AsyncMock)
+    @patch("bot.handlers.recommend.get_recommendations", new_callable=AsyncMock)
+    async def test_show_recs_with_ai_dj(self, mock_recs, mock_record, mock_cache):
+        from bot.handlers.recommend import _show_recommendations
+        mock_recs.return_value = [
+            {"video_id": "a", "title": "Song A", "uploader": "Artist", "duration": 180, "duration_fmt": "3:00", "source": "youtube"},
+        ]
+        mock_cache.store_search = AsyncMock()
+        user = _make_user(onboarded=True)
+        msg = MagicMock()
+        msg.answer = AsyncMock()
 
-    def test_none(self):
-        from bot.handlers.recommend import _fmt_dur
-        assert _fmt_dur(None) == "?:??"
+        await _show_recommendations(msg, user)
+        mock_recs.assert_called_once_with(1, limit=10)
+        msg.answer.assert_called()
 
-    def test_zero(self):
-        from bot.handlers.recommend import _fmt_dur
-        assert _fmt_dur(0) == "?:??"
+    @pytest.mark.asyncio
+    @patch("bot.handlers.recommend.search_tracks", new_callable=AsyncMock)
+    @patch("bot.handlers.recommend.cache")
+    @patch("bot.handlers.recommend.record_listening_event", new_callable=AsyncMock)
+    @patch("bot.handlers.recommend.get_recommendations", new_callable=AsyncMock)
+    async def test_fallback_to_youtube(self, mock_recs, mock_record, mock_cache, mock_yt):
+        from bot.handlers.recommend import _show_recommendations
+        mock_recs.return_value = []
+        mock_yt.return_value = [
+            {"video_id": "yt1", "title": "YT Song", "uploader": "YT", "duration": 200, "duration_fmt": "3:20", "source": "youtube"},
+        ]
+        mock_cache.store_search = AsyncMock()
+        user = _make_user(onboarded=True, fav_artists=["Nirvana"])
+        msg = MagicMock()
+        msg.answer = AsyncMock()
 
-    def test_exact_minute(self):
-        from bot.handlers.recommend import _fmt_dur
-        assert _fmt_dur(60) == "1:00"
+        await _show_recommendations(msg, user)
+        mock_yt.assert_called_once()
+        msg.answer.assert_called()
