@@ -44,6 +44,66 @@ _SPOTIFY_RE = re.compile(
     r"https?://open\.spotify\.com/track/[a-zA-Z0-9]+",
 )
 
+# YouTube URL regex — matches youtube.com, youtu.be, m.youtube.com, music.youtube.com
+_YOUTUBE_URL_RE = re.compile(
+    r"https?://(?:www\.|m\.|music\.)?(?:youtube\.com/watch\?[^\s]*v=|youtu\.be/)([a-zA-Z0-9_-]{11})",
+)
+
+
+def is_youtube_url(text: str) -> bool:
+    """Check if text contains a YouTube URL."""
+    return bool(_YOUTUBE_URL_RE.search(text))
+
+
+def extract_youtube_video_id(text: str) -> str | None:
+    """Extract YouTube video ID from a URL in text."""
+    m = _YOUTUBE_URL_RE.search(text)
+    return m.group(1) if m else None
+
+
+async def resolve_youtube_url(video_id: str) -> dict | None:
+    """Fetch metadata for a YouTube video ID and return a track_info dict."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(_ytdl_pool, _resolve_youtube_sync, video_id)
+    except Exception as e:
+        logger.error("YouTube resolve failed for %s: %s", video_id, e)
+        return None
+
+
+def _resolve_youtube_sync(video_id: str) -> dict | None:
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "socket_timeout": 15,
+        **_base_opts(),
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return None
+            duration = info.get("duration") or 0
+            if duration <= 0 or duration > settings.MAX_DURATION:
+                return None
+            raw_title = info.get("title") or "Unknown"
+            uploader = info.get("uploader") or info.get("channel") or "Unknown"
+            artist, title = _parse_artist_title(raw_title, uploader)
+            return {
+                "video_id": video_id,
+                "title": title,
+                "uploader": artist,
+                "duration": duration,
+                "duration_fmt": _fmt_duration(int(duration)),
+                "source": "youtube",
+                "upload_year": _extract_year(info),
+            }
+    except Exception as e:
+        logger.error("YouTube resolve sync error for %s: %s", video_id, e)
+        return None
+
 # Junk to strip from YouTube titles
 _TITLE_JUNK_RE = re.compile(
     r"\s*[\(\[]"

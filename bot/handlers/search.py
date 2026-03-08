@@ -19,7 +19,7 @@ from bot.config import settings
 from bot.db import get_or_create_user, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
-from bot.services.downloader import cleanup_file, download_track, search_tracks
+from bot.services.downloader import cleanup_file, download_track, search_tracks, is_youtube_url, extract_youtube_video_id, resolve_youtube_url
 from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, search_spotify
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
@@ -183,6 +183,35 @@ async def _do_search(message: Message, query: str) -> None:
             await status.edit_text(
                 f"{_SEARCH_LOGO}\n\n"
                 f"▸ Яндекс.Музыка\n"
+                f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        return
+    # YouTube link → resolve metadata, download directly
+    elif is_youtube_url(query):
+        video_id = extract_youtube_video_id(query)
+        if not video_id:
+            return
+        status = await message.answer(t(lang, "youtube_link_detected"))
+        track_info = await resolve_youtube_url(video_id)
+        if not track_info:
+            await status.edit_text(t(lang, "no_results"))
+            return
+        await record_listening_event(
+            user_id=user.id, query=query[:500], action="search", source="youtube"
+        )
+        requests_total.labels(source="youtube").inc()
+        is_group = message.chat.type in ("group", "supergroup")
+        if is_group:
+            await _group_auto_play(message, status, user, track_info)
+        else:
+            session_id = secrets.token_urlsafe(6)
+            await cache.store_search(session_id, [track_info])
+            keyboard = _build_results_keyboard([track_info], session_id)
+            await status.edit_text(
+                f"{_SEARCH_LOGO}\n\n"
+                f"▸ YouTube\n"
                 f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
                 reply_markup=keyboard,
                 parse_mode="HTML",
@@ -463,8 +492,11 @@ async def handle_text(message: Message) -> None:
                 matched_prefix = True
                 break
 
-    # In groups: only respond to trigger words, ignore random messages
+    # In groups: auto-convert YouTube/Spotify/Yandex links even without trigger prefix
     if is_group and not matched_prefix:
+        if is_youtube_url(text) or is_spotify_url(text) or is_yandex_music_url(text):
+            await _do_search(message, text)
+            return
         return
 
     if not text:
