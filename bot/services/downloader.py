@@ -13,7 +13,7 @@ from bot.config import settings, _COOKIES_PATH
 logger = logging.getLogger(__name__)
 
 # Dedicated thread pool for yt-dlp I/O operations
-_ytdl_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ytdl")
+_ytdl_pool = ThreadPoolExecutor(max_workers=settings.YTDL_WORKERS, thread_name_prefix="ytdl")
 
 
 def log_runtime_info() -> None:
@@ -110,6 +110,11 @@ _TITLE_JUNK_RE = re.compile(
     r"(?:official\s*(?:music\s*)?video|official\s*audio|official\s*lyric[s]?\s*video"
     r"|lyric[s]?\s*video|lyric[s]?|audio|music\s*video|видеоклип|клип|текст"
     r"|hd|hq|4k|1080p|720p|mv|m/v"
+    r"|remaster(?:ed)?(?:\s*\d{4})?"
+    r"|live(?:\s+(?:at|from|in)\s+[^)\]]+)?"
+    r"|explicit|deluxe(?:\s*edition)?"
+    r"|bonus\s*track|acoustic(?:\s*version)?"
+    r"|prod\.?\s*(?:by\s*)?[^)\]]*"
     r"|премьера\s*(?:клипа)?\s*,?\s*\d{4}|премьера\s*\d{4}"
     r"|ft\.?[^)\]]*|feat\.?[^)\]]*)\s*[\)\]]",
     re.IGNORECASE,
@@ -122,12 +127,18 @@ _EXTRA_JUNK_RE = re.compile(
     r"|\s*\[\s*\]",
     re.IGNORECASE,
 )
+# Emoji / special Unicode blocks
+_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001F9FF\U00002700-\U000027BF\U0000FE00-\U0000FE0F"
+    "\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF\U00002600-\U000026FF]+",
+)
 
 
 def _clean_title(raw_title: str) -> str:
     """Strip common YouTube junk from title."""
     cleaned = _TITLE_JUNK_RE.sub("", raw_title)
     cleaned = _EXTRA_JUNK_RE.sub("", cleaned)
+    cleaned = _EMOJI_RE.sub("", cleaned)
     # Strip trailing standalone words: "lyrics", "audio", "video", "текст"
     cleaned = re.sub(r"\s+(?:lyrics|audio|video|текст)\s*$", "", cleaned, flags=re.IGNORECASE)
     # Normalize whitespace

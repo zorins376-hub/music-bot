@@ -123,6 +123,8 @@ async def search_yandex(query: str, limit: int = 5) -> list[dict]:
         for tr in result.tracks.results:
             d = _track_to_dict(tr)
             if d:
+                # Attach the token used for this search so download can reuse it
+                d["_ym_token"] = token
                 tracks.append(d)
             if len(tracks) >= limit:
                 break
@@ -134,9 +136,13 @@ async def search_yandex(query: str, limit: int = 5) -> list[dict]:
         return []
 
 
-async def download_yandex(track_id: int, dest: Path, bitrate: int = 320) -> Path:
-    """Download a Yandex Music track by numeric ID to dest (MP3)."""
-    token = _next_token()
+async def download_yandex(track_id: int, dest: Path, bitrate: int = 320, token: str | None = None) -> Path:
+    """Download a Yandex Music track by numeric ID to dest (MP3).
+
+    If ``token`` is provided, reuse it to keep search+download on the same token.
+    """
+    if token is None:
+        token = _next_token()
     if not token:
         raise RuntimeError("No Yandex token configured")
     try:

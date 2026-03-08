@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     COOLDOWN_REGULAR: int = 5
     COOLDOWN_PREMIUM: int = 1
 
+    # ── Thread pool ──────────────────────────────────────────────────────
+    YTDL_WORKERS: int = 4
+
     # ── Pyrogram userbot (v1.1) ───────────────────────────────────────────
     PYROGRAM_API_ID: Optional[int] = None
     PYROGRAM_API_HASH: Optional[str] = None

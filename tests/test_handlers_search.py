@@ -236,6 +236,8 @@ class TestSearchCascade:
         mock_cache.redis = AsyncMock()
         mock_cache.redis.get = AsyncMock(return_value="10")  # max_results
         mock_cache.store_search = AsyncMock()
+        mock_cache.get_query_cache = AsyncMock(return_value=None)
+        mock_cache.set_query_cache = AsyncMock()
         mock_local.return_value = []
         mock_ym.return_value = [_track_info()]
         mock_metrics.labels = MagicMock(return_value=MagicMock())

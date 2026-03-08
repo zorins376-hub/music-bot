@@ -1,11 +1,18 @@
 import json
 import logging
+import time
+from collections import defaultdict
 
 import redis.asyncio as aioredis
 
 from bot.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ── In-memory fallback rate limiter (used when Redis is unavailable) ─────
+_mem_counts: dict[int, list[float]] = defaultdict(list)
+_mem_cooldowns: dict[int, float] = {}
+_redis_down_logged = False
 
 
 def _make_redis() -> aioredis.Redis:
@@ -91,7 +98,7 @@ class Cache:
         Returns (allowed, cooldown_seconds).
         cooldown_seconds > 0 → слишком быстро.
         cooldown_seconds == 0 → превышен часовой лимит.
-        Redis unavailable → (True, 0) — allow all requests.
+        Redis unavailable → in-memory fallback (stricter limits).
         """
         try:
             cooldown_key = f"cd:{user_id}"
@@ -112,7 +119,41 @@ class Cache:
             await self.redis.setex(cooldown_key, cooldown, "1")
             return True, 0
         except Exception:
-            return True, 0  # Redis unavailable → allow all requests
+            # Redis unavailable → in-memory fallback with stricter limits
+            return self._check_rate_limit_memory(user_id, is_premium)
+
+    @staticmethod
+    def _check_rate_limit_memory(
+        user_id: int, is_premium: bool
+    ) -> tuple[bool, int]:
+        """In-memory rate limiter used when Redis is down."""
+        global _redis_down_logged
+        if not _redis_down_logged:
+            logger.warning("Redis unavailable — using in-memory rate limiter")
+            _redis_down_logged = True
+
+        now = time.monotonic()
+
+        # Cooldown check
+        cd_end = _mem_cooldowns.get(user_id, 0)
+        if now < cd_end:
+            return False, max(1, int(cd_end - now))
+
+        # Hourly limit (stricter: 8 for regular, still high for premium)
+        max_limit = settings.RATE_LIMIT_PREMIUM if is_premium else max(settings.RATE_LIMIT_REGULAR - 2, 5)
+        timestamps = _mem_counts[user_id]
+        # Prune entries older than 1 hour
+        cutoff = now - 3600
+        _mem_counts[user_id] = [ts for ts in timestamps if ts > cutoff]
+        timestamps = _mem_counts[user_id]
+
+        if len(timestamps) >= max_limit:
+            return False, 0
+
+        timestamps.append(now)
+        cooldown = settings.COOLDOWN_PREMIUM if is_premium else settings.COOLDOWN_REGULAR
+        _mem_cooldowns[user_id] = now + cooldown
+        return True, 0
 
     async def close(self) -> None:
         if self._redis:

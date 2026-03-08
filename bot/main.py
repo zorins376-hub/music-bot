@@ -92,6 +92,13 @@ async def on_shutdown(bot: Bot) -> None:
     if app_settings.USE_WEBHOOK:
         await bot.delete_webhook()
     await cache.close()
+
+    # Gracefully shutdown thread pools
+    from bot.services.downloader import _ytdl_pool
+    from bot.services.vk_provider import _vk_pool
+    _ytdl_pool.shutdown(wait=False)
+    _vk_pool.shutdown(wait=False)
+
     logger.info("Bot stopped")
 
 

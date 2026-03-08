@@ -15,7 +15,7 @@ from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
-_vk_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vk")
+_vk_pool = ThreadPoolExecutor(max_workers=max(1, settings.YTDL_WORKERS // 2), thread_name_prefix="vk")
 _vk_audio: object = None   # cached VkAudio instance
 
 
@@ -86,7 +86,7 @@ async def search_vk(query: str, limit: int = 5) -> list[dict]:
 
 
 async def download_vk(url: str, dest: Path) -> Path:
-    """Fetch a direct VK MP3 URL and write it to dest."""
+    """Fetch a direct VK MP3 URL and stream it to dest."""
     headers = {
         "User-Agent": (
             "VKAndroidApp/7.48-16291 "
@@ -98,5 +98,7 @@ async def download_vk(url: str, dest: Path) -> Path:
             url, headers=headers, timeout=aiohttp.ClientTimeout(total=90)
         ) as resp:
             resp.raise_for_status()
-            dest.write_bytes(await resp.read())
+            with dest.open("wb") as f:
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    f.write(chunk)
     return dest

@@ -7,6 +7,8 @@
   "downloading": "▽ Downloading...",
   "error_download": "Failed to download the track. Try another one.",
   "error_age_restricted": "△ This track is age-restricted (18+). Try another one.",
+  "error_geo_restricted": "△ This track is not available in your region. Try another one.",
+  "error_timeout": "△ Server is not responding — please try again in a minute.",
   "error_too_large": "△ Track is too large. Trying lower bitrate...",
   "error_too_large_final": "Track is too long to send via Telegram.",
   "error_too_long": "Track is longer than 10 minutes — can't download.",
@@ -115,9 +117,10 @@
   "pl_track_no_file": "Track not downloaded yet. Find it via search first.",
   "pl_no_playable": "No playable tracks available.",
 
-  "captcha_prompt": "Solve to continue: <b>{a} + {b} = ?</b>",
+  "captcha_prompt": "Solve to continue: <b>{a} × {b} + {c} = ?</b>",
   "captcha_ok": "✓ Verified!",
   "captcha_fail": "✗ Wrong. Try again.",
+  "captcha_blocked": "⛔ Too many wrong attempts. Wait {minutes} min.",
 
   "my_stats_header": "◎ <b>My Stats</b>",
   "my_stats_total": "▸ Total downloads: <b>{count}</b> tracks",

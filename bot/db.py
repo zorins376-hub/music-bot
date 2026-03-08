@@ -36,6 +36,7 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 username=tg_user.username,
                 first_name=tg_user.first_name,
                 is_premium=admin,
+                is_admin=admin,
             )
             session.add(user)
             await session.commit()
@@ -48,14 +49,25 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 and user.premium_until is not None
                 and user.premium_until < now
             )
+            # BUG-005: premium=True but no expiry and not admin → revoke
+            orphaned_premium = (
+                not admin
+                and user.is_premium
+                and user.premium_until is None
+            )
             update_values: dict = {
                 "username": tg_user.username,
                 "first_name": tg_user.first_name,
                 "last_active": now,
             }
+            # Sync admin flag from config → DB
+            if admin and not user.is_admin:
+                update_values["is_admin"] = True
+            if not admin and user.is_admin:
+                update_values["is_admin"] = False
             if admin and not user.is_premium:
                 update_values["is_premium"] = True
-            if expired_premium:
+            if expired_premium or orphaned_premium:
                 update_values["is_premium"] = False
 
             await session.execute(
@@ -66,9 +78,11 @@ async def get_or_create_user(tg_user: TgUser) -> User:
             # Reflect changes on the in-memory object
             if "is_premium" in update_values:
                 user.is_premium = update_values["is_premium"]
+            if "is_admin" in update_values:
+                user.is_admin = update_values["is_admin"]
 
-        # Register admin ID dynamically (in-memory only, no extra query)
-        if admin and tg_user.id not in settings.ADMIN_IDS:
+        # Keep in-memory list in sync for fast checks elsewhere
+        if user.is_admin and tg_user.id not in settings.ADMIN_IDS:
             settings.ADMIN_IDS.append(tg_user.id)
 
         return user
@@ -158,28 +172,26 @@ async def upsert_track(
 
 
 async def get_user_stats(user_id: int) -> dict:
-    """Return personal play statistics for a user."""
+    """Return personal play statistics for a user (single optimized query)."""
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(weeks=1)
     async with async_session() as session:
-        total: int = (
+        # Combined query: total plays, weekly plays, and top artist in one round-trip
+        stats_row = (
             await session.execute(
-                select(func.count(ListeningHistory.id)).where(
-                    ListeningHistory.user_id == user_id,
-                    ListeningHistory.action == "play",
-                )
+                select(
+                    func.count(ListeningHistory.id).filter(
+                        ListeningHistory.action == "play"
+                    ).label("total"),
+                    func.count(ListeningHistory.id).filter(
+                        ListeningHistory.action == "play",
+                        ListeningHistory.created_at >= week_ago,
+                    ).label("week"),
+                ).where(ListeningHistory.user_id == user_id)
             )
-        ).scalar() or 0
-
-        week: int = (
-            await session.execute(
-                select(func.count(ListeningHistory.id)).where(
-                    ListeningHistory.user_id == user_id,
-                    ListeningHistory.action == "play",
-                    ListeningHistory.created_at >= week_ago,
-                )
-            )
-        ).scalar() or 0
+        ).first()
+        total = stats_row.total if stats_row else 0
+        week = stats_row.week if stats_row else 0
 
         top_row = (
             await session.execute(

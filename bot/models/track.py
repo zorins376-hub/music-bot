@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.models.base import Base
@@ -26,6 +26,10 @@ class Track(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    __table_args__ = (
+        Index("ix_tracks_downloads", "downloads"),
+    )
+
 
 class ListeningHistory(Base):
     """История прослушивания — основа для AI DJ рекомендаций."""
@@ -43,6 +47,10 @@ class ListeningHistory(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_lh_user_action_created", "user_id", "action", created_at.desc()),
     )
 
 

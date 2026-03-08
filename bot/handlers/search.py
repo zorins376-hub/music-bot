@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+
+def _classify_download_error(err_msg: str) -> str:
+    """Return i18n key for a download error message."""
+    if "Sign in to confirm your age" in err_msg:
+        return "error_age_restricted"
+    if "not available" in err_msg.lower() or "geo" in err_msg.lower() or "blocked" in err_msg.lower():
+        return "error_geo_restricted"
+    if "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
+        return "error_timeout"
+    return "error_download"
+
 # Group chat auto-cleanup timeout (seconds)
 _GROUP_CLEANUP_SEC = 60
 
@@ -263,13 +274,21 @@ async def _do_search(message: Message, query: str) -> None:
         return
 
     # STEP 2: Яндекс.Музыка — 320 kbps, если токен есть
-    results = await search_yandex(query, limit=max_results)
+    results = await cache.get_query_cache(query, "yandex")
+    if results is None:
+        results = await search_yandex(query, limit=max_results)
+        if results:
+            await cache.set_query_cache(query, results, "yandex")
     if results:
         requests_total.labels(source="yandex").inc()
 
     # STEP 3: Spotify
     if not results:
-        results = await search_spotify(query, limit=max_results)
+        results = await cache.get_query_cache(query, "spotify")
+        if results is None:
+            results = await search_spotify(query, limit=max_results)
+            if results:
+                await cache.set_query_cache(query, results, "spotify")
         if results:
             requests_total.labels(source="spotify").inc()
 
@@ -283,7 +302,11 @@ async def _do_search(message: Message, query: str) -> None:
 
     # STEP 5: VK Music
     if not results:
-        results = await search_vk(query, limit=max_results)
+        results = await cache.get_query_cache(query, "vk")
+        if results is None:
+            results = await search_vk(query, limit=max_results)
+            if results:
+                await cache.set_query_cache(query, results, "vk")
         if results:
             requests_total.labels(source="vk").inc()
 
@@ -388,7 +411,7 @@ async def _group_auto_play(
     try:
         if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate)
+            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
@@ -400,10 +423,17 @@ async def _group_auto_play(
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
             cleanup_file(mp3_path)
             mp3_path = None
-            mp3_path = await download_track(video_id, 128)
-            bitrate = 128
-            file_size = mp3_path.stat().st_size
+            try:
+                mp3_path = await download_track(video_id, 128)
+                bitrate = 128
+                file_size = mp3_path.stat().st_size
+            except Exception:
+                mp3_path = None
+                await status.edit_text(t(lang, "error_too_large_final"))
+                return
             if file_size > settings.MAX_FILE_SIZE:
+                cleanup_file(mp3_path)
+                mp3_path = None
                 await status.edit_text(t(lang, "error_too_large_final"))
                 return
         sent = await message.answer_audio(
@@ -419,10 +449,7 @@ async def _group_auto_play(
     except Exception as e:
         err_msg = str(e)
         logger.error("Group auto-play error for %s: %s", video_id, err_msg)
-        if "Sign in to confirm your age" in err_msg:
-            await status.edit_text(t(lang, "error_age_restricted"))
-        else:
-            await status.edit_text(t(lang, "error_download"))
+        await status.edit_text(t(lang, _classify_download_error(err_msg)))
     finally:
         if mp3_path:
             cleanup_file(mp3_path)
@@ -584,7 +611,7 @@ async def handle_track_select(
     try:
         if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate)
+            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
@@ -598,10 +625,17 @@ async def handle_track_select(
             cleanup_file(mp3_path)
             mp3_path = None
             await status.edit_text(t(lang, "error_too_large"))
-            mp3_path = await download_track(video_id, 128)
-            bitrate = 128
-            file_size = mp3_path.stat().st_size
+            try:
+                mp3_path = await download_track(video_id, 128)
+                bitrate = 128
+                file_size = mp3_path.stat().st_size
+            except Exception:
+                mp3_path = None
+                await status.edit_text(t(lang, "error_too_large_final"))
+                return
             if file_size > settings.MAX_FILE_SIZE:
+                cleanup_file(mp3_path)
+                mp3_path = None
                 await status.edit_text(t(lang, "error_too_large_final"))
                 return
 
@@ -627,10 +661,7 @@ async def handle_track_select(
     except Exception as e:
         err_msg = str(e)
         logger.error("Download error for %s: %s", video_id, err_msg)
-        if "Sign in to confirm your age" in err_msg:
-            await status.edit_text(t(lang, "error_age_restricted"))
-        else:
-            await status.edit_text(t(lang, "error_download"))
+        await status.edit_text(t(lang, _classify_download_error(err_msg)))
     finally:
         if mp3_path:
             cleanup_file(mp3_path)
