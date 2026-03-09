@@ -208,5 +208,12 @@
   "changelog_video": "Download YouTube video clips",
   "changelog_inline": "Inline mode in any chat",
   "changelog_groups": "Group chat support",
-  "changelog_premium": "Premium subscription (150 Stars)"
+  "changelog_premium": "Premium subscription (150 Stars)",
+
+  "fav_added": "❤️ Added to favorites",
+  "fav_exists": "Already in favorites",
+  "fav_removed": "💔 Removed from favorites",
+  "favorites_empty": "Favorites are empty. Download a track and tap ❤️ +",
+  "favorites_title": "❤️ <b>Favorite Tracks ({count})</b>",
+  "favorites_more": "... and {count} more tracks"
 }

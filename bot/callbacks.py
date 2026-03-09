@@ -32,3 +32,9 @@ class AddToQueueCb(CallbackData, prefix="aq"):
 class LyricsCb(CallbackData, prefix="lyr"):
     """Lyrics callback."""
     tid: int  # track DB id
+
+
+class FavoriteCb(CallbackData, prefix="fav"):
+    """Favorites callback."""
+    tid: int
+    act: str  # add / del

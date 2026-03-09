@@ -10,6 +10,7 @@ from bot.config import settings
 logger = logging.getLogger(__name__)
 from bot.models.base import async_session
 from bot.models.admin_log import AdminLog
+from bot.models.favorite import FavoriteTrack
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
 
@@ -338,6 +339,51 @@ async def log_admin_action(
             details=details,
         ))
         await session.commit()
+
+
+async def add_favorite_track(user_id: int, track_id: int) -> bool:
+    """Add track to favorites. Returns True if added, False if it already exists."""
+    async with async_session() as session:
+        exists = await session.scalar(
+            select(func.count())
+            .select_from(FavoriteTrack)
+            .where(FavoriteTrack.user_id == user_id, FavoriteTrack.track_id == track_id)
+        )
+        if exists:
+            return False
+        session.add(FavoriteTrack(user_id=user_id, track_id=track_id))
+        await session.commit()
+        return True
+
+
+async def remove_favorite_track(user_id: int, track_id: int) -> bool:
+    """Remove track from favorites. Returns True if removed."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(FavoriteTrack).where(
+                FavoriteTrack.user_id == user_id,
+                FavoriteTrack.track_id == track_id,
+            )
+        )
+        fav = result.scalar_one_or_none()
+        if fav is None:
+            return False
+        await session.delete(fav)
+        await session.commit()
+        return True
+
+
+async def get_favorite_tracks(user_id: int, limit: int = 50) -> list[Track]:
+    """Return user's favorite tracks ordered by newest first."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Track)
+            .join(FavoriteTrack, FavoriteTrack.track_id == Track.id)
+            .where(FavoriteTrack.user_id == user_id)
+            .order_by(FavoriteTrack.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
 
 async def get_admin_logs(limit: int = 20) -> list[AdminLog]:

@@ -16,6 +16,7 @@ if app_settings.SENTRY_DSN:
 
 from bot.handlers import admin, charts, faq, history, inline, search, start, video
 from bot.handlers import radio, premium, recommend, playlist, recognize, queue, referral
+from bot.handlers import favorites
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
@@ -71,6 +72,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="history", description="▹ Мои запросы"),
         BotCommand(command="settings", description="≡ Качество аудио"),
         BotCommand(command="playlist", description="▸ Плейлисты"),
+        BotCommand(command="favorites", description="❤️ Любимое"),
         BotCommand(command="profile", description="◉ Мой профиль"),
         BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
@@ -199,6 +201,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(start.router)
     dp.include_router(admin.router)      # Admin (before search for forward mode)
     dp.include_router(playlist.router)   # Playlists
+    dp.include_router(favorites.router)  # Favorites
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ

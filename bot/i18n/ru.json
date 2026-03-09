@@ -208,5 +208,12 @@
   "changelog_video": "Скачивание видеоклипов с YouTube",
   "changelog_inline": "Инлайн-режим в любом чате",
   "changelog_groups": "Поддержка групповых чатов",
-  "changelog_premium": "Premium подписка (150 Stars)"
+  "changelog_premium": "Premium подписка (150 Stars)",
+
+  "fav_added": "❤️ Добавлено в любимое",
+  "fav_exists": "Уже в любимом",
+  "fav_removed": "💔 Удалено из любимого",
+  "favorites_empty": "В любимом пока пусто. Скачай трек и нажми ❤️ +",
+  "favorites_title": "❤️ <b>Любимые треки ({count})</b>",
+  "favorites_more": "... и ещё {count} треков"
 }

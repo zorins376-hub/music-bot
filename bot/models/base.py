@@ -41,6 +41,7 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
     from bot.models.user import User  # noqa: F401
     from bot.models.track import Track, ListeningHistory, Payment  # noqa: F401
     from bot.models.playlist import Playlist, PlaylistTrack  # noqa: F401
+    from bot.models.favorite import FavoriteTrack  # noqa: F401
     from bot.models.admin_log import AdminLog  # noqa: F401
 
     last_exc: BaseException | None = None

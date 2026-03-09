@@ -208,5 +208,12 @@
   "changelog_video": "YouTube видеоклиптерин жүктөө",
   "changelog_inline": "Каалаган чатта инлайн режим",
   "changelog_groups": "Топтук чаттарды колдоо",
-  "changelog_premium": "Premium жазылуу (150 Stars)"
+  "changelog_premium": "Premium жазылуу (150 Stars)",
+
+  "fav_added": "❤️ Сүйүктүүлөргө кошулду",
+  "fav_exists": "Сүйүктүүлөрдө бар",
+  "fav_removed": "💔 Сүйүктүүлөрдөн өчүрүлдү",
+  "favorites_empty": "Сүйүктүүлөр азыр бош. Трек жүктөп, ❤️ + басыңыз",
+  "favorites_title": "❤️ <b>Сүйүктүү тректер ({count})</b>",
+  "favorites_more": "... жана дагы {count} трек"
 }

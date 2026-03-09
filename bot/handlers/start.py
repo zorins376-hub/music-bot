@@ -43,6 +43,9 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
+            InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
+        ],
+        [
             InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
         ],
     ]
@@ -199,6 +202,15 @@ async def handle_faq_button(callback: CallbackQuery) -> None:
     user = await get_or_create_user(callback.from_user)
     await callback.answer()
     await send_faq(callback.message, user.language)
+
+
+@router.callback_query(lambda c: c.data == "action:favorites")
+async def handle_favorites_button(callback: CallbackQuery) -> None:
+    from bot.handlers.favorites import send_favorites
+
+    user = await get_or_create_user(callback.from_user)
+    await callback.answer()
+    await send_favorites(callback.message, user.id, user.language)
 
 
 @router.callback_query(lambda c: c.data == "action:menu")

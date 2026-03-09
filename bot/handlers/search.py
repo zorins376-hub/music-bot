@@ -26,7 +26,7 @@ from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 from bot.services.search_engine import deduplicate_results, suggest_query
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, FavoriteCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -897,6 +897,10 @@ def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMa
             ),
         ],
         [
+            InlineKeyboardButton(
+                text="❤️ +",
+                callback_data=FavoriteCb(tid=track_id, act="add").pack(),
+            ),
             InlineKeyboardButton(
                 text="\ud83d\udcdd \u0422\u0435\u043a\u0441\u0442",
                 callback_data=LyricsCb(tid=track_id).pack(),
