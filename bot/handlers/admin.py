@@ -379,6 +379,9 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="◈ Рассылка", callback_data="adm:broadcast"),
             ],
             [
+                InlineKeyboardButton(text="🆕 Рассылка версии", callback_data="adm:release"),
+            ],
+            [
                 InlineKeyboardButton(text="◇ Дать Premium", callback_data="adm:premium"),
                 InlineKeyboardButton(text="✖ Бан", callback_data="adm:ban"),
             ],
@@ -746,6 +749,28 @@ async def handle_adm_queue(callback: CallbackQuery) -> None:
     except Exception:
         await callback.message.answer(
             "\n".join(lines), reply_markup=_back_to_panel_kb, parse_mode="HTML"
+        )
+
+
+@router.callback_query(lambda c: c.data == "adm:release")
+async def handle_adm_release(callback: CallbackQuery, bot: Bot) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer("Запускаю рассылку версии...")
+    from bot.main import _broadcast_version_update
+
+    await _broadcast_version_update(bot)
+    await log_admin_action(callback.from_user.id, "version_broadcast")
+    try:
+        await callback.message.edit_text(
+            "✅ Рассылка новой версии завершена. Проверь логи sent/failed.",
+            reply_markup=_back_to_panel_kb,
+        )
+    except Exception:
+        await callback.message.answer(
+            "✅ Рассылка новой версии завершена. Проверь логи sent/failed.",
+            reply_markup=_back_to_panel_kb,
         )
 
 
