@@ -13,3 +13,6 @@ cookies.txt
 cookie_debug.log
 export_log*.txt
 test_cookie_output.txt
+.claude/
+.vscode/
+nifty-growing-starlight.md
