@@ -173,6 +173,14 @@ async def _send_release_radar(bot) -> None:
                     ),
                 ]
             )
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=t(lang, "radar_mix_btn"),
+                        callback_data="action:mix",
+                    )
+                ]
+            )
 
             try:
                 await bot.send_message(
