@@ -55,3 +55,26 @@ async def cb_radar_toggle(callback: CallbackQuery) -> None:
         reply_markup=_radar_keyboard(lang, new_value),
         parse_mode="HTML",
     )
+
+
+@router.callback_query(lambda c: c.data == "radar:disable")
+async def cb_radar_disable(callback: CallbackQuery) -> None:
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+
+    async with async_session() as session:
+        await session.execute(
+            update(User).where(User.id == user.id).values(release_radar_enabled=False)
+        )
+        await session.commit()
+
+    await callback.answer(t(lang, "radar_updated"))
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(
+        t(lang, "radar_header", status=t(lang, "radar_status_off")),
+        reply_markup=_radar_keyboard(lang, False),
+        parse_mode="HTML",
+    )

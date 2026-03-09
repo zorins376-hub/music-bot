@@ -161,6 +161,14 @@ async def _send_release_radar(bot) -> None:
                         )
                     ]
                 )
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=t(lang, "radar_disable_btn"),
+                        callback_data="radar:disable",
+                    )
+                ]
+            )
 
             try:
                 await bot.send_message(
