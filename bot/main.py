@@ -233,6 +233,7 @@ async def _broadcast_version_update(bot: Bot) -> None:
         logger.info("Version broadcast: sending v%s to %d users", VERSION, len(users))
         sent = 0
         failed = 0
+        sent_user_ids: list[int] = []
 
         for user_id, language in users:
             lang = language or "ru"
@@ -243,19 +244,23 @@ async def _broadcast_version_update(bot: Bot) -> None:
             try:
                 await bot.send_message(user_id, message_text, parse_mode="HTML")
                 sent += 1
+                sent_user_ids.append(user_id)
             except Exception:
                 failed += 1
-            finally:
-                try:
-                    async with async_session() as session:
-                        await session.execute(
-                            update(User).where(User.id == user_id).values(last_seen_version=VERSION)
-                        )
-                        await session.commit()
-                except Exception:
-                    pass
 
             await asyncio.sleep(0.05)
+
+        if sent_user_ids:
+            try:
+                async with async_session() as session:
+                    await session.execute(
+                        update(User)
+                        .where(User.id.in_(sent_user_ids))
+                        .values(last_seen_version=VERSION)
+                    )
+                    await session.commit()
+            except Exception as e:
+                logger.error("Version broadcast post-update error: %s", e)
 
         logger.info("Version broadcast done: sent=%d, failed=%d", sent, failed)
 
