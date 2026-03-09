@@ -38,3 +38,9 @@ class FavoriteCb(CallbackData, prefix="fav"):
     """Favorites callback."""
     tid: int
     act: str  # add / del
+
+
+class ShareTrackCb(CallbackData, prefix="shtr"):
+    """Share track callback."""
+    tid: int
+    act: str  # mk / dl

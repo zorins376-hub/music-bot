@@ -215,5 +215,11 @@
   "fav_removed": "💔 Сүйүктүүлөрдөн өчүрүлдү",
   "favorites_empty": "Сүйүктүүлөр азыр бош. Трек жүктөп, ❤️ + басыңыз",
   "favorites_title": "❤️ <b>Сүйүктүү тректер ({count})</b>",
-  "favorites_more": "... жана дагы {count} трек"
+  "favorites_more": "... жана дагы {count} трек",
+
+  "share_track_created": "📤 <b>«{title}» трегине шилтеме</b>\n\n<code>{link}</code>",
+  "share_track_expired": "⚠️ Шилтеме жараксыз же мөөнөтү бүттү",
+  "share_track_open_header": "📥 <b>Сизге трек бөлүштү</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
+  "share_track_download_btn": "⬇️ Жүктөө",
+  "share_track_no_file": "⚠️ Файл кэште жок. Бул тректи /search аркылуу табыңыз"
 }

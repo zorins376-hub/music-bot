@@ -1,4 +1,5 @@
 import asyncio
+import json as _json
 import logging
 import secrets
 import time
@@ -26,12 +27,14 @@ from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 from bot.services.search_engine import deduplicate_results, suggest_query
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, FavoriteCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, FavoriteCb, ShareTrackCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+_TRACK_SHARE_TTL = 30 * 24 * 3600  # 30 days
 
 
 def _classify_download_error(err_msg: str) -> str:
@@ -905,6 +908,10 @@ def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMa
                 text="\ud83d\udcdd \u0422\u0435\u043a\u0441\u0442",
                 callback_data=LyricsCb(tid=track_id).pack(),
             ),
+            InlineKeyboardButton(
+                text="📤",
+                callback_data=ShareTrackCb(tid=track_id, act="mk").pack(),
+            ),
         ],
     ]
     # E-03: Share button
@@ -938,6 +945,113 @@ async def handle_feedback(
     await callback.message.edit_text(
         t(user.language, "feedback_saved", emoji=emoji), reply_markup=None
     )
+
+
+@router.callback_query(ShareTrackCb.filter())
+async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackCb) -> None:
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+
+    from bot.models.base import async_session
+    from bot.models.track import Track
+
+    async with async_session() as session:
+        from sqlalchemy import select as _sel
+
+        track = (
+            await session.execute(_sel(Track).where(Track.id == callback_data.tid))
+        ).scalar_one_or_none()
+
+    if not track:
+        await callback.answer(t(lang, "pl_not_found"), show_alert=True)
+        return
+
+    if callback_data.act == "mk":
+        share_id = secrets.token_urlsafe(8)
+        payload = _json.dumps({"track_id": track.id, "user_id": user.id})
+        try:
+            await cache.redis.setex(f"share:track:{share_id}", _TRACK_SHARE_TTL, payload)
+        except Exception:
+            await callback.answer("⚠️", show_alert=True)
+            return
+
+        bot_me = await callback.bot.me()
+        link = f"https://t.me/{bot_me.username}?start=tr_{share_id}"
+        await callback.answer()
+        await callback.message.answer(
+            t(lang, "share_track_created", title=track.title or "?", link=link),
+            parse_mode="HTML",
+        )
+        return
+
+    # act == "dl"
+    if track.file_id:
+        await callback.answer()
+        await callback.message.answer_audio(
+            audio=track.file_id,
+            title=track.title or "Unknown",
+            performer=track.artist or "Unknown",
+            duration=int(track.duration) if track.duration else None,
+            caption=t(lang, "shared_track_caption"),
+        )
+    else:
+        await callback.answer()
+        await callback.message.answer(t(lang, "share_track_no_file"))
+
+
+async def show_shared_track(message: Message, share_id: str) -> None:
+    """Display shared track from deep-link /start tr_<share_id>."""
+    user = await get_or_create_user(message.from_user)
+    lang = user.language
+
+    try:
+        raw = await cache.redis.get(f"share:track:{share_id}")
+    except Exception:
+        raw = None
+
+    if not raw:
+        await message.answer(t(lang, "share_track_expired"))
+        return
+
+    try:
+        data = _json.loads(raw)
+        track_id = int(data.get("track_id", 0))
+    except Exception:
+        await message.answer(t(lang, "share_track_expired"))
+        return
+
+    from bot.models.base import async_session
+    from bot.models.track import Track
+
+    async with async_session() as session:
+        from sqlalchemy import select as _sel
+
+        track = (
+            await session.execute(_sel(Track).where(Track.id == track_id))
+        ).scalar_one_or_none()
+
+    if not track:
+        await message.answer(t(lang, "share_track_expired"))
+        return
+
+    text = t(
+        lang,
+        "share_track_open_header",
+        artist=track.artist or "?",
+        title=track.title or "?",
+        duration=fmt_duration(track.duration or 0),
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t(lang, "share_track_download_btn"),
+                    callback_data=ShareTrackCb(tid=track.id, act="dl").pack(),
+                )
+            ]
+        ]
+    )
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(LyricsCb.filter())

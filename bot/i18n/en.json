@@ -215,5 +215,11 @@
   "fav_removed": "💔 Removed from favorites",
   "favorites_empty": "Favorites are empty. Download a track and tap ❤️ +",
   "favorites_title": "❤️ <b>Favorite Tracks ({count})</b>",
-  "favorites_more": "... and {count} more tracks"
+  "favorites_more": "... and {count} more tracks",
+
+  "share_track_created": "📤 <b>Track link for “{title}”</b>\n\n<code>{link}</code>",
+  "share_track_expired": "⚠️ Link is invalid or expired",
+  "share_track_open_header": "📥 <b>A track was shared with you</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
+  "share_track_download_btn": "⬇️ Download",
+  "share_track_no_file": "⚠️ File is not in cache. Find this track via /search"
 }

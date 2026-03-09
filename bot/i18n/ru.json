@@ -215,5 +215,11 @@
   "fav_removed": "💔 Удалено из любимого",
   "favorites_empty": "В любимом пока пусто. Скачай трек и нажми ❤️ +",
   "favorites_title": "❤️ <b>Любимые треки ({count})</b>",
-  "favorites_more": "... и ещё {count} треков"
+  "favorites_more": "... и ещё {count} треков",
+
+  "share_track_created": "📤 <b>Ссылка на трек «{title}»</b>\n\n<code>{link}</code>",
+  "share_track_expired": "⚠️ Ссылка недействительна или истекла",
+  "share_track_open_header": "📥 <b>Поделились треком</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
+  "share_track_download_btn": "⬇️ Скачать",
+  "share_track_no_file": "⚠️ Файл недоступен в кэше. Найди трек через /search"
 }
