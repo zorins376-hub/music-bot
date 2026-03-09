@@ -40,6 +40,7 @@ class User(Base):
     # Version tracking
     last_seen_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
     welcome_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    release_radar_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

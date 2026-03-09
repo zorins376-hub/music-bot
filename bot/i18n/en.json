@@ -235,5 +235,12 @@
   "mix_share_open": "✦ <b>Daily Mix was shared with you</b>\n\nTracks: <b>{count}</b>",
   "mix_clone_btn": "📥 Clone to playlist",
   "mix_shared_playlist_name": "Shared Mix {date}",
-  "mix_cloned": "✅ Mix cloned: {count} tracks"
+  "mix_cloned": "✅ Mix cloned: {count} tracks",
+
+  "radar_header": "🆕 <b>Release Radar</b>\n\nCurrent status: {status}",
+  "radar_status_on": "enabled",
+  "radar_status_off": "disabled",
+  "radar_enable_btn": "✅ Enable",
+  "radar_disable_btn": "⛔ Disable",
+  "radar_updated": "Status updated"
 }

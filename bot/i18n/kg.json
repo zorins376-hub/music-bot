@@ -235,5 +235,12 @@
   "mix_share_open": "✦ <b>Сиз менен Daily Mix бөлүштү</b>\n\nТрек саны: <b>{count}</b>",
   "mix_clone_btn": "📥 Плейлистке көчүрүү",
   "mix_shared_playlist_name": "Shared Mix {date}",
-  "mix_cloned": "✅ Микс көчүрүлдү: {count} трек"
+  "mix_cloned": "✅ Микс көчүрүлдү: {count} трек",
+
+  "radar_header": "🆕 <b>Release Radar</b>\n\nУчурдагы абал: {status}",
+  "radar_status_on": "күйгүзүлгөн",
+  "radar_status_off": "өчүрүлгөн",
+  "radar_enable_btn": "✅ Күйгүзүү",
+  "radar_disable_btn": "⛔ Өчүрүү",
+  "radar_updated": "Абал жаңыртылды"
 }

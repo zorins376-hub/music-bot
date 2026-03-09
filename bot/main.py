@@ -18,6 +18,7 @@ from bot.handlers import admin, charts, faq, history, inline, search, start, vid
 from bot.handlers import radio, premium, recommend, playlist, recognize, queue, referral
 from bot.handlers import favorites
 from bot.handlers import mix
+from bot.handlers import release_radar
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
@@ -59,6 +60,10 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.daily_digest import start_digest_scheduler
     await start_digest_scheduler(bot)
 
+    # Release Radar scheduler
+    from bot.services.release_radar import start_release_radar_scheduler
+    await start_release_radar_scheduler(bot)
+
     # One-time welcome broadcast for existing users
     asyncio.create_task(_broadcast_welcome(bot))
 
@@ -67,6 +72,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="start", description="◉ Главное меню"),
         BotCommand(command="search", description="◈ Найти трек"),
         BotCommand(command="mix", description="✦ Daily Mix"),
+        BotCommand(command="radar", description="🆕 Release Radar"),
         BotCommand(command="video", description="🎦 Найти клип"),
         BotCommand(command="top", description="◆ Топ треков"),
         BotCommand(command="charts", description="🏆 Топ-чарты"),
@@ -205,6 +211,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(playlist.router)   # Playlists
     dp.include_router(favorites.router)  # Favorites
     dp.include_router(mix.router)        # Daily Mix
+    dp.include_router(release_radar.router)  # Release Radar
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ
