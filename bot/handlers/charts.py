@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import secrets
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -694,6 +695,25 @@ def _bar(done: int, total: int) -> str:
     return "█" * filled + "░" * (10 - filled)
 
 
+def _fmt_eta(seconds: int | None) -> str:
+    if seconds is None or seconds < 0:
+        return "--:--"
+    m, s = divmod(int(seconds), 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def _calc_eta(started_at: float, done: int, total: int, base_done: int = 0) -> int | None:
+    processed = done - base_done
+    if processed <= 0:
+        return None
+    elapsed = time.monotonic() - started_at
+    if elapsed <= 0:
+        return None
+    rate = elapsed / processed
+    remaining = max(0, total - done)
+    return int(remaining * rate)
+
+
 def _bulk_kb(job: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[
@@ -867,8 +887,11 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
     playlist_name = f"Chart {source_label[:32]} {date_label}"[:95]
 
     job_id = secrets.token_urlsafe(6)
+    started_at = time.monotonic()
     status = await callback.message.answer(
-        f"⏳ Импорт чарта в плейлист\n\n[{_bar(0, len(tracks))}] 0/{len(tracks)}",
+        f"⏳ Импорт чарта в плейлист\n"
+        f"ETA: {_fmt_eta(None)}\n\n"
+        f"[{_bar(0, len(tracks))}] 0/{len(tracks)}",
         reply_markup=_bulk_kb(job_id),
     )
 
@@ -935,10 +958,12 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
                     cleanup_file(mp3_path)
 
         if idx % 2 == 0 or idx == len(tracks):
+            eta = _calc_eta(started_at, idx, len(tracks))
             try:
                 await status.edit_text(
                     "⏳ Импорт чарта в плейлист\n"
                     f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
+                    f"ETA: {_fmt_eta(eta)}\n"
                     f"[{_bar(idx, len(tracks))}] {idx}/{len(tracks)}",
                     reply_markup=_bulk_kb(job_id),
                 )
@@ -1064,9 +1089,11 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
     status = await callback.message.answer(
         "⏳ Продолжение импорта чарта\n"
         f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
+        f"ETA: {_fmt_eta(None)}\n"
         f"[{_bar(start_index, len(tracks))}] {start_index}/{len(tracks)}",
         reply_markup=_bulk_kb(job_id),
     )
+    started_at = time.monotonic()
 
     imported_track_ids: list[int] = []
     cancelled = False
@@ -1121,10 +1148,12 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
                     cleanup_file(mp3_path)
 
         if idx % 2 == 0 or idx == len(tracks):
+            eta = _calc_eta(started_at, idx, len(tracks), base_done=start_index)
             try:
                 await status.edit_text(
                     "⏳ Продолжение импорта чарта\n"
                     f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
+                    f"ETA: {_fmt_eta(eta)}\n"
                     f"[{_bar(idx, len(tracks))}] {idx}/{len(tracks)}",
                     reply_markup=_bulk_kb(job_id),
                 )
