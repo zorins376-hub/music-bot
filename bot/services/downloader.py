@@ -334,9 +334,14 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
         _list_formats_debug(video_id)
         raise
 
-    mp3_path = output_dir / f"{video_id}.mp3"
+    mp3_path = output_dir / f"{file_stem}.mp3"
     if mp3_path.exists():
         return mp3_path
+    # Fallback: check without dl_id suffix (older naming)
+    if dl_id:
+        alt = output_dir / f"{video_id}.mp3"
+        if alt.exists():
+            return alt
     raise FileNotFoundError(f"MP3 not found after download: {video_id}")
 
 
