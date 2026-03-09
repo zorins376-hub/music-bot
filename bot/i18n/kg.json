@@ -193,5 +193,20 @@
   "queue_shuffled": "🔀 Кезек аралаштырылды",
   "queue_no_next": "Кезек бош — кийинки трек жок",
   "lyrics_not_found": "📝 Ыр тексти табылган жок",
-  "lyrics_full_link": "Genius'те толук текст ➜"
+  "lyrics_full_link": "Genius'те толук текст ➜",
+
+  "bot_version": "◌ BLACK ROOM <b>v{version}</b>",
+  "changelog_title": "◌ BLACK ROOM жаңыртуулары",
+  "whats_new": "🆕 Жаңылыктар",
+
+  "changelog_search": "5 булактан издөө (Яндекс, Spotify, VK, SoundCloud, YouTube)",
+  "changelog_radio": "TEQUILA LIVE жана FULLMOON LIVE радио каналдары",
+  "changelog_charts": "Чарттар: Apple Music, YouTube, Яндекс, Русское Радио, Europa+",
+  "changelog_recognize": "Музыка таануу (Shazam)",
+  "changelog_recommend": "AI DJ — жеке сунуштар",
+  "changelog_playlist": "Плейлисттер (20 плейлист, 50 трек)",
+  "changelog_video": "YouTube видеоклиптерин жүктөө",
+  "changelog_inline": "Каалаган чатта инлайн режим",
+  "changelog_groups": "Топтук чаттарды колдоо",
+  "changelog_premium": "Premium жазылуу (150 Stars)"
 }

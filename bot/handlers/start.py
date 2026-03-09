@@ -12,6 +12,7 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory
 from bot.models.user import User
+from bot.version import VERSION, get_new_features, get_changelog_text, CHANGELOG
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +96,56 @@ async def cmd_start(message: Message) -> None:
             from bot.handlers.referral import process_referral
             await process_referral(message, payload[4:])
 
+    # Check for new features to show
+    new_features = get_new_features(user.language, user.last_seen_version)
+    if new_features:
+        await message.answer(new_features, parse_mode="HTML")
+        # Update last_seen_version
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id == user.id).values(last_seen_version=VERSION)
+            )
+            await session.commit()
+    elif not user.last_seen_version:
+        # First time user — silently update version
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id == user.id).values(last_seen_version=VERSION)
+            )
+            await session.commit()
+
     await message.answer(
         t(user.language, "start_message", name=message.from_user.first_name or ""),
         reply_markup=_main_menu(user.language, admin=admin),
         parse_mode="HTML",
     )
+
+
+@router.message(Command("version"))
+async def cmd_version(message: Message) -> None:
+    """Show current bot version."""
+    user = await get_or_create_user(message.from_user)
+    await message.answer(
+        t(user.language, "bot_version", version=VERSION),
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("changelog"))
+async def cmd_changelog(message: Message) -> None:
+    """Show full changelog."""
+    user = await get_or_create_user(message.from_user)
+    parts = [f"<b>{t(user.language, 'changelog_title')}</b>\n"]
+    
+    # Sort versions newest first
+    from packaging.version import Version
+    versions = sorted(CHANGELOG.keys(), key=lambda v: Version(v), reverse=True)
+    
+    for ver in versions[:5]:  # Last 5 versions
+        parts.append(get_changelog_text(user.language, ver))
+        parts.append("")
+    
+    await message.answer("\n".join(parts).strip(), parse_mode="HTML")
 
 
 @router.message(Command("help"))

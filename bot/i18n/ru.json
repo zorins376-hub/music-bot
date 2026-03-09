@@ -193,5 +193,20 @@
   "queue_shuffled": "🔀 Очередь перемешана",
   "queue_no_next": "Очередь пуста — нет следующего трека",
   "lyrics_not_found": "📝 Текст песни не найден",
-  "lyrics_full_link": "Полный текст на Genius ➜"
+  "lyrics_full_link": "Полный текст на Genius ➜",
+
+  "bot_version": "◌ BLACK ROOM <b>v{version}</b>",
+  "changelog_title": "◌ Обновления BLACK ROOM",
+  "whats_new": "🆕 Что нового",
+
+  "changelog_search": "Поиск по 5 источникам (Яндекс, Spotify, VK, SoundCloud, YouTube)",
+  "changelog_radio": "Радио-каналы TEQUILA LIVE и FULLMOON LIVE",
+  "changelog_charts": "Чарты: Apple Music, YouTube, Яндекс, Русское Радио, Europa+",
+  "changelog_recognize": "Распознавание музыки (Shazam)",
+  "changelog_recommend": "AI DJ — персональные рекомендации",
+  "changelog_playlist": "Плейлисты (до 20 плейлистов, 50 треков)",
+  "changelog_video": "Скачивание видеоклипов с YouTube",
+  "changelog_inline": "Инлайн-режим в любом чате",
+  "changelog_groups": "Поддержка групповых чатов",
+  "changelog_premium": "Premium подписка (150 Stars)"
 }

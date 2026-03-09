@@ -30,3 +30,6 @@ vk_api
 # ── Monitoring ────────────────────────────────────────────
 sentry-sdk[asyncio]>=1.40.0
 prometheus-client>=0.20.0
+
+# ── Utilities ─────────────────────────────────────────────
+packaging>=23.0

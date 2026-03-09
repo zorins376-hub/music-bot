@@ -37,6 +37,9 @@ class User(Base):
     referral_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     referral_bonus_tracks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
+    # Version tracking
+    last_seen_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
