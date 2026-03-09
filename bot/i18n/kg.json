@@ -221,5 +221,12 @@
   "share_track_expired": "⚠️ Шилтеме жараксыз же мөөнөтү бүттү",
   "share_track_open_header": "📥 <b>Сизге трек бөлүштү</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
   "share_track_download_btn": "⬇️ Жүктөө",
-  "share_track_no_file": "⚠️ Файл кэште жок. Бул тректи /search аркылуу табыңыз"
+  "share_track_no_file": "⚠️ Файл кэште жок. Бул тректи /search аркылуу табыңыз",
+
+  "mix_header": "✦ <b>Daily Mix</b>\n\nБүгүнкү тандоо: <b>{count}</b> трек",
+  "mix_empty": "Daily Mix үчүн маалымат аз. Көбүрөөк трек угуңуз ❤️",
+  "mix_save_btn": "➕ Плейлистке сактоо",
+  "mix_saved": "✅ Плейлистке сакталды: {count} трек",
+  "mix_expired": "⚠️ Daily Mix сессиясы эскирди, /mix кайра ачыңыз",
+  "mix_playlist_name": "Daily Mix {date}"
 }

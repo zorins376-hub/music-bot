@@ -26,17 +26,18 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
         ],
         [
-            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
+            InlineKeyboardButton(text="✦ DAILY MIX", callback_data="action:mix"),
             InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
         ],
         [
+            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
             InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
-            InlineKeyboardButton(text="🎦 Видео", callback_data="action:video"),
         ],
         [
-            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
+            InlineKeyboardButton(text="🎦 Видео", callback_data="action:video"),
             InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
         ],
+        [InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top")],
         [
             InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
             InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),

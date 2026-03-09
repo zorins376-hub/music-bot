@@ -221,5 +221,12 @@
   "share_track_expired": "⚠️ Ссылка недействительна или истекла",
   "share_track_open_header": "📥 <b>Поделились треком</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
   "share_track_download_btn": "⬇️ Скачать",
-  "share_track_no_file": "⚠️ Файл недоступен в кэше. Найди трек через /search"
+  "share_track_no_file": "⚠️ Файл недоступен в кэше. Найди трек через /search",
+
+  "mix_header": "✦ <b>Daily Mix</b>\n\nПодборка на сегодня: <b>{count}</b> треков",
+  "mix_empty": "Пока недостаточно данных для Daily Mix. Послушай больше треков ❤️",
+  "mix_save_btn": "➕ Сохранить в плейлист",
+  "mix_saved": "✅ Сохранено в плейлист: {count} треков",
+  "mix_expired": "⚠️ Сессия Daily Mix устарела, открой /mix заново",
+  "mix_playlist_name": "Daily Mix {date}"
 }

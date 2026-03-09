@@ -44,3 +44,9 @@ class ShareTrackCb(CallbackData, prefix="shtr"):
     """Share track callback."""
     tid: int
     act: str  # mk / dl
+
+
+class MixCb(CallbackData, prefix="mix"):
+    """Daily mix callback actions."""
+    act: str  # save
+    sid: str

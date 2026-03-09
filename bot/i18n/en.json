@@ -221,5 +221,12 @@
   "share_track_expired": "⚠️ Link is invalid or expired",
   "share_track_open_header": "📥 <b>A track was shared with you</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
   "share_track_download_btn": "⬇️ Download",
-  "share_track_no_file": "⚠️ File is not in cache. Find this track via /search"
+  "share_track_no_file": "⚠️ File is not in cache. Find this track via /search",
+
+  "mix_header": "✦ <b>Daily Mix</b>\n\nYour pick for today: <b>{count}</b> tracks",
+  "mix_empty": "Not enough data for Daily Mix yet. Listen to more tracks ❤️",
+  "mix_save_btn": "➕ Save to playlist",
+  "mix_saved": "✅ Saved to playlist: {count} tracks",
+  "mix_expired": "⚠️ Daily Mix session expired, open /mix again",
+  "mix_playlist_name": "Daily Mix {date}"
 }
