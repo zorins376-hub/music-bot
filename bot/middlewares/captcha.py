@@ -18,6 +18,7 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.user import User
 from bot.services.cache import cache
+from bot.version import WELCOME_MESSAGE
 
 _CHALLENGE_TTL = 60 * 10  # 10 minutes to answer
 _MAX_ATTEMPTS = 5          # max wrong answers before cooldown
@@ -107,7 +108,7 @@ class CaptchaMiddleware(BaseMiddleware):
             try:
                 async with async_session() as session:
                     await session.execute(
-                        update(User).where(User.id == tg_user.id).values(captcha_passed=True)
+                        update(User).where(User.id == tg_user.id).values(captcha_passed=True, welcome_sent=True)
                     )
                     await session.commit()
             except Exception:
@@ -118,6 +119,8 @@ class CaptchaMiddleware(BaseMiddleware):
             except Exception:
                 pass
             await event.answer(t(db_user.language, "captcha_ok"), parse_mode="HTML")
+            # Send welcome message to new users
+            await event.answer(WELCOME_MESSAGE, parse_mode="HTML")
             return
         else:
             # Track failed attempts

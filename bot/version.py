@@ -10,6 +10,25 @@ When adding new features:
 # Current bot version
 VERSION = "1.0.0"
 
+# Welcome message for new users (sent after captcha)
+WELCOME_MESSAGE = """◌ <b>BLACK ROOM v1.0.0</b> — Официальный запуск! 🎉
+
+🎵 <b>Поиск</b> — Яндекс, Spotify, VK, SoundCloud, YouTube
+📻 <b>Радио</b> — TEQUILA LIVE · FULLMOON LIVE · AUTO MIX
+🏆 <b>Чарты</b> — Apple Music, YouTube, Яндекс, Русское Радио, Europa+
+🎙 <b>Shazam</b> — распознавание по голосовому/аудио/видео
+◈ <b>AI DJ</b> — персональные рекомендации под твой вкус
+▸ <b>Плейлисты</b> — создавай и делись с друзьями
+🎦 <b>Видео</b> — клипы с YouTube (360p/480p/720p)
+◎ <b>Инлайн</b> — @TSmymusicbot_bot в любом чате
+💬 <b>Группы</b> — добавь бота в чат
+🤝 <b>Рефералы</b> — приглашай друзей → бонус треки + Premium
+◇ <b>Premium</b> — безлимитно, 320 kbps (150 Stars)
+
+/start — главное меню
+/faq — полное руководство
+/referral — твоя реферальная ссылка"""
+
 # Changelog: version -> list of changes
 # Each entry: (emoji, description_key) - key refers to i18n string
 CHANGELOG = {

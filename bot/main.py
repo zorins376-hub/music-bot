@@ -57,6 +57,9 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.daily_digest import start_digest_scheduler
     await start_digest_scheduler(bot)
 
+    # One-time welcome broadcast for existing users
+    asyncio.create_task(_broadcast_welcome(bot))
+
     # Register bot commands for private chats
     private_commands = [
         BotCommand(command="start", description="◉ Главное меню"),
@@ -126,6 +129,64 @@ async def _global_error_handler(event: ErrorEvent) -> bool:
     except Exception:
         pass
     return True
+
+
+async def _broadcast_welcome(bot: Bot) -> None:
+    """One-time broadcast welcome message to all existing users who haven't received it yet."""
+    from sqlalchemy import select, update
+    from bot.models.base import async_session
+    from bot.models.user import User
+    from bot.version import WELCOME_MESSAGE
+
+    await asyncio.sleep(10)  # Wait for DB to be ready
+
+    try:
+        async with async_session() as session:
+            # Get all users who passed captcha but haven't received welcome
+            result = await session.execute(
+                select(User.id).where(
+                    User.captcha_passed == True,
+                    User.welcome_sent == False
+                )
+            )
+            user_ids = [row[0] for row in result.fetchall()]
+
+        if not user_ids:
+            logger.info("Welcome broadcast: no users to notify")
+            return
+
+        logger.info("Welcome broadcast: sending to %d users", len(user_ids))
+        sent = 0
+        failed = 0
+
+        for user_id in user_ids:
+            try:
+                await bot.send_message(user_id, WELCOME_MESSAGE, parse_mode="HTML")
+                sent += 1
+                # Mark as sent
+                async with async_session() as session:
+                    await session.execute(
+                        update(User).where(User.id == user_id).values(welcome_sent=True)
+                    )
+                    await session.commit()
+            except Exception as e:
+                failed += 1
+                # Still mark as sent to avoid retry spam on blocked users
+                try:
+                    async with async_session() as session:
+                        await session.execute(
+                            update(User).where(User.id == user_id).values(welcome_sent=True)
+                        )
+                        await session.commit()
+                except Exception:
+                    pass
+            # Rate limit: 30 msgs/sec max for Telegram
+            await asyncio.sleep(0.05)
+
+        logger.info("Welcome broadcast done: sent=%d, failed=%d", sent, failed)
+
+    except Exception as e:
+        logger.error("Welcome broadcast error: %s", e)
 
 
 def build_dispatcher() -> Dispatcher:
