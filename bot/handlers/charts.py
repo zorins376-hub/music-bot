@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import secrets
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import aiohttp
@@ -19,7 +20,11 @@ from aiogram.types import (
 )
 
 from bot.db import get_or_create_user
+from bot.db import upsert_track
 from bot.i18n import t
+from bot.models.base import async_session
+from bot.models.playlist import Playlist, PlaylistTrack
+from bot.services.downloader import cleanup_file, download_track, search_tracks
 from bot.services.cache import cache
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,11 @@ class ChartCb(CallbackData, prefix="ch"):
 class ChartDl(CallbackData, prefix="cd"):
     sid: str   # session id
     i: int     # track index
+
+
+class ChartBulk(CallbackData, prefix="cb"):
+    src: str
+    sid: str
 
 
 # ── Chart fetchers ───────────────────────────────────────────────────────
@@ -646,6 +656,13 @@ def _chart_page_kb(
             )
         ])
 
+    rows.append([
+        InlineKeyboardButton(
+            text="➕ Добавить чарт в плейлист",
+            callback_data=ChartBulk(src=source, sid=session_id).pack(),
+        )
+    ])
+
     # Navigation
     nav = []
     if page > 0:
@@ -658,6 +675,14 @@ def _chart_page_kb(
 
     rows.append([InlineKeyboardButton(text="◁ Чарты", callback_data="action:charts")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _bar(done: int, total: int) -> str:
+    if total <= 0:
+        return "░░░░░░░░░░"
+    filled = int((done / total) * 10)
+    filled = max(0, min(10, filled))
+    return "█" * filled + "░" * (10 - filled)
 
 
 # ── Handlers ─────────────────────────────────────────────────────────────
@@ -755,6 +780,143 @@ async def handle_chart_download(callback: CallbackQuery, callback_data: ChartDl)
     # Simpler: just trigger search directly
     from bot.handlers.search import _do_search
     await _do_search(callback.message, query.strip())
+
+
+@router.callback_query(ChartBulk.filter())
+async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -> None:
+    await callback.answer("⏳ Готовлю импорт чарта...")
+
+    user = await get_or_create_user(callback.from_user)
+    raw = await cache.redis.get(f"search:{callback_data.sid}")
+    if not raw:
+        await callback.message.answer("Сессия чарта истекла. Открой чарт заново.")
+        return
+
+    tracks = json.loads(raw)
+    if not tracks:
+        await callback.message.answer("Чарт пуст.")
+        return
+
+    source_label = _CHART_LABELS.get(callback_data.src, callback_data.src)
+    date_label = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+    playlist_name = f"Chart {source_label[:32]} {date_label}"[:95]
+
+    status = await callback.message.answer(
+        f"⏳ Импорт чарта в плейлист\n\n[{_bar(0, len(tracks))}] 0/{len(tracks)}"
+    )
+
+    # Determine target bitrate (free users max 192)
+    try:
+        bitrate = int(user.quality) if str(user.quality).isdigit() else 192
+    except Exception:
+        bitrate = 192
+    if not user.is_premium:
+        bitrate = min(bitrate, 192)
+
+    imported_track_ids: list[int] = []
+    downloaded = 0
+    failed = 0
+
+    for idx, tr in enumerate(tracks, 1):
+        query = tr.get("query") or f"{tr.get('artist', '')} {tr.get('title', '')}".strip()
+        video_id = tr.get("video_id") or ""
+        info = None
+
+        if video_id and re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            info = {
+                "video_id": video_id,
+                "title": tr.get("title") or "Unknown",
+                "uploader": tr.get("artist") or "Unknown",
+                "duration": None,
+            }
+        else:
+            found = await search_tracks(query, max_results=1, source="youtube")
+            if found:
+                info = found[0]
+
+        if not info:
+            failed += 1
+        else:
+            mp3_path = None
+            try:
+                mp3_path = await download_track(
+                    info["video_id"],
+                    bitrate=bitrate,
+                    dl_id=uuid.uuid4().hex[:8],
+                )
+                downloaded += 1
+                track = await upsert_track(
+                    source_id=info["video_id"],
+                    title=info.get("title"),
+                    artist=info.get("uploader"),
+                    duration=int(info["duration"]) if info.get("duration") else None,
+                    source="youtube",
+                    channel="external",
+                )
+                imported_track_ids.append(track.id)
+            except Exception:
+                failed += 1
+            finally:
+                if mp3_path:
+                    cleanup_file(mp3_path)
+
+        if idx % 2 == 0 or idx == len(tracks):
+            try:
+                await status.edit_text(
+                    "⏳ Импорт чарта в плейлист\n"
+                    f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
+                    f"[{_bar(idx, len(tracks))}] {idx}/{len(tracks)}"
+                )
+            except Exception:
+                pass
+
+    # Create/reuse playlist and append unique tracks
+    added = 0
+    async with async_session() as session:
+        from sqlalchemy import func, select
+
+        cnt = await session.scalar(select(func.count()).where(Playlist.user_id == user.id))
+        existing = await session.execute(
+            select(Playlist).where(Playlist.user_id == user.id, Playlist.name == playlist_name)
+        )
+        playlist = existing.scalar_one_or_none()
+
+        if playlist is None:
+            if (cnt or 0) >= 20:
+                await status.edit_text("⚠️ Достигнут лимит плейлистов (20). Удали один и повтори.")
+                return
+            playlist = Playlist(user_id=user.id, name=playlist_name)
+            session.add(playlist)
+            await session.flush()
+
+        existing_track_ids_r = await session.execute(
+            select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id)
+        )
+        existing_track_ids = {row[0] for row in existing_track_ids_r.all()}
+
+        pos = int(
+            await session.scalar(select(func.count()).where(PlaylistTrack.playlist_id == playlist.id)) or 0
+        )
+        for tid in imported_track_ids:
+            if tid in existing_track_ids:
+                continue
+            if pos >= 50:
+                break
+            session.add(PlaylistTrack(playlist_id=playlist.id, track_id=tid, position=pos))
+            existing_track_ids.add(tid)
+            pos += 1
+            added += 1
+
+        await session.commit()
+
+    await status.edit_text(
+        "✅ Импорт чарта завершён\n\n"
+        f"Плейлист: <b>{playlist_name}</b>\n"
+        f"Скачано: <b>{downloaded}</b>\n"
+        f"Добавлено в плейлист: <b>{added}</b>\n"
+        f"Ошибок: <b>{failed}</b>",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(lambda c: c.data == "noop")
