@@ -166,7 +166,11 @@ async def _send_release_radar(bot) -> None:
                     InlineKeyboardButton(
                         text=t(lang, "radar_disable_btn"),
                         callback_data="radar:disable",
-                    )
+                    ),
+                    InlineKeyboardButton(
+                        text=t(lang, "radar_open_btn"),
+                        callback_data="radar:open",
+                    ),
                 ]
             )
 

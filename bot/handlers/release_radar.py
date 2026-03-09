@@ -31,7 +31,11 @@ def _radar_quick_keyboard(lang: str, enabled: bool) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=t(lang, "radar_disable_btn") if enabled else t(lang, "radar_enable_btn"),
                     callback_data="radar:disable" if enabled else "radar:enable",
-                )
+                ),
+                InlineKeyboardButton(
+                    text=t(lang, "radar_open_btn"),
+                    callback_data="radar:open",
+                ),
             ]
         ]
     )
@@ -101,4 +105,17 @@ async def cb_radar_enable(callback: CallbackQuery) -> None:
     await callback.answer(t(lang, "radar_updated"))
     await callback.message.edit_reply_markup(
         reply_markup=_radar_quick_keyboard(lang, True)
+    )
+
+
+@router.callback_query(lambda c: c.data == "radar:open")
+async def cb_radar_open(callback: CallbackQuery) -> None:
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    status = t(lang, "radar_status_on") if user.release_radar_enabled else t(lang, "radar_status_off")
+    await callback.answer()
+    await callback.message.answer(
+        t(lang, "radar_header", status=status),
+        reply_markup=_radar_keyboard(lang, user.release_radar_enabled),
+        parse_mode="HTML",
     )

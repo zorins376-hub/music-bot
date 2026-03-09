@@ -242,6 +242,7 @@
   "radar_status_off": "disabled",
   "radar_enable_btn": "✅ Enable",
   "radar_disable_btn": "⛔ Disable",
+  "radar_open_btn": "👁 /radar",
   "radar_updated": "Status updated",
   "radar_notify_title": "🆕 <b>Release Radar</b>",
   "radar_notify_intro": "New tracks from artists you listen to:",
