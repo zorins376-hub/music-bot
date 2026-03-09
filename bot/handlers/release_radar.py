@@ -24,6 +24,19 @@ def _radar_keyboard(lang: str, enabled: bool) -> InlineKeyboardMarkup:
     )
 
 
+def _radar_quick_keyboard(lang: str, enabled: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t(lang, "radar_disable_btn") if enabled else t(lang, "radar_enable_btn"),
+                    callback_data="radar:disable" if enabled else "radar:enable",
+                )
+            ]
+        ]
+    )
+
+
 @router.message(Command("radar"))
 async def cmd_radar(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
@@ -69,12 +82,23 @@ async def cb_radar_disable(callback: CallbackQuery) -> None:
         await session.commit()
 
     await callback.answer(t(lang, "radar_updated"))
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-    await callback.message.answer(
-        t(lang, "radar_header", status=t(lang, "radar_status_off")),
-        reply_markup=_radar_keyboard(lang, False),
-        parse_mode="HTML",
+    await callback.message.edit_reply_markup(
+        reply_markup=_radar_quick_keyboard(lang, False)
+    )
+
+
+@router.callback_query(lambda c: c.data == "radar:enable")
+async def cb_radar_enable(callback: CallbackQuery) -> None:
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+
+    async with async_session() as session:
+        await session.execute(
+            update(User).where(User.id == user.id).values(release_radar_enabled=True)
+        )
+        await session.commit()
+
+    await callback.answer(t(lang, "radar_updated"))
+    await callback.message.edit_reply_markup(
+        reply_markup=_radar_quick_keyboard(lang, True)
     )
