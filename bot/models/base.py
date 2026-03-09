@@ -48,6 +48,41 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                # Add columns that create_all won't add to existing tables
+                if _is_pg:
+                    _alter_stmts = [
+                        # User columns added after initial deployment
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS captcha_passed BOOLEAN DEFAULT false",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS request_count INTEGER DEFAULT 0",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS fav_genres JSONB",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS fav_artists JSONB",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS fav_vibe VARCHAR(50)",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_bpm INTEGER",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded BOOLEAN DEFAULT false",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS ad_free_until TIMESTAMPTZ",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS flac_credits INTEGER DEFAULT 0",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER DEFAULT 0",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_tracks INTEGER DEFAULT 0",
+                        # ListeningHistory columns
+                        "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS action VARCHAR(20) DEFAULT 'play'",
+                        "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS listen_duration INTEGER",
+                        "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'search'",
+                        # Track columns
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'youtube'",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS channel VARCHAR(50)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS artist VARCHAR(255)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS genre VARCHAR(50)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS bpm INTEGER",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS duration INTEGER",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS downloads INTEGER DEFAULT 0",
+                    ]
+                    for stmt in _alter_stmts:
+                        try:
+                            await conn.execute(__import__("sqlalchemy").text(stmt))
+                        except Exception:
+                            pass  # Column already exists or table doesn't exist yet
                 # Create pg_trgm extension and trigram indexes for PostgreSQL
                 if _is_pg:
                     await conn.execute(
