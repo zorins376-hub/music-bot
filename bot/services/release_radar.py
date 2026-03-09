@@ -1,8 +1,14 @@
 import asyncio
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
+
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from bot.callbacks import TrackCallback
+from bot.services.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +100,7 @@ async def _send_release_radar(bot) -> None:
                 continue
 
             lines = ["🆕 <b>Release Radar</b>", "", "Новые треки артистов, которых ты слушаешь:"]
+            notify_tracks: list[dict] = []
             added = 0
             for track in candidates[:5]:
                 already = await session.scalar(
@@ -112,16 +119,50 @@ async def _send_release_radar(bot) -> None:
                     )
                 )
                 lines.append(f"• {track.artist or '?'} — {track.title or '?'}")
+                notify_tracks.append(
+                    {
+                        "video_id": track.source_id,
+                        "title": track.title or "Unknown",
+                        "uploader": track.artist or "Unknown",
+                        "duration": int(track.duration) if track.duration else None,
+                        "duration_fmt": f"{track.duration // 60}:{track.duration % 60:02d}" if track.duration else "?:??",
+                        "source": track.source or "youtube",
+                    }
+                )
                 added += 1
 
             if added == 0:
                 continue
 
+            session_id = secrets.token_urlsafe(6)
+            try:
+                await cache.store_search(session_id, notify_tracks)
+            except Exception:
+                pass
+
             lines.append("")
             lines.append("/radar — включить/выключить уведомления")
             await session.commit()
+
+            rows = []
+            for i, tr in enumerate(notify_tracks[:5]):
+                label = f"♪ {(tr.get('uploader') or '?')[:18]} — {(tr.get('title') or '?')[:20]}"
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text=label,
+                            callback_data=TrackCallback(sid=session_id, i=i).pack(),
+                        )
+                    ]
+                )
+
             try:
-                await bot.send_message(user.id, "\n".join(lines), parse_mode="HTML")
+                await bot.send_message(
+                    user.id,
+                    "\n".join(lines),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                )
                 sent_count += 1
                 await asyncio.sleep(0.05)
             except Exception:
