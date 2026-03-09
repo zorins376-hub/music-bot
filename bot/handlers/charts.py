@@ -59,6 +59,10 @@ class ChartBulkCtl(CallbackData, prefix="cbc"):
     job: str
 
 
+class ChartBulkResume(CallbackData, prefix="cbr"):
+    token: str
+
+
 # ── Chart fetchers ───────────────────────────────────────────────────────
 
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
@@ -701,6 +705,51 @@ def _bulk_kb(job: str) -> InlineKeyboardMarkup:
     )
 
 
+async def _append_to_chart_playlist(user_id: int, playlist_name: str, imported_track_ids: list[int]) -> int | None:
+    """Append unique tracks to user's playlist. Returns added count, or None if playlist limit reached."""
+    if not imported_track_ids:
+        return 0
+
+    added = 0
+    async with async_session() as session:
+        from sqlalchemy import func, select
+
+        cnt = await session.scalar(select(func.count()).where(Playlist.user_id == user_id))
+        existing = await session.execute(
+            select(Playlist).where(Playlist.user_id == user_id, Playlist.name == playlist_name)
+        )
+        playlist = existing.scalar_one_or_none()
+
+        if playlist is None:
+            if (cnt or 0) >= 20:
+                return None
+            playlist = Playlist(user_id=user_id, name=playlist_name)
+            session.add(playlist)
+            await session.flush()
+
+        existing_track_ids_r = await session.execute(
+            select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id)
+        )
+        existing_track_ids = {row[0] for row in existing_track_ids_r.all()}
+
+        pos = int(
+            await session.scalar(select(func.count()).where(PlaylistTrack.playlist_id == playlist.id)) or 0
+        )
+        for tid in imported_track_ids:
+            if tid in existing_track_ids:
+                continue
+            if pos >= 50:
+                break
+            session.add(PlaylistTrack(playlist_id=playlist.id, track_id=tid, position=pos))
+            existing_track_ids.add(tid)
+            pos += 1
+            added += 1
+
+        await session.commit()
+
+    return added
+
+
 # ── Handlers ─────────────────────────────────────────────────────────────
 
 @router.message(Command("charts"))
@@ -836,9 +885,11 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
     failed = 0
     cancelled = False
 
+    next_index = 0
     for idx, tr in enumerate(tracks, 1):
         if job_id in _chart_cancel_jobs:
             cancelled = True
+            next_index = idx - 1
             break
 
         query = tr.get("query") or f"{tr.get('artist', '')} {tr.get('title', '')}".strip()
@@ -897,55 +948,58 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
     _chart_cancel_jobs.discard(job_id)
 
     if cancelled:
+        added_partial = await _append_to_chart_playlist(user.id, playlist_name, imported_track_ids)
+        if added_partial is None:
+            await status.edit_text("⚠️ Достигнут лимит плейлистов (20). Удали один и повтори.")
+            return
+
+        resume_token = secrets.token_urlsafe(8)
+        resume_payload = {
+            "user_id": user.id,
+            "src": callback_data.src,
+            "sid": callback_data.sid,
+            "next_index": next_index,
+            "playlist_name": playlist_name,
+            "downloaded": downloaded,
+            "failed": failed,
+        }
+        try:
+            await cache.redis.setex(
+                f"chart:resume:{resume_token}",
+                3600,
+                json.dumps(resume_payload, ensure_ascii=False),
+            )
+        except Exception:
+            resume_token = ""
+
+        resume_kb = None
+        if resume_token:
+            resume_kb = InlineKeyboardMarkup(
+                inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="▶ Продолжить импорт",
+                        callback_data=ChartBulkResume(token=resume_token).pack(),
+                    )
+                ]]
+            )
+
         try:
             await status.edit_text(
                 "⏹ Импорт чарта остановлен пользователем\n\n"
                 f"Успешно скачано: <b>{downloaded}</b>\n"
+                f"Добавлено в плейлист: <b>{added_partial}</b>\n"
                 f"Ошибок: <b>{failed}</b>",
                 parse_mode="HTML",
+                reply_markup=resume_kb,
             )
         except Exception:
             pass
         return
 
-    # Create/reuse playlist and append unique tracks
-    added = 0
-    async with async_session() as session:
-        from sqlalchemy import func, select
-
-        cnt = await session.scalar(select(func.count()).where(Playlist.user_id == user.id))
-        existing = await session.execute(
-            select(Playlist).where(Playlist.user_id == user.id, Playlist.name == playlist_name)
-        )
-        playlist = existing.scalar_one_or_none()
-
-        if playlist is None:
-            if (cnt or 0) >= 20:
-                await status.edit_text("⚠️ Достигнут лимит плейлистов (20). Удали один и повтори.")
-                return
-            playlist = Playlist(user_id=user.id, name=playlist_name)
-            session.add(playlist)
-            await session.flush()
-
-        existing_track_ids_r = await session.execute(
-            select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id)
-        )
-        existing_track_ids = {row[0] for row in existing_track_ids_r.all()}
-
-        pos = int(
-            await session.scalar(select(func.count()).where(PlaylistTrack.playlist_id == playlist.id)) or 0
-        )
-        for tid in imported_track_ids:
-            if tid in existing_track_ids:
-                continue
-            if pos >= 50:
-                break
-            session.add(PlaylistTrack(playlist_id=playlist.id, track_id=tid, position=pos))
-            existing_track_ids.add(tid)
-            pos += 1
-            added += 1
-
-        await session.commit()
+    added = await _append_to_chart_playlist(user.id, playlist_name, imported_track_ids)
+    if added is None:
+        await status.edit_text("⚠️ Достигнут лимит плейлистов (20). Удали один и повтори.")
+        return
 
     await status.edit_text(
         "✅ Импорт чарта завершён\n\n"
@@ -961,6 +1015,185 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
 async def handle_chart_bulk_cancel(callback: CallbackQuery, callback_data: ChartBulkCtl) -> None:
     _chart_cancel_jobs.add(callback_data.job)
     await callback.answer("Останавливаю импорт...", show_alert=False)
+
+
+@router.callback_query(ChartBulkResume.filter())
+async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: ChartBulkResume) -> None:
+    await callback.answer("⏳ Продолжаю импорт...")
+
+    raw_resume = await cache.redis.get(f"chart:resume:{callback_data.token}")
+    if not raw_resume:
+        await callback.message.answer("Сессия продолжения истекла. Запусти импорт заново из чарта.")
+        return
+
+    try:
+        payload = json.loads(raw_resume)
+    except Exception:
+        await callback.message.answer("Не удалось восстановить сессию. Запусти импорт заново.")
+        return
+
+    user = await get_or_create_user(callback.from_user)
+    if int(payload.get("user_id", 0)) != user.id:
+        await callback.answer("Эта сессия продолжения не твоя", show_alert=True)
+        return
+
+    sid = str(payload.get("sid", ""))
+    src = str(payload.get("src", ""))
+    start_index = int(payload.get("next_index", 0))
+    playlist_name = str(payload.get("playlist_name", "Chart import"))
+    downloaded = int(payload.get("downloaded", 0))
+    failed = int(payload.get("failed", 0))
+
+    raw_tracks = await cache.redis.get(f"search:{sid}")
+    if not raw_tracks:
+        await callback.message.answer("Сессия чарта истекла. Открой чарт заново.")
+        return
+    tracks = json.loads(raw_tracks)
+    if not tracks or start_index >= len(tracks):
+        await callback.message.answer("Нечего продолжать — чарт уже обработан.")
+        return
+
+    try:
+        bitrate = int(user.quality) if str(user.quality).isdigit() else 192
+    except Exception:
+        bitrate = 192
+    if not user.is_premium:
+        bitrate = min(bitrate, 192)
+
+    job_id = secrets.token_urlsafe(6)
+    status = await callback.message.answer(
+        "⏳ Продолжение импорта чарта\n"
+        f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
+        f"[{_bar(start_index, len(tracks))}] {start_index}/{len(tracks)}",
+        reply_markup=_bulk_kb(job_id),
+    )
+
+    imported_track_ids: list[int] = []
+    cancelled = False
+    next_index = start_index
+
+    for idx, tr in enumerate(tracks[start_index:], start_index + 1):
+        if job_id in _chart_cancel_jobs:
+            cancelled = True
+            next_index = idx - 1
+            break
+
+        query = tr.get("query") or f"{tr.get('artist', '')} {tr.get('title', '')}".strip()
+        video_id = tr.get("video_id") or ""
+        info = None
+
+        if video_id and re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            info = {
+                "video_id": video_id,
+                "title": tr.get("title") or "Unknown",
+                "uploader": tr.get("artist") or "Unknown",
+                "duration": None,
+            }
+        else:
+            found = await search_tracks(query, max_results=1, source="youtube")
+            if found:
+                info = found[0]
+
+        if not info:
+            failed += 1
+        else:
+            mp3_path = None
+            try:
+                mp3_path = await download_track(
+                    info["video_id"],
+                    bitrate=bitrate,
+                    dl_id=uuid.uuid4().hex[:8],
+                )
+                downloaded += 1
+                track = await upsert_track(
+                    source_id=info["video_id"],
+                    title=info.get("title"),
+                    artist=info.get("uploader"),
+                    duration=int(info["duration"]) if info.get("duration") else None,
+                    source="youtube",
+                    channel="external",
+                )
+                imported_track_ids.append(track.id)
+            except Exception:
+                failed += 1
+            finally:
+                if mp3_path:
+                    cleanup_file(mp3_path)
+
+        if idx % 2 == 0 or idx == len(tracks):
+            try:
+                await status.edit_text(
+                    "⏳ Продолжение импорта чарта\n"
+                    f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
+                    f"[{_bar(idx, len(tracks))}] {idx}/{len(tracks)}",
+                    reply_markup=_bulk_kb(job_id),
+                )
+            except Exception:
+                pass
+
+    _chart_cancel_jobs.discard(job_id)
+
+    if cancelled:
+        added_partial = await _append_to_chart_playlist(user.id, playlist_name, imported_track_ids)
+        if added_partial is None:
+            await status.edit_text("⚠️ Достигнут лимит плейлистов (20). Удали один и повтори.")
+            return
+
+        new_token = secrets.token_urlsafe(8)
+        resume_payload = {
+            "user_id": user.id,
+            "src": src,
+            "sid": sid,
+            "next_index": next_index,
+            "playlist_name": playlist_name,
+            "downloaded": downloaded,
+            "failed": failed,
+        }
+        try:
+            await cache.redis.setex(
+                f"chart:resume:{new_token}",
+                3600,
+                json.dumps(resume_payload, ensure_ascii=False),
+            )
+            resume_kb = InlineKeyboardMarkup(
+                inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="▶ Продолжить импорт",
+                        callback_data=ChartBulkResume(token=new_token).pack(),
+                    )
+                ]]
+            )
+        except Exception:
+            resume_kb = None
+
+        await status.edit_text(
+            "⏹ Импорт чарта остановлен пользователем\n\n"
+            f"Успешно скачано: <b>{downloaded}</b>\n"
+            f"Добавлено в плейлист: <b>{added_partial}</b>\n"
+            f"Ошибок: <b>{failed}</b>",
+            parse_mode="HTML",
+            reply_markup=resume_kb,
+        )
+        return
+
+    added = await _append_to_chart_playlist(user.id, playlist_name, imported_track_ids)
+    if added is None:
+        await status.edit_text("⚠️ Достигнут лимит плейлистов (20). Удали один и повтори.")
+        return
+
+    try:
+        await cache.redis.delete(f"chart:resume:{callback_data.token}")
+    except Exception:
+        pass
+
+    await status.edit_text(
+        "✅ Импорт чарта завершён\n\n"
+        f"Плейлист: <b>{playlist_name}</b>\n"
+        f"Скачано: <b>{downloaded}</b>\n"
+        f"Добавлено в плейлист: <b>{added}</b>\n"
+        f"Ошибок: <b>{failed}</b>",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(lambda c: c.data == "noop")
