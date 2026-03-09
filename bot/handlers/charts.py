@@ -33,6 +33,7 @@ router = Router()
 _LOGO = "◉ <b>BLACK ROOM</b>"
 _PER_PAGE = 5
 _CHART_TTL = 6 * 3600  # 6 hours cache
+_chart_cancel_jobs: set[str] = set()
 
 _ytdl_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chart")
 
@@ -52,6 +53,10 @@ class ChartDl(CallbackData, prefix="cd"):
 class ChartBulk(CallbackData, prefix="cb"):
     src: str
     sid: str
+
+
+class ChartBulkCtl(CallbackData, prefix="cbc"):
+    job: str
 
 
 # ── Chart fetchers ───────────────────────────────────────────────────────
@@ -685,6 +690,17 @@ def _bar(done: int, total: int) -> str:
     return "█" * filled + "░" * (10 - filled)
 
 
+def _bulk_kb(job: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="⏹ Отмена",
+                callback_data=ChartBulkCtl(job=job).pack(),
+            )
+        ]]
+    )
+
+
 # ── Handlers ─────────────────────────────────────────────────────────────
 
 @router.message(Command("charts"))
@@ -801,8 +817,10 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
     date_label = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
     playlist_name = f"Chart {source_label[:32]} {date_label}"[:95]
 
+    job_id = secrets.token_urlsafe(6)
     status = await callback.message.answer(
-        f"⏳ Импорт чарта в плейлист\n\n[{_bar(0, len(tracks))}] 0/{len(tracks)}"
+        f"⏳ Импорт чарта в плейлист\n\n[{_bar(0, len(tracks))}] 0/{len(tracks)}",
+        reply_markup=_bulk_kb(job_id),
     )
 
     # Determine target bitrate (free users max 192)
@@ -816,8 +834,13 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
     imported_track_ids: list[int] = []
     downloaded = 0
     failed = 0
+    cancelled = False
 
     for idx, tr in enumerate(tracks, 1):
+        if job_id in _chart_cancel_jobs:
+            cancelled = True
+            break
+
         query = tr.get("query") or f"{tr.get('artist', '')} {tr.get('title', '')}".strip()
         video_id = tr.get("video_id") or ""
         info = None
@@ -865,10 +888,25 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
                 await status.edit_text(
                     "⏳ Импорт чарта в плейлист\n"
                     f"Скачано: {downloaded} · Ошибок: {failed}\n\n"
-                    f"[{_bar(idx, len(tracks))}] {idx}/{len(tracks)}"
+                    f"[{_bar(idx, len(tracks))}] {idx}/{len(tracks)}",
+                    reply_markup=_bulk_kb(job_id),
                 )
             except Exception:
                 pass
+
+    _chart_cancel_jobs.discard(job_id)
+
+    if cancelled:
+        try:
+            await status.edit_text(
+                "⏹ Импорт чарта остановлен пользователем\n\n"
+                f"Успешно скачано: <b>{downloaded}</b>\n"
+                f"Ошибок: <b>{failed}</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return
 
     # Create/reuse playlist and append unique tracks
     added = 0
@@ -917,6 +955,12 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
         f"Ошибок: <b>{failed}</b>",
         parse_mode="HTML",
     )
+
+
+@router.callback_query(ChartBulkCtl.filter())
+async def handle_chart_bulk_cancel(callback: CallbackQuery, callback_data: ChartBulkCtl) -> None:
+    _chart_cancel_jobs.add(callback_data.job)
+    await callback.answer("Останавливаю импорт...", show_alert=False)
 
 
 @router.callback_query(lambda c: c.data == "noop")
