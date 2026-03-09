@@ -101,6 +101,12 @@ async def cmd_start(message: Message) -> None:
             from bot.handlers.search import show_shared_track
             await show_shared_track(message, share_id)
             return
+        # Share mix deep-link: /start mx_<share_id>
+        elif payload.startswith("mx_"):
+            share_id = payload[3:]
+            from bot.handlers.mix import show_shared_mix
+            await show_shared_mix(message, share_id)
+            return
         # E-01: Handle referral deep-link: /start ref_<user_id>
         elif payload.startswith("ref_"):
             from bot.handlers.referral import process_referral

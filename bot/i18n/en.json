@@ -228,5 +228,12 @@
   "mix_save_btn": "➕ Save to playlist",
   "mix_saved": "✅ Saved to playlist: {count} tracks",
   "mix_expired": "⚠️ Daily Mix session expired, open /mix again",
-  "mix_playlist_name": "Daily Mix {date}"
+  "mix_playlist_name": "Daily Mix {date}",
+  "mix_share_btn": "📤 Share",
+  "mix_share_created": "📤 <b>Daily Mix link</b>\n\n<code>{link}</code>",
+  "mix_share_expired": "⚠️ Mix link is invalid or expired",
+  "mix_share_open": "✦ <b>Daily Mix was shared with you</b>\n\nTracks: <b>{count}</b>",
+  "mix_clone_btn": "📥 Clone to playlist",
+  "mix_shared_playlist_name": "Shared Mix {date}",
+  "mix_cloned": "✅ Mix cloned: {count} tracks"
 }

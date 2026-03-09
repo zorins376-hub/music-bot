@@ -228,5 +228,12 @@
   "mix_save_btn": "➕ Сохранить в плейлист",
   "mix_saved": "✅ Сохранено в плейлист: {count} треков",
   "mix_expired": "⚠️ Сессия Daily Mix устарела, открой /mix заново",
-  "mix_playlist_name": "Daily Mix {date}"
+  "mix_playlist_name": "Daily Mix {date}",
+  "mix_share_btn": "📤 Поделиться",
+  "mix_share_created": "📤 <b>Ссылка на Daily Mix</b>\n\n<code>{link}</code>",
+  "mix_share_expired": "⚠️ Ссылка на микс недействительна или истекла",
+  "mix_share_open": "✦ <b>С вами поделились Daily Mix</b>\n\nТреков: <b>{count}</b>",
+  "mix_clone_btn": "📥 Скопировать в плейлист",
+  "mix_shared_playlist_name": "Shared Mix {date}",
+  "mix_cloned": "✅ Микс скопирован: {count} треков"
 }

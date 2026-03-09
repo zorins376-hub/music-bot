@@ -228,5 +228,12 @@
   "mix_save_btn": "➕ Плейлистке сактоо",
   "mix_saved": "✅ Плейлистке сакталды: {count} трек",
   "mix_expired": "⚠️ Daily Mix сессиясы эскирди, /mix кайра ачыңыз",
-  "mix_playlist_name": "Daily Mix {date}"
+  "mix_playlist_name": "Daily Mix {date}",
+  "mix_share_btn": "📤 Бөлүшүү",
+  "mix_share_created": "📤 <b>Daily Mix шилтемеси</b>\n\n<code>{link}</code>",
+  "mix_share_expired": "⚠️ Микс шилтемеси жараксыз же мөөнөтү бүттү",
+  "mix_share_open": "✦ <b>Сиз менен Daily Mix бөлүштү</b>\n\nТрек саны: <b>{count}</b>",
+  "mix_clone_btn": "📥 Плейлистке көчүрүү",
+  "mix_shared_playlist_name": "Shared Mix {date}",
+  "mix_cloned": "✅ Микс көчүрүлдү: {count} трек"
 }
