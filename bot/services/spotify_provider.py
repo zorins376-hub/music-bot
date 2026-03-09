@@ -84,7 +84,7 @@ def _search_sync(query: str, limit: int) -> list[dict]:
     if sp is None:
         return []
     try:
-        result = sp.search(q=query, type="track", limit=min(limit + 5, 50))
+        result = sp.search(q=query, type="track", limit=min(limit, 50))
         items = (result or {}).get("tracks", {}).get("items", [])
         tracks = []
         for item in items:

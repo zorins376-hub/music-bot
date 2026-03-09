@@ -87,6 +87,24 @@ def _make_progress_cb(status_msg, lang: str):
     return _on_progress
 
 
+import re as _re
+_YT_ID_RE = _re.compile(r'^[A-Za-z0-9_-]{11}$')
+
+
+def _is_valid_yt_id(video_id: str) -> bool:
+    """Check if a string looks like a valid YouTube video ID (11 chars, base64url)."""
+    return bool(_YT_ID_RE.match(video_id))
+
+
+async def _resolve_yt_video_id(track_info: dict) -> str | None:
+    """For non-YouTube tracks without a valid video_id, search YouTube by artist+title."""
+    query = f"{track_info.get('uploader', '')} - {track_info.get('title', '')}"
+    yt_results = await search_tracks(query.strip(), max_results=1, source="youtube")
+    if yt_results:
+        return yt_results[0]["video_id"]
+    return None
+
+
 async def _safe_edit(msg, text: str) -> None:
     """Edit message text, ignoring any Telegram errors."""
     try:
@@ -509,13 +527,20 @@ async def _group_auto_play(
         elif track_info.get("source") == "spotify":
             mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
-            mp3_path = await download_track(video_id, bitrate, dl_id=_dl_id)
+            dl_vid = video_id
+            if not _is_valid_yt_id(video_id):
+                dl_vid = await _resolve_yt_video_id(track_info)
+                if not dl_vid:
+                    await status.edit_text(t(lang, "error_download"))
+                    return
+            mp3_path = await download_track(dl_vid, bitrate, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
             cleanup_file(mp3_path)
             mp3_path = None
+            dl_vid = video_id if _is_valid_yt_id(video_id) else (await _resolve_yt_video_id(track_info) or video_id)
             try:
-                mp3_path = await download_track(video_id, 128, dl_id=_dl_id)
+                mp3_path = await download_track(dl_vid, 128, dl_id=_dl_id)
                 bitrate = 128
                 file_size = mp3_path.stat().st_size
             except Exception:
@@ -712,7 +737,13 @@ async def handle_track_select(
         elif track_info.get("source") == "spotify":
             mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
-            mp3_path = await download_track(video_id, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
+            dl_vid = video_id
+            if not _is_valid_yt_id(video_id):
+                dl_vid = await _resolve_yt_video_id(track_info)
+                if not dl_vid:
+                    await status.edit_text(t(lang, "error_download"))
+                    return
+            mp3_path = await download_track(dl_vid, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
 
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
@@ -720,7 +751,8 @@ async def handle_track_select(
             mp3_path = None
             await status.edit_text(t(lang, "error_too_large"))
             try:
-                mp3_path = await download_track(video_id, 128, dl_id=_dl_id)
+                dl_vid_fb = video_id if _is_valid_yt_id(video_id) else (await _resolve_yt_video_id(track_info) or video_id)
+                mp3_path = await download_track(dl_vid_fb, 128, dl_id=_dl_id)
                 bitrate = 128
                 file_size = mp3_path.stat().st_size
             except Exception:
