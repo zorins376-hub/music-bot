@@ -181,6 +181,14 @@ async def _send_release_radar(bot) -> None:
                     )
                 ]
             )
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=t(lang, "radar_favorites_btn"),
+                        callback_data="action:favorites",
+                    )
+                ]
+            )
 
             try:
                 await bot.send_message(
