@@ -308,38 +308,17 @@ async def _do_search(message: Message, query: str) -> None:
 
     # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
     local_tracks = await search_local_tracks(query, limit=max_results)
-    if local_tracks:
-        results = []
-        for tr in local_tracks:
-            results.append({
-                "video_id": tr.source_id,
-                "title": tr.title or "Unknown",
-                "uploader": tr.artist or "Unknown",
-                "duration": tr.duration or 0,
-                "duration_fmt": _fmt_duration(tr.duration) if tr.duration else "?:??",
-                "source": tr.source or "channel",
-                "file_id": tr.file_id,
-            })
-        await record_listening_event(
-            user_id=user.id, query=query[:500], action="search", source="search"
-        )
-
-        # Groups: auto-play first track immediately
-        if is_group:
-            await _group_auto_play(message, status, user, results[0])
-            return
-
-        session_id = secrets.token_urlsafe(6)
-        await cache.store_search(session_id, results)
-        keyboard = _build_results_keyboard(results, session_id)
-        await status.edit_text(
-            f"{_SEARCH_LOGO}\n\n"
-            f"{t(lang, 'found_local')}\n"
-            f"\u25b8 <b>{query}</b> ({len(results)})",
-            reply_markup=keyboard,
-            parse_mode="HTML",
-        )
-        return
+    local_results = []
+    for tr in (local_tracks or []):
+        local_results.append({
+            "video_id": tr.source_id,
+            "title": tr.title or "Unknown",
+            "uploader": tr.artist or "Unknown",
+            "duration": tr.duration or 0,
+            "duration_fmt": _fmt_duration(tr.duration) if tr.duration else "?:??",
+            "source": tr.source or "channel",
+            "file_id": tr.file_id,
+        })
 
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
     async def _search_source(source: str, search_fn, limit: int) -> list[dict]:
@@ -393,6 +372,9 @@ async def _do_search(message: Message, query: str) -> None:
             alt_results = await asyncio.gather(*alt_tasks)
             for batch in alt_results:
                 all_results.extend(batch)
+
+    # Merge local + external results, then deduplicate
+    all_results = local_results + all_results
 
     # Deduplicate across sources (language-aware ranking)
     script = detect_script(query)
