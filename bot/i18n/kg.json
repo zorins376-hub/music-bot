@@ -242,5 +242,8 @@
   "radar_status_off": "өчүрүлгөн",
   "radar_enable_btn": "✅ Күйгүзүү",
   "radar_disable_btn": "⛔ Өчүрүү",
-  "radar_updated": "Абал жаңыртылды"
+  "radar_updated": "Абал жаңыртылды",
+  "radar_notify_title": "🆕 <b>Release Radar</b>",
+  "radar_notify_intro": "Сиз уккан артисттердин жаңы тректери:",
+  "radar_notify_footer": "/radar — эскертмелерди күйгүзүү/өчүрүү"
 }

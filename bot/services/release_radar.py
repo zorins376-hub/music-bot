@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.callbacks import TrackCallback
+from bot.i18n import t
 from bot.services.cache import cache
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,12 @@ async def _send_release_radar(bot) -> None:
             if not candidates:
                 continue
 
-            lines = ["🆕 <b>Release Radar</b>", "", "Новые треки артистов, которых ты слушаешь:"]
+            lang = user.language or "ru"
+            lines = [
+                t(lang, "radar_notify_title"),
+                "",
+                t(lang, "radar_notify_intro"),
+            ]
             notify_tracks: list[dict] = []
             added = 0
             for track in candidates[:5]:
@@ -141,7 +147,7 @@ async def _send_release_radar(bot) -> None:
                 pass
 
             lines.append("")
-            lines.append("/radar — включить/выключить уведомления")
+            lines.append(t(lang, "radar_notify_footer"))
             await session.commit()
 
             rows = []
