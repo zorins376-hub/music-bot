@@ -209,6 +209,12 @@
   "changelog_inline": "Inline mode in any chat",
   "changelog_groups": "Group chat support",
   "changelog_premium": "Premium subscription (150 Stars)",
+  "changelog_favorites": "Favorites: add tracks to ❤️ and use /favorites",
+  "changelog_share_tracks_mix": "Track and Daily Mix sharing via deep links",
+  "changelog_daily_mix": "Daily Mix: personalized daily selection",
+  "changelog_release_radar": "Release Radar: notifications about fresh releases",
+  "changelog_chart_bulk": "Chart import to playlist: progress, cancel, resume, ETA",
+  "changelog_chart_cache": "Chart cache prewarm for faster imports",
 
   "fav_added": "❤️ Added to favorites",
   "fav_exists": "Already in favorites",

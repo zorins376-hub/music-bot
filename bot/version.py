@@ -8,7 +8,7 @@ When adding new features:
 """
 
 # Current bot version
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # Welcome message for new users (sent after captcha)
 WELCOME_MESSAGE = """◌ <b>BLACK ROOM v1.0.0</b> — Официальный запуск! 🎉
@@ -32,6 +32,14 @@ WELCOME_MESSAGE = """◌ <b>BLACK ROOM v1.0.0</b> — Официальный з�
 # Changelog: version -> list of changes
 # Each entry: (emoji, description_key) - key refers to i18n string
 CHANGELOG = {
+    "1.1.0": [
+        ("❤️", "changelog_favorites"),
+        ("📤", "changelog_share_tracks_mix"),
+        ("✦", "changelog_daily_mix"),
+        ("🆕", "changelog_release_radar"),
+        ("🏆", "changelog_chart_bulk"),
+        ("⚡", "changelog_chart_cache"),
+    ],
     "1.0.0": [
         ("🎵", "changelog_search"),          # Поиск треков по 5 источникам
         ("📻", "changelog_radio"),            # Радио-каналы TEQUILA/FULLMOON

@@ -209,6 +209,12 @@
   "changelog_inline": "Каалаган чатта инлайн режим",
   "changelog_groups": "Топтук чаттарды колдоо",
   "changelog_premium": "Premium жазылуу (150 Stars)",
+  "changelog_favorites": "Сүйүктүүлөр: тректерди ❤️ га кошуу жана /favorites",
+  "changelog_share_tracks_mix": "Deep-link аркылуу трек жана Daily Mix бөлүшүү",
+  "changelog_daily_mix": "Daily Mix: күн сайын жеке подборка",
+  "changelog_release_radar": "Release Radar: жаңы релиздер тууралуу эскертмелер",
+  "changelog_chart_bulk": "Чартты плейлистке импорт: прогресс, токтотуу, улантуу, ETA",
+  "changelog_chart_cache": "Импортту тездетүү үчүн чарт кэшин алдын ала даярдоо",
 
   "fav_added": "❤️ Сүйүктүүлөргө кошулду",
   "fav_exists": "Сүйүктүүлөрдө бар",

@@ -209,6 +209,12 @@
   "changelog_inline": "Инлайн-режим в любом чате",
   "changelog_groups": "Поддержка групповых чатов",
   "changelog_premium": "Premium подписка (150 Stars)",
+  "changelog_favorites": "Избранное: добавление треков в ❤️ и команда /favorites",
+  "changelog_share_tracks_mix": "Шеринг треков и Daily Mix по deep-link ссылкам",
+  "changelog_daily_mix": "Daily Mix: ежедневная персональная подборка",
+  "changelog_release_radar": "Release Radar: уведомления о свежих релизах",
+  "changelog_chart_bulk": "Импорт чарта в плейлист: прогресс, отмена, продолжение, ETA",
+  "changelog_chart_cache": "Кэш и предзагрузка чартов для ускорения импорта",
 
   "fav_added": "❤️ Добавлено в любимое",
   "fav_exists": "Уже в любимом",

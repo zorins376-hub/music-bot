@@ -34,6 +34,9 @@ router = Router()
 _LOGO = "◉ <b>BLACK ROOM</b>"
 _PER_PAGE = 5
 _CHART_TTL = 6 * 3600  # 6 hours cache
+_CHART_IMPORT_DEFAULT_LIMIT = 30
+_CHART_PREWARM_INTERVAL = 2 * 3600
+_CHART_PREPARE_TOP_N = 20
 _chart_cancel_jobs: set[str] = set()
 
 _ytdl_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chart")
@@ -54,6 +57,7 @@ class ChartDl(CallbackData, prefix="cd"):
 class ChartBulk(CallbackData, prefix="cb"):
     src: str
     sid: str
+    lim: int
 
 
 class ChartBulkCtl(CallbackData, prefix="cbc"):
@@ -633,6 +637,67 @@ async def _get_chart(source: str) -> list[dict]:
     return tracks
 
 
+async def _prepare_chart_tracks(tracks: list[dict], max_items: int = _CHART_PREPARE_TOP_N) -> list[dict]:
+    """Pre-resolve YouTube video IDs for top chart items to speed up bulk imports."""
+    if not tracks:
+        return tracks
+
+    prepared = list(tracks)
+    limit = min(max_items, len(prepared))
+    for i in range(limit):
+        tr = prepared[i]
+        vid = (tr.get("video_id") or "").strip()
+        if vid and re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+            continue
+
+        query = (tr.get("query") or f"{tr.get('artist', '')} {tr.get('title', '')}").strip()
+        if not query:
+            continue
+        try:
+            found = await search_tracks(query, max_results=1, source="youtube")
+            if found:
+                video_id = (found[0].get("video_id") or "").strip()
+                if video_id and re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+                    tr["video_id"] = video_id
+        except Exception:
+            continue
+
+    return prepared
+
+
+async def _prewarm_charts_once() -> None:
+    """Warm chart cache and prepare top entries with resolved video IDs."""
+    for src in _CHART_FETCHERS:
+        try:
+            tracks = await _get_chart(src)
+            if not tracks:
+                continue
+            prepared = await _prepare_chart_tracks(tracks)
+            await cache.redis.setex(
+                f"chart:{src}",
+                _CHART_TTL,
+                json.dumps(prepared, ensure_ascii=False),
+            )
+            logger.info("Chart prewarm: %s prepared=%d", src, min(_CHART_PREPARE_TOP_N, len(prepared)))
+        except Exception as e:
+            logger.warning("Chart prewarm failed for %s: %s", src, e)
+
+
+async def start_chart_cache_prewarm_scheduler() -> None:
+    """Start background chart prewarm loop."""
+    asyncio.create_task(_chart_prewarm_loop())
+
+
+async def _chart_prewarm_loop() -> None:
+    await asyncio.sleep(8)
+    while True:
+        try:
+            await _prewarm_charts_once()
+        except Exception as e:
+            logger.warning("Chart prewarm loop error: %s", e)
+        await asyncio.sleep(_CHART_PREWARM_INTERVAL)
+
+
 # ── UI builders ──────────────────────────────────────────────────────────
 
 def _chart_menu_kb() -> InlineKeyboardMarkup:
@@ -668,8 +733,14 @@ def _chart_page_kb(
 
     rows.append([
         InlineKeyboardButton(
-            text="➕ Добавить чарт в плейлист",
-            callback_data=ChartBulk(src=source, sid=session_id).pack(),
+            text="➕ Импорт 30 треков",
+            callback_data=ChartBulk(src=source, sid=session_id, lim=_CHART_IMPORT_DEFAULT_LIMIT).pack(),
+        )
+    ])
+    rows.append([
+        InlineKeyboardButton(
+            text="➕ Импорт весь чарт",
+            callback_data=ChartBulk(src=source, sid=session_id, lim=0).pack(),
         )
     ])
 
@@ -877,7 +948,9 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
         await callback.message.answer("Сессия чарта истекла. Открой чарт заново.")
         return
 
-    tracks = json.loads(raw)
+    tracks_all = json.loads(raw)
+    limit = len(tracks_all) if callback_data.lim <= 0 else min(int(callback_data.lim), len(tracks_all))
+    tracks = tracks_all[:limit]
     if not tracks:
         await callback.message.answer("Чарт пуст.")
         return
@@ -983,6 +1056,7 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
             "user_id": user.id,
             "src": callback_data.src,
             "sid": callback_data.sid,
+            "total_limit": limit,
             "next_index": next_index,
             "playlist_name": playlist_name,
             "downloaded": downloaded,
@@ -1065,6 +1139,7 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
     sid = str(payload.get("sid", ""))
     src = str(payload.get("src", ""))
     start_index = int(payload.get("next_index", 0))
+    total_limit = int(payload.get("total_limit", 0))
     playlist_name = str(payload.get("playlist_name", "Chart import"))
     downloaded = int(payload.get("downloaded", 0))
     failed = int(payload.get("failed", 0))
@@ -1073,7 +1148,8 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
     if not raw_tracks:
         await callback.message.answer("Сессия чарта истекла. Открой чарт заново.")
         return
-    tracks = json.loads(raw_tracks)
+    tracks_all = json.loads(raw_tracks)
+    tracks = tracks_all[:total_limit] if total_limit > 0 else tracks_all
     if not tracks or start_index >= len(tracks):
         await callback.message.answer("Нечего продолжать — чарт уже обработан.")
         return
@@ -1173,6 +1249,7 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
             "user_id": user.id,
             "src": src,
             "sid": sid,
+            "total_limit": len(tracks),
             "next_index": next_index,
             "playlist_name": playlist_name,
             "downloaded": downloaded,

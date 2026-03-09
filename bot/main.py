@@ -64,8 +64,15 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.release_radar import start_release_radar_scheduler
     await start_release_radar_scheduler(bot)
 
+    # Chart cache prewarm scheduler
+    from bot.handlers.charts import start_chart_cache_prewarm_scheduler
+    await start_chart_cache_prewarm_scheduler()
+
     # One-time welcome broadcast for existing users
     asyncio.create_task(_broadcast_welcome(bot))
+
+    # One-time version broadcast for existing users after deploy
+    asyncio.create_task(_broadcast_version_update(bot))
 
     # Register bot commands for private chats
     private_commands = [
@@ -197,6 +204,63 @@ async def _broadcast_welcome(bot: Bot) -> None:
 
     except Exception as e:
         logger.error("Welcome broadcast error: %s", e)
+
+
+async def _broadcast_version_update(bot: Bot) -> None:
+    """Broadcast current version changelog to all users who haven't seen this version yet."""
+    from sqlalchemy import select, update
+    from bot.models.base import async_session
+    from bot.models.user import User
+    from bot.version import VERSION, get_changelog_text
+    from bot.i18n import t
+
+    await asyncio.sleep(15)
+
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(User.id, User.language).where(
+                    User.captcha_passed == True,
+                    (User.last_seen_version.is_(None)) | (User.last_seen_version != VERSION),
+                )
+            )
+            users = result.fetchall()
+
+        if not users:
+            logger.info("Version broadcast: no users to notify")
+            return
+
+        logger.info("Version broadcast: sending v%s to %d users", VERSION, len(users))
+        sent = 0
+        failed = 0
+
+        for user_id, language in users:
+            lang = language or "ru"
+            changelog_text = get_changelog_text(lang, VERSION)
+            message_text = (
+                f"<b>{t(lang, 'whats_new')}</b>\n\n{changelog_text}" if changelog_text else f"<b>{t(lang, 'bot_version', version=VERSION)}</b>"
+            )
+            try:
+                await bot.send_message(user_id, message_text, parse_mode="HTML")
+                sent += 1
+            except Exception:
+                failed += 1
+            finally:
+                try:
+                    async with async_session() as session:
+                        await session.execute(
+                            update(User).where(User.id == user_id).values(last_seen_version=VERSION)
+                        )
+                        await session.commit()
+                except Exception:
+                    pass
+
+            await asyncio.sleep(0.05)
+
+        logger.info("Version broadcast done: sent=%d, failed=%d", sent, failed)
+
+    except Exception as e:
+        logger.error("Version broadcast error: %s", e)
 
 
 def build_dispatcher() -> Dispatcher:
