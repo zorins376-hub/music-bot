@@ -396,7 +396,7 @@ async def _do_search(message: Message, query: str) -> None:
 
     # Deduplicate across sources (language-aware ranking)
     script = detect_script(query)
-    results = deduplicate_results(all_results, lang_hint=script)[:max_results] if all_results else []
+    results = deduplicate_results(all_results, lang_hint=script, query=query)[:max_results] if all_results else []
 
     if not results:
         # TASK-012: "Did you mean?" suggestions

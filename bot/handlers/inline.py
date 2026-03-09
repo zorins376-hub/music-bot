@@ -75,7 +75,7 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
 
     all_results = (local_res or []) + (ym_res or []) + (sp_res or []) + (vk_res or []) + (yt_res or [])
     script = detect_script(query)
-    results_data = deduplicate_results(all_results, lang_hint=script)[:10]
+    results_data = deduplicate_results(all_results, lang_hint=script, query=query)[:10]
 
     # D-02: Build deep-link URL for non-cached tracks
     bot_me = await inline_query.bot.me()

@@ -118,8 +118,30 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
-def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: str = "mixed") -> list[dict]:
-    """Remove duplicate tracks, keeping the one from the best source."""
+def _relevance_score(query_norm: str, artist: str, title: str) -> float:
+    """Score how relevant a track is to the search query (0.0 - 1.0).
+
+    Checks if query words appear in artist+title. Exact word matches
+    score higher than partial/substring matches.
+    """
+    query_words = set(query_norm.split())
+    track_text = f"{artist} {title}".lower()
+    track_words = set(track_text.split())
+    if not query_words:
+        return 0.0
+    # Exact word overlap
+    exact = len(query_words & track_words)
+    # Substring matches for words not matched exactly
+    substring = 0
+    for qw in query_words - track_words:
+        if qw in track_text:
+            substring += 0.5
+    return (exact + substring) / len(query_words)
+
+
+def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: str = "mixed", query: str = "") -> list[dict]:
+    """Remove duplicate tracks, keeping the one from the best source.
+    Then re-rank by relevance to the original query."""
     if not results:
         return []
 
@@ -131,7 +153,7 @@ def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: 
     else:
         rank = _SOURCE_RANK
 
-    # Sort by source quality (best first)
+    # Sort by source quality (best first) for dedup — keep best source version
     ranked = sorted(results, key=lambda r: rank.get(r.get("source", ""), 0), reverse=True)
 
     kept: list[dict] = []
@@ -150,6 +172,17 @@ def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: 
         if not is_dup:
             kept.append(track)
             kept_keys.append(key)
+
+    # Re-rank by relevance to original query
+    if query:
+        query_norm = normalize_query(query)
+        kept.sort(
+            key=lambda t: (
+                _relevance_score(query_norm, t.get("uploader", ""), t.get("title", "")),
+                rank.get(t.get("source", ""), 0),
+            ),
+            reverse=True,
+        )
 
     return kept
 
