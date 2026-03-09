@@ -518,6 +518,14 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await _broadcast(bot, message, text)
         await log_admin_action(message.from_user.id, "broadcast", details=text[:200])
 
+    # /admin release — force send current version changelog to eligible users
+    elif subcmd in ("release", "version", "whatsnew"):
+        await message.answer("⏳ Запускаю рассылку новой версии...")
+        from bot.main import _broadcast_version_update
+        await _broadcast_version_update(bot)
+        await message.answer("✅ Рассылка новой версии завершена. Проверь логи sent/failed.")
+        await log_admin_action(message.from_user.id, "version_broadcast")
+
     # /admin premium <user_id | @username>  — выдать premium вручную
     elif subcmd == "premium":
         if len(args) < 3:
@@ -643,6 +651,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin ban &lt;id или @username&gt; — бан\n"
             "/admin unban &lt;id или @username&gt; — разбан\n"
             "/admin broadcast &lt;текст&gt; — рассылка\n"
+            "/admin release — рассылка новой версии\n"
             "/admin premium &lt;id или @username&gt; — выдать premium\n"
             "/admin queue — очередь эфира\n"
             "/admin skip — пропустить трек\n"
