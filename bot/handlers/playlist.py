@@ -3,6 +3,7 @@ import json as _json
 import logging
 import random as _random
 import secrets
+import uuid
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -11,18 +12,22 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
 )
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
+from bot.config import settings
 from bot.db import get_or_create_user
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.playlist import Playlist, PlaylistTrack
 from bot.models.track import Track
 from bot.callbacks import AddToPlCb
+from bot.services.cache import cache
+from bot.services.downloader import cleanup_file, download_track
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -293,26 +298,91 @@ async def cb_remove_track(callback: CallbackQuery, callback_data: PlCb) -> None:
 # ── Play single track from playlist ─────────────────────────────────────
 
 
+async def _send_playlist_track_audio(message: Message, user, track: Track) -> bool:
+    """Send track audio using file_id, cache fallback, or lazy download.
+
+    Returns True if track was sent, False otherwise.
+    """
+    # 1) Direct DB file_id
+    if track.file_id:
+        await message.answer_audio(
+            audio=track.file_id,
+            title=track.title,
+            performer=track.artist,
+            duration=track.duration,
+        )
+        return True
+
+    # 2) Try file_id cache by common bitrates
+    for br in (192, 320, 128):
+        fid = await cache.get_file_id(track.source_id, br)
+        if fid:
+            try:
+                await message.answer_audio(
+                    audio=fid,
+                    title=track.title,
+                    performer=track.artist,
+                    duration=track.duration,
+                )
+                async with async_session() as session:
+                    await session.execute(
+                        update(Track).where(Track.id == track.id).values(file_id=fid)
+                    )
+                    await session.commit()
+                return True
+            except Exception:
+                continue
+
+    # 3) Lazy download (for youtube-like source_id), then send and persist file_id
+    source_id = (track.source_id or "").strip()
+    if not source_id:
+        return False
+
+    bitrate = int(user.quality) if str(user.quality).isdigit() else 192
+    if not user.is_premium:
+        bitrate = min(bitrate, 192)
+
+    mp3_path = None
+    try:
+        mp3_path = await download_track(source_id, bitrate=bitrate, dl_id=uuid.uuid4().hex[:8])
+        sent = await message.answer_audio(
+            audio=FSInputFile(mp3_path),
+            title=track.title,
+            performer=track.artist,
+            duration=track.duration,
+        )
+        fid = sent.audio.file_id if sent and sent.audio else None
+        if fid:
+            try:
+                await cache.set_file_id(source_id, fid, bitrate)
+            except Exception:
+                pass
+            async with async_session() as session:
+                await session.execute(
+                    update(Track).where(Track.id == track.id).values(file_id=fid)
+                )
+                await session.commit()
+        return True
+    except Exception as e:
+        logger.warning("Playlist lazy download failed for track %s (%s): %s", track.id, source_id, e)
+        return False
+    finally:
+        if mp3_path:
+            cleanup_file(mp3_path)
+
+
 @router.callback_query(PlCb.filter(F.act == "play"))
 async def cb_play_track(callback: CallbackQuery, callback_data: PlCb) -> None:
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
     async with async_session() as session:
         tr = await session.get(Track, callback_data.tid)
-        if not tr or not tr.file_id:
+        if not tr:
             await callback.message.answer(t(user.language, "pl_track_no_file"))
             return
-    dur = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else ""
-    caption = f"{tr.artist or '?'} — {tr.title or '?'}"
-    if dur:
-        caption += f" ({dur})"
-    await callback.message.answer_audio(
-        audio=tr.file_id,
-        title=tr.title,
-        performer=tr.artist,
-        duration=tr.duration,
-        caption=caption,
-    )
+    sent_ok = await _send_playlist_track_audio(callback.message, user, tr)
+    if not sent_ok:
+        await callback.message.answer(t(user.language, "pl_track_no_file"))
 
 
 # ── Play all / Shuffle ──────────────────────────────────────────────────
@@ -333,30 +403,27 @@ async def _send_playlist_tracks(callback: CallbackQuery, pl_id: int, shuffle: bo
         )
         tracks = list(result.scalars().all())
 
-    playable = [tr for tr in tracks if tr.file_id]
-    if not playable:
-        await callback.message.answer(t(user.language, "pl_no_playable"))
-        return
-
+    play_order = list(tracks)
     if shuffle:
-        _random.shuffle(playable)
+        _random.shuffle(play_order)
 
     mode = t(user.language, "pl_shuffle") if shuffle else t(user.language, "pl_play_all")
     await callback.message.answer(
-        t(user.language, "pl_playing", name=pl.name, mode=mode, count=len(playable)),
+        t(user.language, "pl_playing", name=pl.name, mode=mode, count=len(play_order)),
         parse_mode="HTML",
     )
 
-    for tr in playable:
+    sent_count = 0
+    for tr in play_order:
         try:
-            await callback.message.answer_audio(
-                audio=tr.file_id,
-                title=tr.title,
-                performer=tr.artist,
-                duration=tr.duration,
-            )
+            ok = await _send_playlist_track_audio(callback.message, user, tr)
+            if ok:
+                sent_count += 1
         except Exception:
             logger.warning("Failed to send track %s from playlist %s", tr.id, pl_id)
+
+    if sent_count == 0:
+        await callback.message.answer(t(user.language, "pl_no_playable"))
 
 
 @router.callback_query(PlCb.filter(F.act == "pall"))
