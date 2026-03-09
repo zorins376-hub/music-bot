@@ -68,6 +68,10 @@ async def on_startup(bot: Bot) -> None:
     from bot.handlers.charts import start_chart_cache_prewarm_scheduler
     await start_chart_cache_prewarm_scheduler()
 
+    # Weekly recap scheduler (Monday 10:00 UTC)
+    from bot.services.weekly_recap import start_weekly_recap_scheduler
+    await start_weekly_recap_scheduler(bot)
+
     # One-time welcome broadcast for existing users
     asyncio.create_task(_broadcast_welcome(bot))
 

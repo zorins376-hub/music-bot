@@ -254,5 +254,26 @@
   "radar_updated": "Статус обновлён",
   "radar_notify_title": "🆕 <b>Release Radar</b>",
   "radar_notify_intro": "Новые треки артистов, которых ты слушаешь:",
-  "radar_notify_footer": "/radar — включить/выключить уведомления"
+  "radar_notify_footer": "/radar — включить/выключить уведомления",
+
+  "taste_header": "🎤 <b>Твой музыкальный вкус</b>",
+  "taste_total": "▸ Всего прослушиваний: <b>{total}</b> (за месяц: {month})",
+  "taste_top_artists": "<b>Топ артисты:</b>",
+  "taste_top_genres": "<b>Топ жанры:</b>",
+  "taste_avg_bpm": "▸ Средний BPM: <b>{bpm}</b>",
+  "taste_vibe": "▸ Вайб: <i>{vibe}</i>",
+  "taste_sources": "<b>Источники:</b>",
+  "taste_no_data": "Пока нет данных — послушай треки через поиск!",
+
+  "recap_header": "📊 <b>Твоя неделя в BLACK ROOM</b>",
+  "recap_total": "▸ Прослушано треков: <b>{count}</b>",
+  "recap_top_track": "🏆 Трек недели: <b>{artist}</b> — <b>{title}</b> ({count}x)",
+  "recap_top_artists": "<b>Топ артисты:</b>",
+  "recap_top_genres": "<b>Топ жанры:</b>",
+  "recap_footer": "Слушай больше — каждый понедельник новый дайджест! 🎶",
+
+  "similar_searching": "🔁 Ищу похожие треки...",
+  "similar_not_found": "🔁 Похожие треки не найдены.",
+  "similar_header": "🔁 <b>Похожее на {artist} — {title}</b>",
+  "lyrics_translate_fail": "🌐 Не удалось перевести текст. Попробуй позже."
 }

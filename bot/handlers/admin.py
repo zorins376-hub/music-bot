@@ -401,6 +401,9 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="≡ Настройки", callback_data="adm:settings"),
             ],
             [
+                InlineKeyboardButton(text="🩺 Здоровье провайдеров", callback_data="adm:health"),
+            ],
+            [
                 InlineKeyboardButton(text="◁ Назад", callback_data="adm:back"),
             ],
         ]
@@ -772,6 +775,16 @@ async def handle_adm_release(callback: CallbackQuery, bot: Bot) -> None:
             "✅ Рассылка новой версии завершена. Проверь логи sent/failed.",
             reply_markup=_back_to_panel_kb,
         )
+
+
+@router.callback_query(lambda c: c.data == "adm:health")
+async def handle_adm_health(callback: CallbackQuery) -> None:
+    if not _is_admin(callback.from_user.id):
+        return await callback.answer("⛔", show_alert=True)
+    await callback.answer()
+    from bot.services.provider_health import get_health_summary
+    text = get_health_summary()
+    await callback.message.answer(text, parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "adm:back")

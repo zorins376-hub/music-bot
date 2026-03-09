@@ -136,3 +136,36 @@ async def _scrape_lyrics(session: aiohttp.ClientSession, url: str) -> str | None
     except Exception as e:
         logger.warning("Genius scrape error: %s", e)
         return None
+
+
+async def translate_lyrics(lines: list[str], target_lang: str = "ru") -> list[str] | None:
+    """Translate lyrics lines using MyMemory free API.
+
+    target_lang: ISO 639-1 code (e.g. 'ru', 'en', 'kg').
+    Returns translated lines or None on failure.
+    """
+    text = "\n".join(lines)
+    if not text.strip():
+        return None
+
+    # MyMemory auto-detects source language
+    params = {"q": text[:4500], "langpair": f"auto|{target_lang}"}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.mymemory.translated.net/get",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+
+        translated = data.get("responseData", {}).get("translatedText", "")
+        if not translated or "MYMEMORY" in translated.upper():
+            return None
+        return [l for l in translated.split("\n") if l.strip()]
+    except Exception as e:
+        logger.warning("Translation error: %s", e)
+        return None

@@ -34,6 +34,11 @@ class LyricsCb(CallbackData, prefix="lyr"):
     tid: int  # track DB id
 
 
+class LyrTransCb(CallbackData, prefix="lytr"):
+    """Translate lyrics callback."""
+    tid: int  # track DB id
+
+
 class FavoriteCb(CallbackData, prefix="fav"):
     """Favorites callback."""
     tid: int
@@ -44,6 +49,11 @@ class ShareTrackCb(CallbackData, prefix="shtr"):
     """Share track callback."""
     tid: int
     act: str  # mk / dl
+
+
+class SimilarCb(CallbackData, prefix="sim"):
+    """Find similar tracks callback."""
+    tid: int  # track DB id
 
 
 class MixCb(CallbackData, prefix="mix"):

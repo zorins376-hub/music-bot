@@ -254,5 +254,26 @@
   "radar_updated": "Status updated",
   "radar_notify_title": "🆕 <b>Release Radar</b>",
   "radar_notify_intro": "New tracks from artists you listen to:",
-  "radar_notify_footer": "/radar — turn notifications on/off"
+  "radar_notify_footer": "/radar — turn notifications on/off",
+
+  "taste_header": "🎤 <b>Your Music Taste</b>",
+  "taste_total": "▸ Total plays: <b>{total}</b> (this month: {month})",
+  "taste_top_artists": "<b>Top Artists:</b>",
+  "taste_top_genres": "<b>Top Genres:</b>",
+  "taste_avg_bpm": "▸ Average BPM: <b>{bpm}</b>",
+  "taste_vibe": "▸ Vibe: <i>{vibe}</i>",
+  "taste_sources": "<b>Sources:</b>",
+  "taste_no_data": "No data yet — listen to some tracks first!",
+
+  "recap_header": "📊 <b>Your Week in BLACK ROOM</b>",
+  "recap_total": "▸ Tracks played: <b>{count}</b>",
+  "recap_top_track": "🏆 Track of the week: <b>{artist}</b> — <b>{title}</b> ({count}x)",
+  "recap_top_artists": "<b>Top Artists:</b>",
+  "recap_top_genres": "<b>Top Genres:</b>",
+  "recap_footer": "Keep listening — a new recap every Monday! 🎶",
+
+  "similar_searching": "🔁 Searching for similar tracks...",
+  "similar_not_found": "🔁 No similar tracks found.",
+  "similar_header": "🔁 <b>Similar to {artist} — {title}</b>",
+  "lyrics_translate_fail": "🌐 Could not translate lyrics. Try again later."
 }

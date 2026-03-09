@@ -254,5 +254,26 @@
   "radar_updated": "Абал жаңыртылды",
   "radar_notify_title": "🆕 <b>Release Radar</b>",
   "radar_notify_intro": "Сиз уккан артисттердин жаңы тректери:",
-  "radar_notify_footer": "/radar — эскертмелерди күйгүзүү/өчүрүү"
+  "radar_notify_footer": "/radar — эскертмелерди күйгүзүү/өчүрүү",
+
+  "taste_header": "🎤 <b>Сенин музыкалык табитиң</b>",
+  "taste_total": "▸ Жалпы угуу: <b>{total}</b> (бул айда: {month})",
+  "taste_top_artists": "<b>Топ артисттер:</b>",
+  "taste_top_genres": "<b>Топ жанрлар:</b>",
+  "taste_avg_bpm": "▸ Орточо BPM: <b>{bpm}</b>",
+  "taste_vibe": "▸ Вайб: <i>{vibe}</i>",
+  "taste_sources": "<b>Булактар:</b>",
+  "taste_no_data": "Азырынча маалымат жок — издөө аркылуу трек ук!",
+
+  "recap_header": "📊 <b>BLACK ROOM'догу жумаң</b>",
+  "recap_total": "▸ Угулган тректер: <b>{count}</b>",
+  "recap_top_track": "🏆 Жуманын треги: <b>{artist}</b> — <b>{title}</b> ({count}x)",
+  "recap_top_artists": "<b>Топ артисттер:</b>",
+  "recap_top_genres": "<b>Топ жанрлар:</b>",
+  "recap_footer": "Угууну улант — ар дүйшөмбүдө жаңы дайджест! 🎶",
+
+  "similar_searching": "🔁 Окшош тректерди издөөдө...",
+  "similar_not_found": "🔁 Окшош тректер табылган жок.",
+  "similar_header": "🔁 <b>{artist} — {title} окшоштор</b>",
+  "lyrics_translate_fail": "🌐 Текстти которууга мүмкүн болгон жок. Кийин аракет кыл."
 }

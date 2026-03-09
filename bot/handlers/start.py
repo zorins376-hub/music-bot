@@ -10,7 +10,7 @@ from sqlalchemy.sql import func
 from bot.db import get_or_create_user, is_admin
 from bot.i18n import t
 from bot.models.base import async_session
-from bot.models.track import ListeningHistory
+from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
 from bot.version import VERSION, get_new_features, get_changelog_text, CHANGELOG
 
@@ -38,6 +38,10 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
         ],
         [InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top")],
+        [
+            InlineKeyboardButton(text="🆕 Новые релизы", callback_data="action:radar"),
+            InlineKeyboardButton(text="🎤 Вкус", callback_data="action:taste"),
+        ],
         [
             InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
             InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
@@ -303,3 +307,147 @@ async def _show_profile(message: Message, tg_user) -> None:
         lines.append(t(lang, "profile_artists", artists=", ".join(user.fav_artists)))
 
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── Taste Profile ────────────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data == "action:taste")
+async def handle_taste_button(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _show_taste_profile(callback.message, callback.from_user)
+
+
+@router.message(Command("taste"))
+async def cmd_taste(message: Message) -> None:
+    await _show_taste_profile(message, message.from_user)
+
+
+async def _show_taste_profile(message: Message, tg_user) -> None:
+    """Display a detailed taste profile for the user."""
+    from bot.db import get_user_stats
+    from collections import Counter
+    from datetime import datetime, timedelta, timezone
+
+    user = await get_or_create_user(tg_user)
+    lang = user.language
+
+    # Gather deep stats from listening history
+    async with async_session() as session:
+        now = datetime.now(timezone.utc)
+        month_ago = now - timedelta(days=30)
+
+        # Top 5 artists (all time)
+        top_artists_r = await session.execute(
+            select(Track.artist, func.count().label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                Track.artist.isnot(None),
+                Track.artist != "",
+            )
+            .group_by(Track.artist)
+            .order_by(func.count().desc())
+            .limit(5)
+        )
+        top_artists = [(row[0], row[1]) for row in top_artists_r.all()]
+
+        # Top 5 genres
+        top_genres_r = await session.execute(
+            select(Track.genre, func.count().label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                Track.genre.isnot(None),
+                Track.genre != "",
+            )
+            .group_by(Track.genre)
+            .order_by(func.count().desc())
+            .limit(5)
+        )
+        top_genres = [(row[0], row[1]) for row in top_genres_r.all()]
+
+        # Average BPM
+        avg_bpm_r = await session.scalar(
+            select(func.avg(Track.bpm))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                Track.bpm.isnot(None),
+            )
+        )
+        avg_bpm = int(avg_bpm_r) if avg_bpm_r else None
+
+        # Total plays & month plays
+        total_plays = await session.scalar(
+            select(func.count(ListeningHistory.id))
+            .where(ListeningHistory.user_id == user.id, ListeningHistory.action == "play")
+        ) or 0
+
+        month_plays = await session.scalar(
+            select(func.count(ListeningHistory.id))
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= month_ago,
+            )
+        ) or 0
+
+        # Sources distribution
+        sources_r = await session.execute(
+            select(ListeningHistory.source, func.count().label("cnt"))
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                ListeningHistory.source.isnot(None),
+            )
+            .group_by(ListeningHistory.source)
+            .order_by(func.count().desc())
+            .limit(5)
+        )
+        sources = [(row[0], row[1]) for row in sources_r.all()]
+
+    lines = [t(lang, "taste_header")]
+    lines.append(t(lang, "taste_total", total=total_plays, month=month_plays))
+
+    if top_artists:
+        lines.append("")
+        lines.append(t(lang, "taste_top_artists"))
+        for i, (artist, cnt) in enumerate(top_artists, 1):
+            lines.append(f"  {i}. {artist} ({cnt})")
+
+    if top_genres:
+        lines.append("")
+        lines.append(t(lang, "taste_top_genres"))
+        for i, (genre, cnt) in enumerate(top_genres, 1):
+            lines.append(f"  {i}. {genre} ({cnt})")
+
+    if avg_bpm:
+        lines.append("")
+        lines.append(t(lang, "taste_avg_bpm", bpm=avg_bpm))
+
+    if user.fav_vibe:
+        lines.append(t(lang, "taste_vibe", vibe=user.fav_vibe))
+
+    if sources:
+        lines.append("")
+        lines.append(t(lang, "taste_sources"))
+        for src, cnt in sources:
+            lines.append(f"  ▸ {src}: {cnt}")
+
+    if total_plays == 0:
+        lines.append("")
+        lines.append(t(lang, "taste_no_data"))
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── Radar from main menu ────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data == "action:radar")
+async def handle_radar_button(callback: CallbackQuery) -> None:
+    from bot.handlers.release_radar import cmd_radar
+    await callback.answer()
+    await cmd_radar(callback.message)

@@ -26,8 +26,9 @@ from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, s
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
+from bot.services.provider_health import record_provider_event
 from bot.services.search_engine import deduplicate_results, suggest_query
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, FavoriteCb, ShareTrackCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -344,16 +345,21 @@ async def _do_search(message: Message, query: str) -> None:
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
     async def _search_source(source: str, search_fn, limit: int) -> list[dict]:
         """Search a single source with cache and 8s timeout."""
+        t0 = time.monotonic()
         try:
             cached = await cache.get_query_cache(query, source)
             if cached is not None:
                 return cached
             res = await asyncio.wait_for(search_fn(query, limit=limit), timeout=8)
+            elapsed = time.monotonic() - t0
+            record_provider_event(source, "search", elapsed, True)
             if res:
                 await cache.set_query_cache(query, res, source)
                 requests_total.labels(source=source).inc()
             return res or []
-        except Exception:
+        except Exception as exc:
+            elapsed = time.monotonic() - t0
+            record_provider_event(source, "search", elapsed, False, str(exc))
             logger.debug("search source %s failed", source, exc_info=True)
             return []
 
@@ -913,6 +919,12 @@ def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMa
                 callback_data=ShareTrackCb(tid=track_id, act="mk").pack(),
             ),
         ],
+        [
+            InlineKeyboardButton(
+                text="🔁 Похожее",
+                callback_data=SimilarCb(tid=track_id).pack(),
+            ),
+        ],
     ]
     # E-03: Share button
     if share_query:
@@ -1095,8 +1107,143 @@ async def handle_lyrics(callback: CallbackQuery, callback_data: LyricsCb) -> Non
     if url:
         text_parts.append(f"\n<a href=\"{url}\">{t(lang, 'lyrics_full_link')}</a>")
 
+    translate_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🌐 Перевод", callback_data=LyrTransCb(tid=callback_data.tid).pack()),
+    ]])
+
     await callback.message.answer(
         "\n".join(text_parts),
         parse_mode="HTML",
         disable_web_page_preview=True,
+        reply_markup=translate_kb,
+    )
+
+
+@router.callback_query(LyrTransCb.filter())
+async def handle_lyrics_translate(callback: CallbackQuery, callback_data: LyrTransCb) -> None:
+    """Translate lyrics for a track."""
+    from bot.services.lyrics_provider import get_lyrics, translate_lyrics
+    from bot.models.base import async_session
+    from bot.models.track import Track
+
+    try:
+        user = await get_or_create_user(callback.from_user)
+    except Exception:
+        await callback.answer()
+        return
+    lang = user.language or "ru"
+    await callback.answer()
+
+    async with async_session() as session:
+        from sqlalchemy import select as _sel
+        result = await session.execute(
+            _sel(Track).where(Track.id == callback_data.tid)
+        )
+        track = result.scalar_one_or_none()
+
+    if not track:
+        await callback.message.answer(t(lang, "lyrics_not_found"))
+        return
+
+    artist = track.artist or ""
+    title_str = track.title or ""
+    lyrics_data = await get_lyrics(artist, title_str)
+
+    if not lyrics_data or not lyrics_data.get("lines"):
+        await callback.message.answer(t(lang, "lyrics_not_found"))
+        return
+
+    target = "ru" if lang != "ru" else "en"
+    translated = await translate_lyrics(lyrics_data["lines"], target_lang=target)
+
+    if not translated:
+        await callback.message.answer(t(lang, "lyrics_translate_fail"))
+        return
+
+    text_parts = [f"🌐 <b>{artist} — {title_str}</b> ({target.upper()})\n"]
+    text_parts.extend(translated)
+
+    await callback.message.answer(
+        "\n".join(text_parts),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(SimilarCb.filter())
+async def handle_similar(callback: CallbackQuery, callback_data: SimilarCb) -> None:
+    """Find similar tracks based on the given track's artist/genre."""
+    from bot.models.base import async_session
+    from bot.models.track import Track
+
+    try:
+        user = await get_or_create_user(callback.from_user)
+    except Exception:
+        await callback.answer()
+        return
+    lang = user.language
+    await callback.answer()
+
+    async with async_session() as session:
+        from sqlalchemy import select as _sel
+        track = (
+            await session.execute(_sel(Track).where(Track.id == callback_data.tid))
+        ).scalar_one_or_none()
+
+    if not track:
+        await callback.message.answer(t(lang, "similar_not_found"))
+        return
+
+    # Build a search query from artist + genre
+    artist = track.artist or ""
+    title = track.title or ""
+    query = f"{artist} {track.genre or ''}".strip() if artist else title
+
+    if not query:
+        await callback.message.answer(t(lang, "similar_not_found"))
+        return
+
+    await callback.message.answer(t(lang, "similar_searching"))
+
+    # Search for similar tracks
+    results = await search_tracks(query, max_results=5, source="youtube")
+
+    # Also try other sources
+    if len(results) < 5:
+        try:
+            ym = await search_yandex(query, limit=5)
+            results.extend(ym)
+        except Exception:
+            pass
+
+    if not results:
+        await callback.message.answer(t(lang, "similar_not_found"))
+        return
+
+    # Deduplicate and remove the original track
+    results = deduplicate_results(results)
+    results = [r for r in results if r.get("video_id") != track.source_id][:5]
+
+    if not results:
+        await callback.message.answer(t(lang, "similar_not_found"))
+        return
+
+    session_id = secrets.token_urlsafe(6)
+    await cache.store_search(session_id, results)
+
+    buttons = []
+    for i, tr in enumerate(results):
+        dur = tr.get("duration_fmt", "?:??")
+        label = f"♪ {tr.get('uploader', '?')} — {tr.get('title', '?')[:35]} ({dur})"
+        buttons.append(
+            [InlineKeyboardButton(
+                text=label,
+                callback_data=TrackCallback(sid=session_id, i=i).pack(),
+            )]
+        )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.answer(
+        t(lang, "similar_header", artist=artist, title=title[:30]),
+        reply_markup=keyboard,
+        parse_mode="HTML",
     )
