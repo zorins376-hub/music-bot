@@ -119,7 +119,7 @@ async def cmd_next(message: Message) -> None:
     if file_id:
         title = track.get("title", "Unknown")
         artist = track.get("uploader", "Unknown")
-        dur = track.get("duration") or 0
+        dur = int(track["duration"]) if track.get("duration") else 0
         await message.answer_audio(
             audio=file_id,
             title=title,
@@ -160,7 +160,7 @@ async def handle_queue_cb(callback: CallbackQuery, callback_data: QueueCb) -> No
                 audio=file_id,
                 title=track.get("title", "Unknown"),
                 performer=track.get("uploader", "Unknown"),
-                duration=track.get("duration") or 0,
+                duration=int(track["duration"]) if track.get("duration") else 0,
             )
         else:
             title = f"{track.get('uploader', '?')} — {track.get('title', '?')}"

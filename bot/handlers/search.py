@@ -490,7 +490,7 @@ async def _group_auto_play(
             audio=local_fid,
             title=track_info["title"],
             performer=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
         )
         await _post_download(user.id, track_info, local_fid, bitrate)
@@ -505,7 +505,7 @@ async def _group_auto_play(
             audio=file_id,
             title=track_info["title"],
             performer=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
         )
         await _post_download(user.id, track_info, file_id, bitrate)
@@ -556,7 +556,7 @@ async def _group_auto_play(
             audio=FSInputFile(mp3_path),
             title=track_info["title"],
             performer=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
@@ -684,7 +684,7 @@ async def handle_track_select(
             audio=local_fid,
             title=track_info["title"],
             performer=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
         )
         tid = await _post_download(user.id, track_info, local_fid, bitrate)
@@ -706,7 +706,7 @@ async def handle_track_select(
             audio=file_id,
             title=track_info["title"],
             performer=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
         )
         tid = await _post_download(user.id, track_info, file_id, bitrate)
@@ -769,7 +769,7 @@ async def handle_track_select(
             audio=FSInputFile(mp3_path),
             title=track_info["title"],
             performer=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
         )
 
@@ -802,7 +802,7 @@ async def handle_track_select(
                             audio=FSInputFile(retry_path),
                             title=track_info["title"],
                             performer=track_info["uploader"],
-                            duration=track_info.get("duration"),
+                            duration=int(track_info["duration"]) if track_info.get("duration") else None,
                             caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
                         )
                         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
@@ -832,7 +832,7 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
             source_id=track_info["video_id"],
             title=track_info["title"],
             artist=track_info["uploader"],
-            duration=track_info.get("duration"),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
             file_id=file_id,
             source=track_info.get("source", "youtube"),
             channel="external",

@@ -247,7 +247,7 @@ async def handle_video_download(callback: CallbackQuery, callback_data: VideoQua
         sent = await callback.message.answer_video(
             video=FSInputFile(video_path),
             caption=caption,
-            duration=tr.get("duration"),
+            duration=int(tr["duration"]) if tr.get("duration") else None,
             supports_streaming=True,
         )
 
