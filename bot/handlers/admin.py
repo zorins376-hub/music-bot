@@ -260,6 +260,56 @@ async def _build_detailed_stats() -> str:
         for i, (artist, title, downloads) in enumerate(top_tracks, 1):
             lines.append(f"  {i}. {artist or '?'} — {title or '?'} ({downloads} скач.)")
 
+    # ── Top tracks TODAY ──────────────────────
+    async with async_session() as session:
+        top_today_r = await session.execute(
+            select(Track.artist, Track.title, func.count(ListeningHistory.id).label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= today_start,
+            )
+            .group_by(Track.id, Track.artist, Track.title)
+            .order_by(func.count(ListeningHistory.id).desc())
+            .limit(10)
+        )
+        top_today = top_today_r.all()
+
+        # ── Retention ─────────────────────────────
+        # % of users who registered N days ago and were active since
+        ret_1d = ret_7d = ret_30d = 0
+        for days_ago, label in [(1, "1d"), (7, "7d"), (30, "30d")]:
+            reg_start = now - timedelta(days=days_ago + 1)
+            reg_end = now - timedelta(days=days_ago)
+            cohort = await session.scalar(
+                select(func.count()).select_from(User)
+                .where(User.created_at >= reg_start, User.created_at < reg_end)
+            ) or 0
+            returned = await session.scalar(
+                select(func.count()).select_from(User)
+                .where(
+                    User.created_at >= reg_start,
+                    User.created_at < reg_end,
+                    User.last_active >= reg_end,
+                )
+            ) or 0
+            if label == "1d":
+                ret_1d = (returned * 100 // cohort) if cohort else 0
+            elif label == "7d":
+                ret_7d = (returned * 100 // cohort) if cohort else 0
+            else:
+                ret_30d = (returned * 100 // cohort) if cohort else 0
+
+    if top_today:
+        lines.append("")
+        lines.append("<b>🔥 Топ-10 треков сегодня:</b>")
+        for i, (artist, title, cnt) in enumerate(top_today, 1):
+            lines.append(f"  {i}. {artist or '?'} — {title or '?'} ({cnt})")
+
+    lines.append("")
+    lines.append("<b>📈 Retention:</b>")
+    lines.append(f"  D1: <b>{ret_1d}%</b> | D7: <b>{ret_7d}%</b> | D30: <b>{ret_30d}%</b>")
+
     return "\n".join(lines)
 
 
@@ -477,13 +527,21 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         if not target:
             await message.answer(err)
             return
+        from datetime import datetime, timedelta, timezone
+        premium_until = datetime.now(timezone.utc) + timedelta(days=settings.PREMIUM_DAYS)
         async with async_session() as session:
             await session.execute(
-                update(User).where(User.id == target.id).values(is_premium=True)
+                update(User).where(User.id == target.id).values(
+                    is_premium=True,
+                    premium_until=premium_until,
+                )
             )
             await session.commit()
         label = f"@{target.username}" if target.username else str(target.id)
-        await message.answer(f"Premium выдан пользователю {label}.")
+        await message.answer(
+            f"Premium выдан пользователю {label} на {settings.PREMIUM_DAYS} дней "
+            f"(до {premium_until.strftime('%d.%m.%Y')})."
+        )
         await log_admin_action(message.from_user.id, "premium", target.id)
 
     # /admin queue — текущая очередь эфира

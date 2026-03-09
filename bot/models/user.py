@@ -28,6 +28,15 @@ class User(Base):
     avg_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Micro-payments (F-02)
+    ad_free_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    flac_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    # Referral system (E-01)
+    referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    referral_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    referral_bonus_tracks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

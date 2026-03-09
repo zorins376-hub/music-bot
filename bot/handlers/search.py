@@ -2,6 +2,7 @@ import asyncio
 import logging
 import secrets
 import time
+import uuid
 from pathlib import Path
 
 from aiogram import Router
@@ -154,12 +155,25 @@ async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> N
 # TrackCallback, FeedbackCallback, AddToPlCb imported from bot.callbacks
 
 
-def _track_caption(lang: str, track_info: dict, bitrate: int) -> str:
-    """Build caption line: ◷ 3:42 · 192 kbps · 2019"""
+def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool = False) -> str:
+    """Build caption line: ◷ 3:42 · 192 kbps · 2019 · ◉ BLACK ROOM"""
     dur = track_info.get("duration_fmt") or "?:??"
     year = track_info.get("upload_year")
     year_str = f" · {year}" if year else ""
-    return t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
+    base = t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
+    if ad_free:
+        return base
+    return f"{base}\n◉ BLACK ROOM"
+
+
+def _is_ad_free(user) -> bool:
+    """Check if user has ad-free (Premium, admin, or paid ad-free period)."""
+    if user.is_premium or user.is_admin:
+        return True
+    from datetime import datetime, timezone as tz
+    if user.ad_free_until and user.ad_free_until > datetime.now(tz.utc):
+        return True
+    return False
 
 
 _SEARCH_LOGO = "\u25c9 <b>BLACK ROOM</b>"
@@ -349,6 +363,8 @@ async def _do_search(message: Message, query: str) -> None:
     async def _search_yt(query_: str, limit: int = 5) -> list[dict]:
         return await search_tracks(query_, max_results=limit, source="youtube")
 
+    from bot.services.search_engine import detect_script, transliterate_cyr_to_lat, transliterate_lat_to_cyr
+
     tasks = [
         _search_source("yandex", search_yandex, max_results),
         _search_source("spotify", search_spotify, max_results),
@@ -361,8 +377,26 @@ async def _do_search(message: Message, query: str) -> None:
     for batch in source_results:
         all_results.extend(batch)
 
-    # Deduplicate across sources
-    results = deduplicate_results(all_results)[:max_results] if all_results else []
+    # A-05: If few results and query is mono-language, try transliterated search
+    if len(all_results) < 3:
+        script = detect_script(query)
+        alt_query = None
+        if script == "cyrillic":
+            alt_query = transliterate_cyr_to_lat(query)
+        elif script == "latin":
+            alt_query = transliterate_lat_to_cyr(query)
+        if alt_query and alt_query != query:
+            alt_tasks = [
+                _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
+                _search_source("yandex", lambda q, limit=5: search_yandex(alt_query, limit=limit), max_results),
+            ]
+            alt_results = await asyncio.gather(*alt_tasks)
+            for batch in alt_results:
+                all_results.extend(batch)
+
+    # Deduplicate across sources (language-aware ranking)
+    script = detect_script(query)
+    results = deduplicate_results(all_results, lang_hint=script)[:max_results] if all_results else []
 
     if not results:
         # TASK-012: "Did you mean?" suggestions
@@ -423,14 +457,15 @@ async def _download_spotify_track(track_info: dict, bitrate: int) -> Path:
     # Try Yandex first — best quality
     ym_results = await search_yandex(query, limit=1)
     if ym_results and ym_results[0].get("ym_track_id"):
-        dest = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+        _dl_id = uuid.uuid4().hex[:8]
+        dest = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
         await download_yandex(ym_results[0]["ym_track_id"], dest, bitrate)
         return dest
 
     # Fallback: search YouTube and download
     yt_results = await search_tracks(query, max_results=1, source="youtube")
     if yt_results:
-        return await download_track(yt_results[0]["video_id"], bitrate)
+        return await download_track(yt_results[0]["video_id"], bitrate, dl_id=uuid.uuid4().hex[:8])
 
     raise RuntimeError(f"No downloadable source found for Spotify track: {query}")
 
@@ -447,9 +482,10 @@ async def _group_auto_play(
     video_id = track_info["video_id"]
 
     # Local file_id (channel tracks)
+    _af = _is_ad_free(user)
     local_fid = track_info.get("file_id")
     if local_fid:
-        caption = _track_caption(lang, track_info, bitrate)
+        caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
             audio=local_fid,
             title=track_info["title"],
@@ -464,7 +500,7 @@ async def _group_auto_play(
     # Redis cache
     file_id = await cache.get_file_id(video_id, bitrate)
     if file_id:
-        caption = _track_caption(lang, track_info, bitrate)
+        caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
             audio=file_id,
             title=track_info["title"],
@@ -481,22 +517,23 @@ async def _group_auto_play(
     await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     mp3_path: Path | None = None
     try:
+        _dl_id = uuid.uuid4().hex[:8]
         if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
-            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
             await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
-            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
         elif track_info.get("source") == "spotify":
             mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
-            mp3_path = await download_track(video_id, bitrate)
+            mp3_path = await download_track(video_id, bitrate, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
             cleanup_file(mp3_path)
             mp3_path = None
             try:
-                mp3_path = await download_track(video_id, 128)
+                mp3_path = await download_track(video_id, 128, dl_id=_dl_id)
                 bitrate = 128
                 file_size = mp3_path.stat().st_size
             except Exception:
@@ -513,7 +550,7 @@ async def _group_auto_play(
             title=track_info["title"],
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
-            caption=_track_caption(lang, track_info, bitrate),
+            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
         await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
@@ -624,16 +661,18 @@ async def handle_track_select(
         return
 
     track_info = results[callback_data.i]
+    _share_q = f"{track_info.get('uploader', '')} - {track_info.get('title', '')}"
     video_id = track_info["video_id"]
     default_br = int(await _get_bot_setting("default_bitrate", "192"))
     bitrate = int(user.quality) if user.quality in ("128", "192", "320") else _smart_bitrate(
         track_info.get("source"), track_info.get("duration"), default_br
     )
+    _af = _is_ad_free(user)
 
     # If track already has a file_id from local DB (channel tracks)
     local_fid = track_info.get("file_id")
     if local_fid:
-        caption = _track_caption(lang, track_info, bitrate)
+        caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await callback.message.answer_audio(
             audio=local_fid,
             title=track_info["title"],
@@ -647,7 +686,7 @@ async def handle_track_select(
         else:
             await callback.message.answer(
                 t(lang, "rate_track"),
-                reply_markup=_feedback_keyboard(tid),
+                reply_markup=_feedback_keyboard(tid, _share_q),
             )
         return
 
@@ -655,7 +694,7 @@ async def handle_track_select(
     file_id = await cache.get_file_id(video_id, bitrate)
     if file_id:
         cache_hits.inc()
-        caption = _track_caption(lang, track_info, bitrate)
+        caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await callback.message.answer_audio(
             audio=file_id,
             title=track_info["title"],
@@ -669,7 +708,7 @@ async def handle_track_select(
         else:
             await callback.message.answer(
                 t(lang, "rate_track"),
-                reply_markup=_feedback_keyboard(tid),
+                reply_markup=_feedback_keyboard(tid, _share_q),
             )
         return
 
@@ -679,18 +718,19 @@ async def handle_track_select(
 
     progress_cb = _make_progress_cb(status, lang)
     mp3_path: Path | None = None
+    _dl_id = uuid.uuid4().hex[:8]
 
     try:
         if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
-            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
             await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
-            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
             await download_vk(track_info["vk_url"], mp3_path)
         elif track_info.get("source") == "spotify":
             mp3_path = await _download_spotify_track(track_info, bitrate)
         else:
-            mp3_path = await download_track(video_id, bitrate, progress_cb=progress_cb)
+            mp3_path = await download_track(video_id, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
 
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
@@ -698,7 +738,7 @@ async def handle_track_select(
             mp3_path = None
             await status.edit_text(t(lang, "error_too_large"))
             try:
-                mp3_path = await download_track(video_id, 128)
+                mp3_path = await download_track(video_id, 128, dl_id=_dl_id)
                 bitrate = 128
                 file_size = mp3_path.stat().st_size
             except Exception:
@@ -716,7 +756,7 @@ async def handle_track_select(
             title=track_info["title"],
             performer=track_info["uploader"],
             duration=track_info.get("duration"),
-            caption=_track_caption(lang, track_info, bitrate),
+            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
         )
 
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
@@ -727,12 +767,43 @@ async def handle_track_select(
         else:
             await callback.message.answer(
                 t(lang, "rate_track"),
-                reply_markup=_feedback_keyboard(tid),
+                reply_markup=_feedback_keyboard(tid, _share_q),
             )
 
     except Exception as e:
         err_msg = str(e)
         logger.error("Download error for %s: %s", video_id, err_msg)
+        # C-07: Auto-retry with a different source
+        failed_source = track_info.get("source", "youtube")
+        retry_query = f"{track_info.get('uploader', '')} {track_info.get('title', '')}".strip()
+        if retry_query and failed_source != "youtube":
+            try:
+                await status.edit_text(f"⚠️ {failed_source} недоступен, ищу альтернативу...")
+                alt_results = await search_tracks(retry_query, max_results=1, source="youtube")
+                if alt_results:
+                    retry_id = uuid.uuid4().hex[:8]
+                    retry_path = await download_track(alt_results[0]["video_id"], bitrate, dl_id=retry_id)
+                    try:
+                        sent = await callback.message.answer_audio(
+                            audio=FSInputFile(retry_path),
+                            title=track_info["title"],
+                            performer=track_info["uploader"],
+                            duration=track_info.get("duration"),
+                            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+                        )
+                        await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+                        tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+                        await status.delete()
+                        if not is_group:
+                            await callback.message.answer(
+                                t(lang, "rate_track"),
+                                reply_markup=_feedback_keyboard(tid, _share_q),
+                            )
+                        return
+                    finally:
+                        cleanup_file(retry_path)
+            except Exception as retry_err:
+                logger.debug("Auto-retry also failed: %s", retry_err)
         await status.edit_text(t(lang, _classify_download_error(err_msg)))
     finally:
         if mp3_path:
@@ -761,6 +832,18 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
         action="play",
         source="search",
     )
+    # E-01: Check referral activation on 3rd download
+    try:
+        from bot.handlers.referral import check_referral_activation
+        from bot.models.base import async_session as _async_session2
+        from bot.models.user import User as _User2
+        async with _async_session2() as session:
+            from sqlalchemy import select as _sel2
+            u_dl = (await session.execute(_sel2(_User2).where(_User2.id == user_id))).scalar()
+            if u_dl:
+                await check_referral_activation(user_id, u_dl.request_count)
+    except Exception:
+        pass
     # Auto-update user taste profile every 10 listens
     try:
         from bot.models.base import async_session as _async_session
@@ -779,35 +862,42 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
     return track.id
 
 
-def _feedback_keyboard(track_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="\u2764\ufe0f",
-                    callback_data=FeedbackCallback(tid=track_id, act="like").pack(),
-                ),
-                InlineKeyboardButton(
-                    text="\ud83d\udc4e",
-                    callback_data=FeedbackCallback(tid=track_id, act="dislike").pack(),
-                ),
-                InlineKeyboardButton(
-                    text="+ \u25b8",
-                    callback_data=AddToPlCb(tid=track_id).pack(),
-                ),
-                InlineKeyboardButton(
-                    text="+ \u25b6",
-                    callback_data=AddToQueueCb(tid=track_id).pack(),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="\ud83d\udcdd \u0422\u0435\u043a\u0441\u0442",
-                    callback_data=LyricsCb(tid=track_id).pack(),
-                ),
-            ],
-        ]
-    )
+def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="\u2764\ufe0f",
+                callback_data=FeedbackCallback(tid=track_id, act="like").pack(),
+            ),
+            InlineKeyboardButton(
+                text="\ud83d\udc4e",
+                callback_data=FeedbackCallback(tid=track_id, act="dislike").pack(),
+            ),
+            InlineKeyboardButton(
+                text="+ \u25b8",
+                callback_data=AddToPlCb(tid=track_id).pack(),
+            ),
+            InlineKeyboardButton(
+                text="+ \u25b6",
+                callback_data=AddToQueueCb(tid=track_id).pack(),
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="\ud83d\udcdd \u0422\u0435\u043a\u0441\u0442",
+                callback_data=LyricsCb(tid=track_id).pack(),
+            ),
+        ],
+    ]
+    # E-03: Share button
+    if share_query:
+        rows[1].append(
+            InlineKeyboardButton(
+                text="\ud83d\udce4",
+                switch_inline_query=share_query[:64],
+            )
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(FeedbackCallback.filter())

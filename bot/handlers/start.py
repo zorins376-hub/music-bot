@@ -1,3 +1,6 @@
+import base64
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -9,6 +12,8 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory
 from bot.models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -62,6 +67,34 @@ _LANG_KEYBOARD = InlineKeyboardMarkup(
 async def cmd_start(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     admin = is_admin(message.from_user.id, message.from_user.username)
+
+    # D-02: Handle deep-link from inline mode: /start s_<base64(query)>
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1:
+        payload = args[1]
+        if payload.startswith("s_"):
+            b64 = payload[2:]
+            # Add back padding
+            b64 += "=" * (-len(b64) % 4)
+            try:
+                query = base64.urlsafe_b64decode(b64).decode()
+            except Exception:
+                logger.debug("Invalid deep-link payload: %s", payload)
+            else:
+                from bot.handlers.search import _do_search
+                await _do_search(message, query)
+                return
+        # C-04: Handle shared playlist deep-link: /start pl_<share_id>
+        elif payload.startswith("pl_"):
+            share_id = payload[3:]
+            from bot.handlers.playlist import show_shared_playlist
+            await show_shared_playlist(message, share_id)
+            return
+        # E-01: Handle referral deep-link: /start ref_<user_id>
+        elif payload.startswith("ref_"):
+            from bot.handlers.referral import process_referral
+            await process_referral(message, payload[4:])
+
     await message.answer(
         t(user.language, "start_message", name=message.from_user.first_name or ""),
         reply_markup=_main_menu(user.language, admin=admin),

@@ -2,6 +2,7 @@ import io
 import json as _json
 import logging
 import random as _random
+import secrets
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -112,6 +113,10 @@ def _playlist_view_kb(
         InlineKeyboardButton(
             text="📤 Export",
             callback_data=PlCb(act="exp", id=pl_id).pack(),
+        ),
+        InlineKeyboardButton(
+            text="🔗",
+            callback_data=PlCb(act="shr", id=pl_id).pack(),
         ),
         InlineKeyboardButton(
             text=t(lang, "pl_back_btn"),
@@ -270,16 +275,18 @@ async def cb_delete_exec(callback: CallbackQuery, callback_data: PlCb) -> None:
 @router.callback_query(PlCb.filter(F.act == "rm"))
 async def cb_remove_track(callback: CallbackQuery, callback_data: PlCb) -> None:
     user = await get_or_create_user(callback.from_user)
+    playlist_id = callback_data.id  # fallback
     async with async_session() as session:
         pt = await session.get(PlaylistTrack, callback_data.tid)
         if pt:
+            playlist_id = pt.playlist_id
             pl = await session.get(Playlist, pt.playlist_id)
             if pl and pl.user_id == user.id:
                 await session.delete(pt)
                 await session.commit()
     await callback.answer(t(user.language, "pl_track_removed"))
-    # Refresh view
-    cb2 = PlCb(act="view", id=callback_data.id)
+    # Refresh view using server-side playlist_id
+    cb2 = PlCb(act="view", id=playlist_id)
     await cb_view(callback, cb2)
 
 
@@ -470,3 +477,215 @@ async def cb_add_to_playlist(callback: CallbackQuery, callback_data: AddToPlCb) 
         await session.commit()
     await callback.answer(t(user.language, "pl_track_added", name=pl.name), show_alert=True)
     await callback.message.delete()
+
+
+# ── Share playlist (C-04) ────────────────────────────────────────────────
+
+_SHARE_TTL = 30 * 24 * 3600  # 30 days
+
+
+@router.callback_query(PlCb.filter(F.act == "shr"))
+async def cb_share_playlist(callback: CallbackQuery, callback_data: PlCb) -> None:
+    """Generate a shareable deep-link for a playlist."""
+    from bot.services.cache import cache
+
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
+    async with async_session() as session:
+        pl = await session.get(Playlist, callback_data.id)
+        if not pl or pl.user_id != user.id:
+            await callback.message.answer(t(user.language, "pl_not_found"))
+            return
+
+    share_id = secrets.token_urlsafe(8)
+    payload = _json.dumps({"user_id": user.id, "playlist_id": pl.id})
+    try:
+        await cache.redis.setex(f"share:{share_id}", _SHARE_TTL, payload)
+    except Exception:
+        await callback.message.answer("⚠️ Не удалось создать ссылку.")
+        return
+
+    bot_me = await callback.bot.me()
+    link = f"https://t.me/{bot_me.username}?start=pl_{share_id}"
+    await callback.message.answer(
+        f"🔗 <b>Ссылка на плейлист «{pl.name}»</b>\n\n"
+        f"<code>{link}</code>\n\n"
+        f"Отправь эту ссылку друзьям — они смогут посмотреть и скопировать плейлист!",
+        parse_mode="HTML",
+    )
+
+
+async def show_shared_playlist(message: Message, share_id: str) -> None:
+    """Display a shared playlist to the recipient (called from start.py deep-link)."""
+    from bot.services.cache import cache
+
+    user = await get_or_create_user(message.from_user)
+    lang = user.language
+
+    try:
+        raw = await cache.redis.get(f"share:{share_id}")
+    except Exception:
+        raw = None
+
+    if not raw:
+        await message.answer(t(lang, "pl_share_expired"))
+        return
+
+    data = _json.loads(raw)
+    playlist_id = data["playlist_id"]
+    owner_id = data["user_id"]
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl:
+            await message.answer(t(lang, "pl_not_found"))
+            return
+
+        result = await session.execute(
+            select(Track)
+            .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+            .where(PlaylistTrack.playlist_id == pl.id)
+            .order_by(PlaylistTrack.position)
+        )
+        tracks = list(result.scalars().all())
+
+    if not tracks:
+        await message.answer(t(lang, "pl_empty"))
+        return
+
+    lines = [f"▸ <b>{pl.name}</b> ({len(tracks)} треков)\n"]
+    for i, tr in enumerate(tracks[:20], 1):
+        dur = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else "?:??"
+        lines.append(f"{i}. {tr.artist or '?'} — {tr.title or '?'} ({dur})")
+    if len(tracks) > 20:
+        lines.append(f"... ещё {len(tracks) - 20} треков")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📥 Скопировать к себе",
+            callback_data=PlCb(act="clone", id=playlist_id).pack(),
+        )],
+    ])
+    await message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(PlCb.filter(F.act == "clone"))
+async def cb_clone_playlist(callback: CallbackQuery, callback_data: PlCb) -> None:
+    """Clone a shared playlist to the current user."""
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+
+    async with async_session() as session:
+        # Check user playlist limit
+        cnt = await session.scalar(
+            select(func.count()).where(Playlist.user_id == user.id)
+        )
+        if cnt >= MAX_PLAYLISTS:
+            await callback.message.answer(t(lang, "pl_limit"))
+            return
+
+        # Get source playlist
+        src = await session.get(Playlist, callback_data.id)
+        if not src:
+            await callback.message.answer(t(lang, "pl_not_found"))
+            return
+
+        # Get source tracks
+        result = await session.execute(
+            select(PlaylistTrack)
+            .where(PlaylistTrack.playlist_id == src.id)
+            .order_by(PlaylistTrack.position)
+        )
+        src_tracks = list(result.scalars().all())
+
+        # Create new playlist
+        new_pl = Playlist(user_id=user.id, name=src.name)
+        session.add(new_pl)
+        await session.flush()
+
+        for pt in src_tracks:
+            session.add(PlaylistTrack(
+                playlist_id=new_pl.id,
+                track_id=pt.track_id,
+                position=pt.position,
+            ))
+        await session.commit()
+
+    await callback.message.answer(
+        t(lang, "pl_cloned", name=src.name, count=len(src_tracks)),
+    )
+
+
+# ── Import playlist from JSON file (C-05) ───────────────────────────────
+
+
+@router.message(F.document)
+async def handle_playlist_import(message: Message) -> None:
+    """Import a playlist from a JSON file sent by the user."""
+    doc = message.document
+    if not doc or not doc.file_name:
+        return
+    if not doc.file_name.endswith(".json"):
+        return
+    if doc.file_size and doc.file_size > 512 * 1024:  # 512 KB max
+        return
+
+    user = await get_or_create_user(message.from_user)
+    lang = user.language
+
+    try:
+        file = await message.bot.download(doc)
+        raw = file.read()
+        data = _json.loads(raw)
+    except Exception:
+        await message.answer(t(lang, "pl_import_error"))
+        return
+
+    name = data.get("name", "Imported")[:50]
+    tracks_data = data.get("tracks", [])
+    if not tracks_data or not isinstance(tracks_data, list):
+        await message.answer(t(lang, "pl_import_error"))
+        return
+
+    async with async_session() as session:
+        cnt = await session.scalar(
+            select(func.count()).where(Playlist.user_id == user.id)
+        )
+        if cnt >= MAX_PLAYLISTS:
+            await message.answer(t(lang, "pl_limit"))
+            return
+
+        pl = Playlist(user_id=user.id, name=name)
+        session.add(pl)
+        await session.flush()
+
+        added = 0
+        for i, item in enumerate(tracks_data[:MAX_TRACKS_PER_PLAYLIST]):
+            artist = item.get("artist", "").strip()
+            title = item.get("title", "").strip()
+            source_id = item.get("source_id", "").strip()
+            if not title:
+                continue
+            # Find or skip the track in local DB
+            track = await session.scalar(
+                select(Track).where(Track.source_id == source_id)
+            ) if source_id else None
+            if not track:
+                track = await session.scalar(
+                    select(Track).where(
+                        Track.artist.ilike(f"%{artist}%"),
+                        Track.title.ilike(f"%{title}%"),
+                    )
+                ) if artist and title else None
+            if track:
+                session.add(PlaylistTrack(
+                    playlist_id=pl.id,
+                    track_id=track.id,
+                    position=added,
+                ))
+                added += 1
+
+        await session.commit()
+
+    await message.answer(t(lang, "pl_imported", name=name, count=added))

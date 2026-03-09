@@ -93,6 +93,9 @@ def detect_script(text: str) -> str:
 _FEAT_RE = re.compile(r"\s*[\(\[]?\s*(?:feat\.?|ft\.?)\s*[^)\]]*[\)\]]?", re.IGNORECASE)
 # Source quality ranking (higher = better)
 _SOURCE_RANK = {"yandex": 5, "spotify": 4, "vk": 3, "soundcloud": 2, "youtube": 1, "channel": 6}
+# Language-aware: Russian queries prioritize Yandex/VK; English → Spotify/YouTube
+_SOURCE_RANK_CYR = {"yandex": 6, "vk": 5, "spotify": 3, "channel": 6, "soundcloud": 2, "youtube": 1}
+_SOURCE_RANK_LAT = {"spotify": 6, "youtube": 5, "soundcloud": 4, "yandex": 3, "vk": 2, "channel": 6}
 
 
 def _normalize_for_dedup(artist: str, title: str) -> str:
@@ -115,13 +118,21 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
-def deduplicate_results(results: list[dict], threshold: float = 0.7) -> list[dict]:
+def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: str = "mixed") -> list[dict]:
     """Remove duplicate tracks, keeping the one from the best source."""
     if not results:
         return []
 
+    # Pick ranking table based on query language
+    if lang_hint == "cyrillic":
+        rank = _SOURCE_RANK_CYR
+    elif lang_hint == "latin":
+        rank = _SOURCE_RANK_LAT
+    else:
+        rank = _SOURCE_RANK
+
     # Sort by source quality (best first)
-    ranked = sorted(results, key=lambda r: _SOURCE_RANK.get(r.get("source", ""), 0), reverse=True)
+    ranked = sorted(results, key=lambda r: rank.get(r.get("source", ""), 0), reverse=True)
 
     kept: list[dict] = []
     kept_keys: list[str] = []

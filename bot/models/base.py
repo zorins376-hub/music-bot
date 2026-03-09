@@ -48,6 +48,18 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                # Create pg_trgm extension and trigram indexes for PostgreSQL
+                if _is_pg:
+                    await conn.execute(
+                        __import__("sqlalchemy").text(
+                            "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+                        )
+                    )
+                    for stmt in (
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_artist_trgm ON tracks USING gin (artist gin_trgm_ops)",
+                    ):
+                        await conn.execute(__import__("sqlalchemy").text(stmt))
             return
         except Exception as exc:
             last_exc = exc

@@ -23,6 +23,33 @@ def is_admin(user_id: int, username: str | None = None) -> bool:
     return False
 
 
+async def persist_admin_id(user_id: int) -> None:
+    """Save admin user_id to Redis for persistence across restarts."""
+    try:
+        from bot.services.cache import cache
+        await cache.redis.sadd("bot:admin_ids", str(user_id))
+    except Exception as e:
+        logger.debug("persist_admin_id failed: %s", e)
+
+
+async def load_admin_ids_from_redis() -> None:
+    """Load persisted admin IDs from Redis into settings.ADMIN_IDS on startup."""
+    try:
+        from bot.services.cache import cache
+        stored = await cache.redis.smembers("bot:admin_ids")
+        if stored:
+            for sid in stored:
+                try:
+                    uid = int(sid)
+                    if uid not in settings.ADMIN_IDS:
+                        settings.ADMIN_IDS.append(uid)
+                except (ValueError, TypeError):
+                    pass
+            logger.info("Loaded %d admin IDs from Redis", len(stored))
+    except Exception as e:
+        logger.debug("load_admin_ids_from_redis failed: %s", e)
+
+
 async def get_or_create_user(tg_user: TgUser) -> User:
     admin = is_admin(tg_user.id, tg_user.username)
     now = datetime.now(timezone.utc)
@@ -85,6 +112,7 @@ async def get_or_create_user(tg_user: TgUser) -> User:
         # Keep in-memory list in sync for fast checks elsewhere
         if user.is_admin and tg_user.id not in settings.ADMIN_IDS:
             settings.ADMIN_IDS.append(tg_user.id)
+            await persist_admin_id(tg_user.id)
 
         return user
 
@@ -177,41 +205,47 @@ async def get_user_stats(user_id: int) -> dict:
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(weeks=1)
     async with async_session() as session:
-        # Combined query: total plays, weekly plays, and top artist in one round-trip
-        stats_row = (
-            await session.execute(
-                select(
-                    func.count(ListeningHistory.id).filter(
-                        ListeningHistory.action == "play"
-                    ).label("total"),
-                    func.count(ListeningHistory.id).filter(
-                        ListeningHistory.action == "play",
-                        ListeningHistory.created_at >= week_ago,
-                    ).label("week"),
-                ).where(ListeningHistory.user_id == user_id)
+        # Single query with scalar subqueries for total, week, and top artist
+        total_sub = (
+            select(func.count(ListeningHistory.id))
+            .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            .correlate()
+            .scalar_subquery()
+        )
+        week_sub = (
+            select(func.count(ListeningHistory.id))
+            .where(
+                ListeningHistory.user_id == user_id,
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
             )
-        ).first()
-        total = stats_row.total if stats_row else 0
-        week = stats_row.week if stats_row else 0
-
-        top_row = (
-            await session.execute(
-                select(Track.artist, func.count(ListeningHistory.id).label("cnt"))
-                .join(Track, ListeningHistory.track_id == Track.id)
-                .where(
-                    ListeningHistory.user_id == user_id,
-                    ListeningHistory.action == "play",
-                    Track.artist.isnot(None),
-                    Track.artist != "",
-                )
-                .group_by(Track.artist)
-                .order_by(desc("cnt"))
-                .limit(1)
+            .correlate()
+            .scalar_subquery()
+        )
+        top_sub = (
+            select(Track.artist)
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id == user_id,
+                ListeningHistory.action == "play",
+                Track.artist.isnot(None),
+                Track.artist != "",
             )
-        ).first()
-        top_artist: str | None = top_row[0] if top_row else None
+            .group_by(Track.artist)
+            .order_by(desc(func.count(ListeningHistory.id)))
+            .limit(1)
+            .correlate()
+            .scalar_subquery()
+        )
+        row = (await session.execute(
+            select(total_sub.label("total"), week_sub.label("week"), top_sub.label("top_artist"))
+        )).first()
 
-    return {"total": total, "week": week, "top_artist": top_artist}
+    return {
+        "total": row.total if row else 0,
+        "week": row.week if row else 0,
+        "top_artist": row.top_artist if row else None,
+    }
 
 
 async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:

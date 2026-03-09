@@ -20,8 +20,8 @@ from bot.models.user import User
 from bot.services.cache import cache
 
 _CHALLENGE_TTL = 60 * 10  # 10 minutes to answer
-_MAX_ATTEMPTS = 3          # max wrong answers before cooldown
-_BLOCK_TTL = 60 * 30      # 30 min block after too many failures
+_MAX_ATTEMPTS = 5          # max wrong answers before cooldown
+_BLOCK_TTL = 60 * 10      # 10 min block after too many failures
 
 
 def _challenge_key(user_id: int) -> str:
