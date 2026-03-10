@@ -646,8 +646,8 @@ export function App() {
               tracks={state.queue}
               currentIndex={state.position}
               onPlay={(t) => action("play", t.video_id)}
-              onReorder={(newTracks) => {
-                reorderQueue(newTracks.map(t => t.video_id)).then(setState).catch(() => {});
+              onReorder={(fromIndex, toIndex) => {
+                reorderQueue(fromIndex, toIndex).then(setState).catch(() => {});
               }}
               onRemove={(t) => {
                 action("remove", t.video_id);

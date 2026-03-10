@@ -114,11 +114,11 @@ export async function checkFavorite(videoId: string): Promise<boolean> {
   return data.liked;
 }
 
-export async function reorderQueue(queue: string[]): Promise<PlayerState> {
+export async function reorderQueue(fromIndex: number, toIndex: number): Promise<PlayerState> {
   const r = await fetch(`${API_BASE}/player/reorder`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({ queue }),
+    body: JSON.stringify({ from_index: fromIndex, to_index: toIndex }),
   });
   if (!r.ok) throw new Error("Failed to reorder");
   return r.json();

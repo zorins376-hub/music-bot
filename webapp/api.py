@@ -434,6 +434,18 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
     return None
 
 
+async def _refresh_missing_covers_in_state(user_id: int) -> None:
+    """Best-effort refresh for older queue entries without cover URLs."""
+    r = await _get_redis()
+    raw = await r.get(_state_key(user_id))
+    if not raw:
+        return
+
+    state = PlayerState.model_validate_json(raw)
+    refreshed = await _hydrate_state_covers(user_id, state)
+    await _save_state(user_id, refreshed)
+
+
 async def _hydrate_track_cover(track: TrackSchema) -> tuple[TrackSchema, bool]:
     cover_url = await _resolve_cover_url(track.video_id, track.source, track.cover_url)
     if cover_url and cover_url != track.cover_url:
@@ -468,6 +480,7 @@ async def _hydrate_state_covers(user_id: int, state: PlayerState) -> PlayerState
 async def get_player_state(user_id: int, user: dict = Depends(get_current_user)):
     if user.get("id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    await _refresh_missing_covers_in_state(user_id)
     return await _load_state(user_id)
 
 

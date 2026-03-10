@@ -7,7 +7,7 @@ interface Props {
   tracks: Track[];
   currentIndex: number;
   onPlay: (track: Track) => void;
-  onReorder?: (newOrder: Track[]) => void;
+  onReorder?: (fromIndex: number, toIndex: number) => void;
   onRemove?: (track: Track) => void;
   accentColor?: string;
   accentColorAlpha?: string;
@@ -32,16 +32,30 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
   const longPressTimer = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const lastAutoScrollAt = useRef(0);
 
   // Calculate drop target based on Y position
   const findDropTarget = useCallback((touchY: number) => {
     let newOverIndex = dragIndex;
-    itemRefs.current.forEach((el, idx) => {
+    const items = [...itemRefs.current.entries()].sort((a, b) => a[0] - b[0]);
+    if (!items.length) return newOverIndex;
+
+    const firstRect = items[0][1].getBoundingClientRect();
+    const lastRect = items[items.length - 1][1].getBoundingClientRect();
+
+    if (touchY <= firstRect.top + firstRect.height / 2) {
+      return 0;
+    }
+    if (touchY >= lastRect.top + lastRect.height / 2) {
+      return items[items.length - 1][0];
+    }
+
+    items.forEach(([idx, el]) => {
       if (idx === dragIndex) return;
       const rect = el.getBoundingClientRect();
       const midY = rect.top + rect.height / 2;
-      if (touchY > midY - 20 && touchY < midY + rect.height) {
-        newOverIndex = idx;
+      if (touchY >= rect.top && touchY <= rect.bottom) {
+        newOverIndex = touchY < midY ? idx : Math.min(idx + 1, items[items.length - 1][0]);
       }
     });
     return newOverIndex;
@@ -54,6 +68,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
     longPressTimer.current = window.setTimeout(() => {
       haptic("heavy");
       setDragIndex(idx);
+      setOverIndex(idx);
       setDragY(e.touches[0].clientY);
       setSwipedIndex(null);
     }, 400);
@@ -87,6 +102,22 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
       e.preventDefault();
       const touchY = e.touches[0].clientY;
       setDragY(touchY);
+
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const edgeThreshold = 56;
+        const now = Date.now();
+        if (now - lastAutoScrollAt.current > 16) {
+          if (touchY < rect.top + edgeThreshold) {
+            container.scrollTop -= 18;
+            lastAutoScrollAt.current = now;
+          } else if (touchY > rect.bottom - edgeThreshold) {
+            container.scrollTop += 18;
+            lastAutoScrollAt.current = now;
+          }
+        }
+      }
       
       const newOver = findDropTarget(touchY);
       if (newOver !== null && newOver !== overIndex) {
@@ -97,11 +128,8 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
 
     const onEnd = () => {
       if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex && onReorder) {
-        const newTracks = [...tracks];
-        const [removed] = newTracks.splice(dragIndex, 1);
-        newTracks.splice(overIndex, 0, removed);
         haptic("medium");
-        onReorder(newTracks);
+        onReorder(dragIndex, overIndex);
       }
       setDragIndex(null);
       setOverIndex(null);
@@ -117,7 +145,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
       document.removeEventListener("touchend", onEnd);
       document.removeEventListener("touchcancel", onEnd);
     };
-  }, [dragIndex, overIndex, tracks, onReorder, findDropTarget]);
+  }, [dragIndex, overIndex, onReorder, findDropTarget]);
 
   const handleTouchEnd = () => {
     if (longPressTimer.current) {
@@ -144,11 +172,6 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
       // Fallback: remove via API directly
       try {
         await sendAction("remove", track.video_id);
-        // Trigger reorder without the removed track
-        if (onReorder) {
-          const newTracks = tracks.filter((_, i) => i !== idx);
-          onReorder(newTracks);
-        }
       } catch (err) {
         console.error("Remove track error:", err);
       }
@@ -185,8 +208,8 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
       <div
         ref={containerRef}
         style={{ 
-          overflowY: dragIndex !== null ? "hidden" : "auto", 
-          maxHeight: "35vh", 
+          overflowY: "auto", 
+          maxHeight: "calc(100vh - 140px)", 
           WebkitOverflowScrolling: "touch",
           position: "relative",
         }}
@@ -257,7 +280,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
                 : overIndex === i && dragIndex !== null
                 ? (isTequila ? "rgba(255, 213, 79, 0.14)" : "rgba(124, 77, 255, 0.2)")
                 : (isTequila ? "rgba(40, 25, 15, 0.45)" : "rgba(255,255,255,0.08)"),
-              transform: `translateX(${swipedIndex === i ? -60 : 0}px) scale(${dragIndex === i ? 1.05 : 1})`,
+              transform: `translateX(${swipedIndex === i ? -60 : 0}px) translateY(${dragIndex === i ? dragY - dragStartY.current : 0}px) scale(${dragIndex === i ? 1.05 : 1})`,
               transition: dragIndex === i ? "none" : "transform 0.2s, background 0.15s",
               boxShadow: dragIndex === i ? "0 8px 24px rgba(0,0,0,0.4)" : (isTequila ? "0 4px 14px rgba(0,0,0,0.18)" : "none"),
               border: isTequila ? `1px solid ${i === currentIndex ? "rgba(255, 245, 210, 0.18)" : "rgba(255, 213, 79, 0.08)"}` : "none",
