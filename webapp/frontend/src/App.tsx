@@ -4,7 +4,7 @@ import { TrackList } from "./components/TrackList";
 import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
-import { fetchPlayerState, sendAction, type PlayerState, type Track } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, type PlayerState, type Track } from "./api";
 
 type View = "player" | "playlists" | "search" | "lyrics";
 
@@ -24,22 +24,48 @@ export function App() {
   const [lyricsTrackId, setLyricsTrackId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Create persistent audio element
+  useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "auto";
+    audioRef.current = audio;
+
+    audio.addEventListener("ended", () => {
+      // Auto-next on track end
+      sendAction("next").then(setState).catch(() => {});
+    });
+    audio.addEventListener("timeupdate", () => {
+      const t = Math.floor(audio.currentTime);
+      elapsedRef.current = t;
+      setElapsed(t);
+    });
+
+    return () => { audio.pause(); audio.src = ""; };
+  }, []);
+
+  // Sync audio with current track
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const track = state.current_track;
+    if (!track) { audio.pause(); audio.src = ""; return; }
+
+    const newSrc = getStreamUrl(track.video_id);
+    if (audio.src !== newSrc) {
+      audio.src = newSrc;
+    }
+    if (state.is_playing) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [state.current_track?.video_id, state.is_playing]);
 
   useEffect(() => {
     if (userId) fetchPlayerState(userId).then(setState).catch(() => {});
   }, [userId]);
-
-  // Tick elapsed for lyrics sync
-  useEffect(() => {
-    if (!state.is_playing) return;
-    const id = window.setInterval(() => {
-      elapsedRef.current += 1;
-      setElapsed(elapsedRef.current);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [state.is_playing, state.current_track?.video_id]);
-
-  // Reset elapsed on track change
   useEffect(() => {
     elapsedRef.current = 0;
     setElapsed(0);
@@ -49,9 +75,8 @@ export function App() {
     async (act: string, trackId?: string, seekPos?: number) => {
       try {
         const s = await sendAction(act, trackId, seekPos);
-        if (act === "seek" && seekPos !== undefined) {
-          elapsedRef.current = seekPos;
-          setElapsed(seekPos);
+        if (act === "seek" && seekPos !== undefined && audioRef.current) {
+          audioRef.current.currentTime = seekPos;
         }
         setState(s);
       } catch {}

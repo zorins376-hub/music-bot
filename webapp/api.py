@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 
 from bot.config import settings
+from bot.services.downloader import download_track
 from bot.models.base import init_db
 from webapp.auth import verify_init_data
 from webapp.schemas import (
@@ -67,6 +68,41 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Audio streaming ─────────────────────────────────────────────────────
+
+@app.get("/api/stream/{video_id}")
+async def stream_audio(
+    video_id: str,
+    x_telegram_init_data: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Download (if needed) and stream MP3 for a given video_id."""
+    # Auth: accept header or query param (audio elements can't send headers)
+    init_data = x_telegram_init_data or token
+    if not init_data or verify_init_data(init_data) is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Sanitize video_id to prevent path traversal
+    import re
+    if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', video_id):
+        raise HTTPException(status_code=400, detail="Invalid video_id")
+
+    # Check if already downloaded
+    mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+    if not mp3_path.exists():
+        try:
+            mp3_path = await download_track(video_id)
+        except Exception as e:
+            logger.error("Stream download failed for %s: %s", video_id, e)
+            raise HTTPException(status_code=500, detail="Download failed")
+
+    return FileResponse(
+        mp3_path,
+        media_type="audio/mpeg",
+        headers={"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400"},
+    )
 
 
 # ── Helper: Redis player state ──────────────────────────────────────────

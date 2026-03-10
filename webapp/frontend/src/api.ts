@@ -78,3 +78,8 @@ export async function searchTracks(query: string, limit = 10): Promise<Track[]> 
   const data = await r.json();
   return data.tracks;
 }
+
+export function getStreamUrl(videoId: string): string {
+  const initData = encodeURIComponent(window.Telegram.WebApp.initData);
+  return `${API_BASE}/stream/${videoId}?token=${initData}`;
+}
