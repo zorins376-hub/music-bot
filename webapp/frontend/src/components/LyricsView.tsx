@@ -11,6 +11,7 @@ interface Props {
   trackId: string;
   elapsed: number;  // current playback position in seconds
   onBack: () => void;
+  accentColor?: string;
 }
 
 /**
@@ -43,7 +44,7 @@ function parseLines(raw: string): LyricLine[] {
   return result;
 }
 
-export function LyricsView({ trackId, elapsed, onBack }: Props) {
+export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)" }: Props) {
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lines, setLines] = useState<LyricLine[]>([]);
@@ -111,7 +112,7 @@ export function LyricsView({ trackId, elapsed, onBack }: Props) {
                 margin: i === activeIdx ? "4px 0" : 0,
                 borderRadius: i === activeIdx ? 8 : 0,
                 background: i === activeIdx
-                  ? "linear-gradient(90deg, var(--tg-theme-button-color, #7c4dff), #e040fb)"
+                  ? `linear-gradient(90deg, ${accentColor || 'var(--tg-theme-button-color, #7c4dff)'}, #e040fb)`
                   : "transparent",
                 transform: i === activeIdx ? "scale(1.02)" : "scale(1)",
                 boxShadow: i === activeIdx ? "0 2px 12px rgba(124, 77, 255, 0.4)" : "none",

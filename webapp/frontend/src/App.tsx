@@ -4,7 +4,9 @@ import { TrackList } from "./components/TrackList";
 import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
+import { MiniPlayer } from "./components/MiniPlayer";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, type PlayerState, type Track } from "./api";
+import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 
 type View = "player" | "playlists" | "search" | "lyrics";
 
@@ -25,6 +27,9 @@ export function App() {
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const preloadRef = useRef<HTMLAudioElement | null>(null);
+  const [accentColor, setAccentColor] = useState("rgb(124, 77, 255)");
+  const [accentColorAlpha, setAccentColorAlpha] = useState("rgba(124, 77, 255, 0.4)");
 
   // Create persistent audio element
   useEffect(() => {
@@ -32,17 +37,43 @@ export function App() {
     audio.preload = "auto";
     audioRef.current = audio;
 
+    // Preload element for gapless playback
+    const preload = new Audio();
+    preload.preload = "auto";
+    preloadRef.current = preload;
+
     audio.addEventListener("ended", () => {
-      // Auto-next on track end
+      // If preloaded, swap instantly (gapless)
+      if (preloadRef.current && preloadRef.current.src && preloadRef.current.readyState >= 2) {
+        const old = audioRef.current;
+        audioRef.current = preloadRef.current;
+        audioRef.current.play().catch(() => {});
+        preloadRef.current = old || new Audio();
+        preloadRef.current.preload = "auto";
+        preloadRef.current.src = "";
+      }
       sendAction("next").then(setState).catch(() => {});
     });
     audio.addEventListener("timeupdate", () => {
       const t = Math.floor(audio.currentTime);
       elapsedRef.current = t;
       setElapsed(t);
+
+      // Gapless: preload next track 15 seconds before end
+      if (audio.duration && audio.duration - audio.currentTime < 15 && audio.duration > 20) {
+        const nextIdx = (state.position + 1) % state.queue.length;
+        if (state.queue.length > 1 && preloadRef.current) {
+          const nextTrack = state.queue[nextIdx];
+          const nextSrc = getStreamUrl(nextTrack.video_id);
+          if (preloadRef.current.src !== nextSrc) {
+            preloadRef.current.src = nextSrc;
+            preloadRef.current.load();
+          }
+        }
+      }
     });
 
-    return () => { audio.pause(); audio.src = ""; };
+    return () => { audio.pause(); audio.src = ""; preload.src = ""; };
   }, []);
 
   // Sync audio with current track
@@ -90,6 +121,20 @@ export function App() {
     }
   }, [state.current_track?.video_id, state.is_playing]);
 
+  // Dynamic Color Extraction from cover
+  useEffect(() => {
+    const coverUrl = state.current_track?.cover_url;
+    if (coverUrl) {
+      extractDominantColor(coverUrl).then((color) => {
+        setAccentColor(rgbToCSS(color));
+        setAccentColorAlpha(rgbaToCSS(color, 0.4));
+      });
+    } else {
+      setAccentColor("rgb(124, 77, 255)");
+      setAccentColorAlpha("rgba(124, 77, 255, 0.4)");
+    }
+  }, [state.current_track?.cover_url]);
+
   useEffect(() => {
     if (userId) fetchPlayerState(userId).then(setState).catch(() => {});
   }, [userId]);
@@ -136,7 +181,7 @@ export function App() {
           }}
         />
       )}
-      <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto" }}>
+      <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
       {/* Nav */}
       <nav style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "center" }}>
         {(["player", "playlists", "search"] as View[]).map((v) => (
@@ -147,10 +192,11 @@ export function App() {
               padding: "6px 14px",
               borderRadius: 16,
               border: "none",
-              background: view === v ? "var(--tg-theme-button-color, #7c4dff)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
+              background: view === v ? accentColor : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
               color: view === v ? "#fff" : "var(--tg-theme-hint-color, #aaa)",
               fontSize: 13,
               cursor: "pointer",
+              transition: "background 0.5s ease",
             }}
           >
             {v === "player" ? "▸ Плеер" : v === "playlists" ? "▸ Плейлисты" : "◈ Поиск"}
@@ -161,7 +207,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}
@@ -170,6 +216,7 @@ export function App() {
               onReorder={(newTracks) => {
                 reorderQueue(newTracks.map(t => t.video_id)).then(setState).catch(() => {});
               }}
+              accentColor={accentColor}
             />
           )}
         </>
@@ -180,9 +227,19 @@ export function App() {
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id); setView("player"); }} />}
 
       {view === "lyrics" && lyricsTrackId && (
-        <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} />
+        <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} />
       )}
       </div>
+
+      {/* Floating Mini-Player (visible when NOT on Player view) */}
+      {view !== "player" && state.current_track && (
+        <MiniPlayer
+          state={state}
+          accentColor={accentColor}
+          onAction={(act) => action(act)}
+          onExpand={() => setView("player")}
+        />
+      )}
     </div>
   );
 }

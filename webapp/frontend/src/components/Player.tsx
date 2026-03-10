@@ -6,6 +6,8 @@ interface Props {
   state: PlayerState;
   onAction: (action: string, trackId?: string, seekPos?: number) => void;
   onShowLyrics: (trackId: string) => void;
+  accentColor?: string;
+  accentColorAlpha?: string;
 }
 
 // --- Haptic Feedback Helper ---
@@ -31,11 +33,11 @@ const IconPlay = () => <svg width="40" height="40" viewBox="0 0 24 24" fill="cur
 const IconPause = () => <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>;
 const IconSkipForward = () => <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19" strokeWidth="2"/></svg>;
 const IconSkipBack = () => <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5" strokeWidth="2"/></svg>;
-const IconShuffle = ({ active }: { active: boolean }) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={active ? "#7c4dff" : "var(--tg-theme-hint-color, #888)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>;
-const IconRepeat = ({ mode }: { mode: string }) => {
+const IconShuffle = ({ active, color = "#7c4dff" }: { active: boolean; color?: string }) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={active ? color : "var(--tg-theme-hint-color, #888)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>;
+const IconRepeat = ({ mode, activeColor = "#7c4dff" }: { mode: string; activeColor?: string }) => {
   const active = mode !== "off";
   const isOne = mode === "one";
-  const color = active ? "#7c4dff" : "var(--tg-theme-hint-color, #888)";
+  const color = active ? activeColor : "var(--tg-theme-hint-color, #888)";
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
@@ -84,7 +86,7 @@ function AudioVisualizer({ isPlaying }: { isPlaying: boolean }) {
           style={{
             width: 4,
             borderRadius: 2,
-            background: "linear-gradient(to top, #7c4dff, #e040fb)",
+            background: `linear-gradient(to top, ${accentColor || '#7c4dff'}, #e040fb)`,
             animation: isPlaying ? `visualizer 0.5s ease-in-out ${bar.delay} infinite alternate` : "none",
             height: isPlaying ? undefined : 8,
           }}
@@ -147,7 +149,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)" }: Props) {
   const track = state.current_track;
   const duration = track?.duration ?? 0;
   const [elapsed, setElapsed] = useState(0);
@@ -315,13 +317,13 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
       {/* Controls with haptic feedback */}
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, marginTop: 16 }}>
         <button style={btnStyle} onClick={() => { haptic("light"); onAction("shuffle"); }}>
-          <IconShuffle active={state.shuffle} />
+          <IconShuffle active={state.shuffle} color={accentColor} />
         </button>
         <button style={btnStyle} onClick={() => { haptic("medium"); onAction("prev"); }}>
           <IconSkipBack />
         </button>
         <button
-          style={{ ...btnStyle, background: "var(--tg-theme-button-color, #7c4dff)", color: "#fff", borderRadius: "50%", padding: 12, width: 64, height: 64, boxShadow: "0 4px 12px rgba(124, 77, 255, 0.4)" }}
+          style={{ ...btnStyle, background: accentColor, color: "#fff", borderRadius: "50%", padding: 12, width: 64, height: 64, boxShadow: `0 4px 12px ${accentColorAlpha}`, transition: "background 0.5s ease, box-shadow 0.5s ease" }}
           onClick={() => { haptic("heavy"); onAction(state.is_playing ? "pause" : "play"); }}
         >
           {state.is_playing ? <IconPause /> : <IconPlay />}
@@ -330,7 +332,7 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
           <IconSkipForward />
         </button>
         <button style={btnStyle} onClick={() => { haptic("light"); onAction("repeat"); }}>
-          <IconRepeat mode={state.repeat_mode} />
+          <IconRepeat mode={state.repeat_mode} activeColor={accentColor} />
         </button>
       </div>
 

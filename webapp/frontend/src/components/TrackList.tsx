@@ -6,6 +6,7 @@ interface Props {
   currentIndex: number;
   onPlay: (track: Track) => void;
   onReorder?: (newOrder: Track[]) => void;
+  accentColor?: string;
 }
 
 // Haptic helper
@@ -15,7 +16,7 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   } catch {}
 };
 
-export function TrackList({ tracks, currentIndex, onPlay, onReorder }: Props) {
+export function TrackList({ tracks, currentIndex, onPlay, onReorder, accentColor = "var(--tg-theme-button-color, #7c4dff)" }: Props) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const dragStartY = useRef(0);
@@ -90,7 +91,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder }: Props) {
             marginBottom: 6,
             cursor: "pointer",
             background: i === currentIndex
-              ? "var(--tg-theme-button-color, #7c4dff)"
+              ? accentColor
               : dragIndex === i
               ? "rgba(124, 77, 255, 0.3)"
               : overIndex === i && dragIndex !== null
