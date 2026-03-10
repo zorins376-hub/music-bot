@@ -273,6 +273,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             alt="Cover" 
             style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} 
             draggable={false}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         ) : (
           track ? "♫" : "♪"
@@ -306,7 +307,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               type="range"
               min={0}
               max={duration}
-              value={seeking ? undefined : elapsed}
+              value={elapsed}
               onInput={(e) => {
                 setSeeking(true);
                 setElapsed(Number((e.target as HTMLInputElement).value));
