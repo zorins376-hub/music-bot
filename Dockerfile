@@ -21,8 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Собираем TMA Player фронтенд
-RUN cd webapp/frontend && npm install && npx vite build
+# Собираем TMA Player фронтенд (node напрямую для обхода permission denied)
+RUN cd webapp/frontend && npm install && node node_modules/vite/bin/vite.js build
 
 RUN mkdir -p /app/data /app/downloads /app/logs
 
