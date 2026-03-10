@@ -434,6 +434,8 @@ export function App() {
     setView("lyrics");
   };
 
+  const isTequila = theme.id === "tequila";
+
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
       {/* Theme Background Image */}
@@ -485,23 +487,45 @@ export function App() {
       )}
       <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
       {/* Nav */}
-      <nav style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "center", alignItems: "center" }}>
+      <nav style={{
+        display: "flex",
+        gap: 8,
+        marginBottom: isTequila ? 4 : 12,
+        justifyContent: "center",
+        alignItems: "center",
+        ...(isTequila ? {
+          padding: "6px 12px",
+          borderRadius: 22,
+          background: "rgba(40, 25, 15, 0.5)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          border: "1px solid rgba(255, 213, 79, 0.12)",
+          maxWidth: 380,
+          margin: "0 auto 4px",
+        } : {}),
+      }}>
         {(["player", "playlists", "search"] as View[]).map((v) => (
           <button
             key={v}
             onClick={() => setView(v)}
             style={{
-              padding: "6px 14px",
-              borderRadius: 16,
-              border: "none",
-              background: view === v ? accentColor : theme.navInactiveBg,
-              color: view === v ? "#fff" : theme.hintColor,
+              padding: isTequila ? "7px 16px" : "6px 14px",
+              borderRadius: isTequila ? 18 : 16,
+              border: isTequila && view === v ? "1px solid rgba(255,213,79,0.3)" : "none",
+              background: view === v
+                ? (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))" : accentColor)
+                : theme.navInactiveBg,
+              color: view === v
+                ? (isTequila ? "#ffd54f" : "#fff")
+                : theme.hintColor,
               fontSize: 13,
+              fontWeight: isTequila && view === v ? 600 : 400,
+              letterSpacing: isTequila ? 0.5 : 0,
               cursor: "pointer",
-              transition: "background 0.5s ease",
+              transition: "all 0.4s ease",
             }}
           >
-            {v === "player" ? "▸ Плеер" : v === "playlists" ? "▸ Плейлисты" : "◈ Поиск"}
+            {v === "player" ? (isTequila ? "♪ Плеер" : "▸ Плеер") : v === "playlists" ? (isTequila ? "♫ Плейлисты" : "▸ Плейлисты") : (isTequila ? "◆ Поиск" : "◈ Поиск")}
           </button>
         ))}
         {/* Theme switcher */}
@@ -531,18 +555,34 @@ export function App() {
       {theme.id === "tequila" && view === "player" && (
         <div style={{
           textAlign: "center",
-          marginBottom: 8,
-          opacity: 0.7,
+          margin: "10px auto 6px",
+          padding: "8px 24px",
+          maxWidth: 320,
+          borderRadius: 16,
+          background: "rgba(255, 213, 79, 0.06)",
+          border: "1px solid rgba(255, 213, 79, 0.1)",
         }}>
-          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: 3, color: "#ffd54f" }}>𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀  𝐌 𝐔 𝐒 𝐈 𝐂</div>
-          <div style={{ fontSize: 10, color: theme.hintColor, marginTop: 2 }}>inspired by 𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘</div>
+          <div style={{
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: 4,
+            color: "#ffd54f",
+            textShadow: "0 0 20px rgba(255, 167, 38, 0.3)",
+          }}>𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀  𝐌 𝐔 𝐒 𝐈 𝐂</div>
+          <div style={{
+            fontSize: 9,
+            color: "#c8a882",
+            marginTop: 3,
+            letterSpacing: 2,
+            textTransform: "uppercase",
+          }}>inspired by 𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘</div>
         </div>
       )}
 
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}

@@ -17,6 +17,7 @@ interface Props {
   isWaveLoading?: boolean;
   elapsed?: number;
   buffering?: boolean;
+  themeId?: string;
 }
 
 // --- Haptic Feedback Helper ---
@@ -158,7 +159,8 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom" }: Props) {
+  const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
   const [seekValue, setSeekValue] = useState<number | null>(null);
@@ -238,6 +240,432 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
     return `${m}:${sec < 10 ? "0" : ""}${sec}`;
   };
 
+  // ─── TEQUILA LUXURY THEME ───────────────────────────────
+  if (isTequila) {
+    const gold = "#ffd54f";
+    const warmAccent = accentColor;
+    const warmAlpha = accentColorAlpha;
+    const glassCard = "rgba(40, 25, 15, 0.55)";
+    const borderGold = "rgba(255, 213, 79, 0.25)";
+    const tqBtn: Record<string, string | number> = {
+      background: "none",
+      border: "none",
+      color: "#fef0e0",
+      cursor: "pointer",
+      padding: "10px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    };
+
+    return (
+      <div style={{ textAlign: "center", padding: "8px 0" }}>
+        {/* Cover — luxury framed */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          style={{
+            position: "relative",
+            width: 260,
+            height: 260,
+            margin: "0 auto 20px",
+            borderRadius: 24,
+            background: track
+              ? `linear-gradient(135deg, rgba(255,167,38,0.15), rgba(255,213,79,0.08))`
+              : "linear-gradient(135deg, #ff6d00 0%, #ffd54f 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: track
+              ? `0 12px 40px rgba(255, 109, 0, 0.25), 0 0 0 1px ${borderGold}, inset 0 0 0 1px rgba(255,213,79,0.1)`
+              : "0 8px 24px rgba(255,109,0,0.3)",
+            overflow: "hidden",
+            transition: swipeOffset === 0 ? "transform 0.3s ease-out" : "none",
+            transform: `translateX(${swipeOffset}px) scale(${state.is_playing ? 1.03 : 1})`,
+            touchAction: "pan-y",
+            userSelect: "none",
+          }}
+        >
+          {track?.cover_url ? (
+            <img
+              src={track.cover_url}
+              alt="Cover"
+              style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }}
+              draggable={false}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          ) : (
+            track ? <IconMusic size={64} color="rgba(255,245,220,0.8)" /> : <IconMusicNote size={48} color="rgba(255,245,220,0.5)" />
+          )}
+          {/* Warm visualizer */}
+          {track && <AudioVisualizer isPlaying={state.is_playing} accentColor="#ff6d00" />}
+          {/* Golden shimmer border overlay */}
+          <div style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 24,
+            border: `1.5px solid ${borderGold}`,
+            pointerEvents: "none",
+          }} />
+        </div>
+
+        {/* Glass info card */}
+        <div style={{
+          margin: "0 16px 16px",
+          padding: "14px 20px",
+          borderRadius: 20,
+          background: glassCard,
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          border: `1px solid ${borderGold}`,
+        }}>
+          <Marquee
+            text={track?.title ?? "Ничего не играет"}
+            style={{ fontSize: 17, fontWeight: 600, color: "#fef0e0", letterSpacing: 0.5 }}
+          />
+          <Marquee
+            text={track ? `${track.artist}  ·  ${track.duration_fmt}` : "—"}
+            style={{ fontSize: 13, color: "#c8a882", marginTop: 4 }}
+          />
+        </div>
+
+        {/* Seek slider — warm */}
+        {track && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 24px", marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: "#c8a882", minWidth: 36, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+              {fmtTime(elapsed)}
+            </span>
+            <div style={{ flex: 1, padding: "12px 0", touchAction: "none" }}>
+              <input
+                type="range"
+                min={0}
+                max={duration || 1}
+                value={elapsed}
+                disabled={duration === 0}
+                onInput={(e) => {
+                  if (duration > 0) {
+                    setSeeking(true);
+                    setSeekValue(Number((e.target as HTMLInputElement).value));
+                  }
+                }}
+                onChange={(e) => {
+                  if (duration > 0) {
+                    const pos = Number((e.target as HTMLInputElement).value);
+                    setSeekValue(null);
+                    setSeeking(false);
+                    haptic("light");
+                    onAction("seek", track.video_id, pos);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  height: 5,
+                  accentColor: "#ffa726",
+                  cursor: duration > 0 ? "pointer" : "default",
+                  opacity: duration > 0 ? 1 : 0.5,
+                }}
+              />
+            </div>
+            <span style={{ fontSize: 11, color: "#c8a882", minWidth: 36, fontVariantNumeric: "tabular-nums" }}>
+              {duration > 0 ? fmtTime(duration) : "-:--"}
+            </span>
+          </div>
+        )}
+
+        {/* Main controls — luxury circular */}
+        <div style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 12,
+          padding: "0 16px",
+        }}>
+          <button style={tqBtn} onClick={() => { haptic("light"); onAction("shuffle"); }}>
+            <IconShuffle active={state.shuffle} color={state.shuffle ? gold : "#c8a882"} />
+          </button>
+          <button
+            style={{
+              ...tqBtn,
+              background: "rgba(255,213,79,0.08)",
+              borderRadius: "50%",
+              width: 48,
+              height: 48,
+              border: `1px solid ${borderGold}`,
+            }}
+            onClick={() => { haptic("medium"); onAction("prev"); }}
+          >
+            <IconSkipBack />
+          </button>
+          {/* Play/Pause — golden glow */}
+          <button
+            style={{
+              ...tqBtn,
+              background: `linear-gradient(135deg, #ff6d00, #ffa726)`,
+              color: "#1a120b",
+              borderRadius: "50%",
+              padding: 14,
+              width: 72,
+              height: 72,
+              boxShadow: `0 6px 24px rgba(255, 109, 0, 0.45), 0 0 0 3px rgba(255, 213, 79, 0.15)`,
+              transition: "all 0.4s ease",
+              position: "relative",
+              border: "none",
+            }}
+            onClick={() => { haptic("heavy"); onAction(state.is_playing ? "pause" : "play"); }}
+          >
+            {buffering ? (
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+                <path d="M12 2a10 10 0 0 1 10 10" />
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </svg>
+            ) : state.is_playing ? <IconPause /> : <IconPlay />}
+          </button>
+          <button
+            style={{
+              ...tqBtn,
+              background: "rgba(255,213,79,0.08)",
+              borderRadius: "50%",
+              width: 48,
+              height: 48,
+              border: `1px solid ${borderGold}`,
+            }}
+            onClick={() => { haptic("medium"); onAction("next"); }}
+          >
+            <IconSkipForward />
+          </button>
+          <button style={tqBtn} onClick={() => { haptic("light"); onAction("repeat"); }}>
+            <IconRepeat mode={state.repeat_mode} activeColor={gold} />
+          </button>
+        </div>
+
+        {/* Action buttons — glass row with warm tones */}
+        {track && (
+          <div style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 8,
+            marginTop: 24,
+            padding: "0 12px",
+            flexWrap: "wrap",
+          }}>
+            {/* Lyrics */}
+            <button
+              onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
+              style={{
+                padding: "9px 18px",
+                borderRadius: 24,
+                border: `1px solid ${borderGold}`,
+                background: glassCard,
+                backdropFilter: "blur(12px)",
+                color: "#fef0e0",
+                fontSize: 13,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                letterSpacing: 0.5,
+                transition: "all 0.3s ease",
+              }}
+            >
+              <IconLyrics /> Текст
+            </button>
+            {/* Like — warm heart */}
+            <button
+              onClick={handleLikeToggle}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${isLiked ? "#ff6d00" : borderGold}`,
+                background: isLiked ? "rgba(255, 109, 0, 0.15)" : glassCard,
+                backdropFilter: "blur(12px)",
+                color: isLiked ? "#ffa726" : "#fef0e0",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                transition: "all 0.3s ease",
+              }}
+            >
+              <IconHeart filled={isLiked} />
+            </button>
+            {/* Share */}
+            <button
+              onClick={handleShare}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${borderGold}`,
+                background: glassCard,
+                backdropFilter: "blur(12px)",
+                color: "#fef0e0",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+            </button>
+            {/* Story */}
+            <button
+              onClick={() => { haptic("medium"); setShowShareCard(true); }}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${borderGold}`,
+                background: "linear-gradient(135deg, rgba(255,109,0,0.12), rgba(255,213,79,0.08))",
+                backdropFilter: "blur(12px)",
+                color: "#fef0e0",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              Story
+            </button>
+            {/* Wave — golden */}
+            <button
+              onClick={() => { haptic("medium"); onWave?.(); }}
+              disabled={isWaveLoading}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${gold}55`,
+                background: "linear-gradient(135deg, rgba(255,109,0,0.18), rgba(255,213,79,0.1))",
+                backdropFilter: "blur(12px)",
+                color: gold,
+                cursor: isWaveLoading ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+                opacity: isWaveLoading ? 0.6 : 1,
+              }}
+            >
+              {isWaveLoading ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12h4l3-9 4 18 3-9h4"/>
+                </svg>
+              )}
+              Волна
+            </button>
+            {/* Sleep — warm */}
+            <button
+              onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${sleepTimerRemaining ? gold + "88" : borderGold}`,
+                background: sleepTimerRemaining ? "rgba(255,167,38,0.15)" : glassCard,
+                backdropFilter: "blur(12px)",
+                color: sleepTimerRemaining ? gold : "#fef0e0",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+              {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : ""}
+            </button>
+          </div>
+        )}
+
+        {/* Sleep menu — warm glass */}
+        {showSleepMenu && (
+          <div style={{
+            marginTop: 12,
+            padding: 14,
+            borderRadius: 20,
+            background: "rgba(40, 25, 15, 0.85)",
+            backdropFilter: "blur(20px)",
+            border: `1px solid ${borderGold}`,
+            display: "flex",
+            gap: 8,
+            justifyContent: "center",
+            flexWrap: "wrap",
+          }}>
+            {[5, 15, 30, 45, 60].map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  haptic("medium");
+                  onSleepTimer?.(m);
+                  setShowSleepMenu(false);
+                }}
+                style={{
+                  padding: "7px 16px",
+                  borderRadius: 14,
+                  border: `1px solid ${borderGold}`,
+                  background: "rgba(255,213,79,0.08)",
+                  color: "#fef0e0",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  transition: "background 0.2s ease",
+                }}
+              >
+                {m} мин
+              </button>
+            ))}
+            {sleepTimerRemaining && (
+              <button
+                onClick={() => {
+                  haptic("light");
+                  onSleepTimer?.(null);
+                  setShowSleepMenu(false);
+                }}
+                style={{
+                  padding: "7px 16px",
+                  borderRadius: 14,
+                  border: "1px solid rgba(255, 109, 0, 0.4)",
+                  background: "rgba(255, 109, 0, 0.15)",
+                  color: "#ff6d00",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Отмена
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Share Card Modal */}
+        {showShareCard && track && (
+          <ShareCard
+            track={track}
+            onClose={() => setShowShareCard(false)}
+            accentColor={accentColor}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ─── DEFAULT BLACK ROOM THEME ──────────────────────────
   return (
     <div style={{ textAlign: "center", padding: "16px 0" }}>
       {/* Cover container with swipe */}
