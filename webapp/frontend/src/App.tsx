@@ -140,13 +140,17 @@ export function App() {
     }
 
     if ("mediaSession" in navigator) {
+      const artworkSrc = track.cover_url || `${window.location.origin}/icon.svg`;
+      const artworkType = track.cover_url ? "image/jpeg" : "image/svg+xml";
       navigator.mediaSession.metadata = new window.MediaMetadata({
         title: track.title,
         artist: track.artist || "Black Room Radio",
-        artwork: track.cover_url ? [
-          { src: track.cover_url, sizes: "480x360", type: "image/jpeg" }
-        ] : []
+        artwork: [
+          { src: artworkSrc, sizes: "192x192", type: artworkType },
+          { src: artworkSrc, sizes: "512x512", type: artworkType }
+        ]
       });
+      navigator.mediaSession.playbackState = state.is_playing ? "playing" : "paused";
 
       navigator.mediaSession.setActionHandler("play", () => {
         sendAction("play").then(setState).catch(() => {});

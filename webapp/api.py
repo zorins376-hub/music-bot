@@ -122,10 +122,46 @@ async def stream_audio(
                     session = get_session()
                     upstream = await session.get(stream_url, headers=upstream_headers, allow_redirects=True)
                     if upstream.status in (200, 206):
+                        cache_tmp_path = settings.DOWNLOAD_DIR / f"{video_id}.part"
+                        should_cache_stream = upstream.status == 200 and not range_header
+
                         async def _iter_upstream():
+                            tmp_file = None
+                            bytes_written = 0
+                            expected_size = None
+                            if should_cache_stream:
+                                try:
+                                    expected_size = int(upstream.headers.get("Content-Length", "0")) or None
+                                except Exception:
+                                    expected_size = None
+                                try:
+                                    tmp_file = open(cache_tmp_path, "wb")
+                                except Exception as e:
+                                    logger.warning("Cannot open temp cache file for %s: %s", video_id, e)
+                                    tmp_file = None
                             try:
                                 async for chunk in upstream.content.iter_chunked(64 * 1024):
+                                    if tmp_file is not None:
+                                        tmp_file.write(chunk)
+                                        bytes_written += len(chunk)
                                     yield chunk
+                                if tmp_file is not None:
+                                    tmp_file.flush()
+                                    tmp_file.close()
+                                    tmp_file = None
+                                    is_complete = expected_size is None or bytes_written >= expected_size
+                                    if is_complete and not mp3_path.exists():
+                                        cache_tmp_path.replace(mp3_path)
+                                    else:
+                                        cache_tmp_path.unlink(missing_ok=True)
+                            except Exception:
+                                if tmp_file is not None:
+                                    try:
+                                        tmp_file.close()
+                                    except Exception:
+                                        pass
+                                cache_tmp_path.unlink(missing_ok=True)
+                                raise
                             finally:
                                 upstream.close()
 
