@@ -22,6 +22,7 @@ from bot.handlers import release_radar
 from bot.handlers import ai_playlist
 from bot.handlers import import_playlist
 from bot.handlers import badges
+from bot.handlers import leaderboard
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
@@ -82,6 +83,12 @@ async def on_startup(bot: Bot) -> None:
     # Load DMCA blocked tracks into memory
     from bot.services.dmca_filter import load_blocked_ids
     await load_blocked_ids()
+
+    # Initialize proxy pool
+    from bot.services.proxy_pool import proxy_pool, start_proxy_health_scheduler
+    proxy_pool.load_from_config()
+    if proxy_pool.size:
+        asyncio.create_task(start_proxy_health_scheduler())
 
     if app_settings.METRICS_PORT:
         from bot.services.metrics import start_metrics_server
@@ -327,6 +334,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(ai_playlist.router)  # Prompt-to-Playlist
     dp.include_router(import_playlist.router)  # Spotify/Yandex import
     dp.include_router(badges.router)  # Achievements/badges
+    dp.include_router(leaderboard.router)  # XP leaderboard
     dp.include_router(queue.router)      # Queue
     dp.include_router(referral.router)   # Referral system
     dp.include_router(faq.router)                # FAQ

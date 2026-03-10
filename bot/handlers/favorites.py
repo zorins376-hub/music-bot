@@ -63,6 +63,11 @@ async def handle_favorite_action(callback: CallbackQuery, callback_data: Favorit
                 await check_and_award_badges(user.id, "like")
             except Exception:
                 pass
+            try:
+                from bot.services.leaderboard import add_xp, XP_LIKE
+                await add_xp(user.id, XP_LIKE)
+            except Exception:
+                pass
         return
 
     removed = await remove_favorite_track(user.id, callback_data.tid)

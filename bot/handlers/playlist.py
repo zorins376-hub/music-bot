@@ -201,6 +201,11 @@ async def create_playlist_name(message: Message, state: FSMContext) -> None:
         await check_and_award_badges(user.id, "playlist_create")
     except Exception:
         pass
+    try:
+        from bot.services.leaderboard import add_xp, XP_PLAYLIST_CREATE
+        await add_xp(user.id, XP_PLAYLIST_CREATE)
+    except Exception:
+        pass
     await message.answer(
         t(user.language, "pl_created", name=name),
         parse_mode="HTML",

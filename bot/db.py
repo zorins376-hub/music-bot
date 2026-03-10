@@ -159,8 +159,50 @@ async def record_listening_event(
                 await check_and_award_badges(user_id, "play")
             except Exception:
                 pass
+            # XP + streak update
+            try:
+                from bot.services.leaderboard import add_xp, XP_PLAY
+                await add_xp(user_id, XP_PLAY)
+                await _update_streak_and_xp(user_id, XP_PLAY)
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("record_listening_event failed for user %s: %s", user_id, e)
+
+
+async def _update_streak_and_xp(user_id: int, xp_amount: int) -> None:
+    """Update user's XP, level, and streak in the database."""
+    from datetime import date
+    from bot.services.leaderboard import calc_level
+
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                return
+            today = date.today()
+            new_xp = (user.xp or 0) + xp_amount
+            new_level = calc_level(new_xp)
+
+            vals: dict = {"xp": new_xp, "level": new_level}
+
+            if user.last_play_date is None:
+                vals["streak_days"] = 1
+                vals["last_play_date"] = today
+            elif user.last_play_date == today:
+                pass  # Already played today
+            elif (today - user.last_play_date).days == 1:
+                vals["streak_days"] = (user.streak_days or 0) + 1
+                vals["last_play_date"] = today
+            else:
+                vals["streak_days"] = 1  # Streak broken
+                vals["last_play_date"] = today
+
+            await session.execute(update(User).where(User.id == user_id).values(**vals))
+            await session.commit()
+    except Exception as e:
+        logger.debug("_update_streak_and_xp failed: %s", e)
 
 
 async def upsert_track(

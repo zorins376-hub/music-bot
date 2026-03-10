@@ -295,5 +295,41 @@
 
   "badge_earned": "🏅 Жаңы бэйдж: <b>{badge}</b>!\n\n{description}",
   "badges_header": "🏅 <b>Менин бэйджтерим</b> ({count})",
-  "badges_empty": "🏅 Бэйджтер жок. Музыка угуп, аларды ач!"
+  "badges_empty": "🏅 Бэйджтер жок. Музыка угуп, аларды ач!",
+
+  "premium_90d_btn": "★ Premium 90 күн — {price} Stars",
+  "premium_365d_btn": "★ Premium 365 күн — {price} Stars",
+  "premium_90d_title": "BLACK ROOM Premium (90 күн)",
+  "premium_90d_desc": "Чексиз · 320 kbps · Жарнамасыз · 90 күн (22% арзан)",
+  "premium_90d_success": "✧ <b>Premium</b> 90 күнгө активдештирилди!",
+  "premium_365d_title": "BLACK ROOM Premium (365 күн)",
+  "premium_365d_desc": "Чексиз · 320 kbps · Жарнамасыз · 1 жыл (44% арзан)",
+  "premium_365d_success": "✧ <b>Premium</b> 365 күнгө активдештирилди!",
+  "flac_10_btn": "★ 10 FLAC ыр — {price} Stars",
+  "flac_10_title": "FLAC пакет (10 ыр)",
+  "flac_10_desc": "10 ырды FLAC сапатта жүктөп алыңыз (20% арзан)",
+  "flac_10_success": "✧ +10 FLAC-кредит кошулду!",
+  "gift_premium_btn": "🎁 Досуңа Premium белек",
+  "gift_prompt": "🎁 Premium белек берүү үчүн @username же ID жаз:",
+  "gift_user_not_found": "⚠️ Колдонуучу табылган жок. Ал бул ботту колдонгонун текшериңиз.",
+  "gift_invoice_title": "🎁 Premium белек",
+  "gift_invoice_desc": "{target} үчүн 30 күн Premium",
+  "gift_success": "🎁 {target} колдонуучуга 30 күн Premium белек берилди!",
+  "gift_received": "🎁 <b>{from_name}</b> сага 30 күн Premium белек берди! Ырахат ал!",
+  "promo_enter_code": "Промокод жаз: <code>/promo КОД</code>",
+  "promo_not_found": "⚠️ Промокод табылган жок.",
+  "promo_expired": "⚠️ Промокод жараксыз.",
+  "promo_already_used": "⚠️ Сен бул промокодду мурун колдондуң.",
+  "promo_success_premium_7d": "✧ Промокод ийгиликтүү! <b>Premium</b> 7 күнгө активдештирилди.",
+  "promo_success_premium_30d": "✧ Промокод ийгиликтүү! <b>Premium</b> 30 күнгө активдештирилди.",
+  "promo_success_flac_5": "✧ Промокод ийгиликтүү! +5 FLAC-кредит.",
+
+  "lb_header": "Лидерлер",
+  "lb_weekly": "Жумалык",
+  "lb_alltime": "Баары",
+  "lb_your_rank": "▸ Сенин ордуң: #{rank}",
+  "lb_your_xp": "▸ XP: {xp} · Деңгээл: {level}",
+  "lb_streak": "🔥 Серия: {days} күн катары менен",
+
+  "story_card_error": "⚠️ Карточка жасоо мүмкүн болгон жок. Кийин аракет кыл."
 }

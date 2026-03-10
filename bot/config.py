@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     # ── OpenAI (Prompt-to-Playlist) ──────────────────────────────────────
     OPENAI_API_KEY: Optional[str] = None
 
+    # ── Proxy pool ────────────────────────────────────────────────────────
+    PROXY_POOL: Optional[str] = None  # comma-separated: socks5://ip:port,http://ip:port
+
     # ── Sentry ───────────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
 

@@ -698,6 +698,56 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         else:
             await message.answer("Трек не найден в списке заблокированных.")
 
+    # /admin proxy — proxy pool status
+    elif subcmd == "proxy":
+        from bot.services.proxy_pool import proxy_pool
+        await message.answer(proxy_pool.get_status(), parse_mode="HTML")
+
+    # /admin promo create <code> <type> <uses> | /admin promo list
+    elif subcmd == "promo":
+        promo_args = text.split(maxsplit=3) if len(args) >= 3 else []
+        if len(promo_args) >= 2 and promo_args[0] == "promo":
+            promo_sub = promo_args[1] if len(promo_args) > 1 else ""
+        else:
+            promo_sub = args[2] if len(args) > 2 else ""
+        if promo_sub == "create":
+            # /admin promo create CODE type uses
+            rest = text.split("create", 1)[-1].strip().split()
+            if len(rest) < 3:
+                await message.answer(
+                    "Использование: /admin promo create &lt;код&gt; &lt;тип: premium_7d|premium_30d|flac_5&gt; &lt;кол-во&gt;",
+                    parse_mode="HTML",
+                )
+                return
+            code, promo_type, max_uses_s = rest[0], rest[1], rest[2]
+            if promo_type not in ("premium_7d", "premium_30d", "flac_5"):
+                await message.answer("Тип должен быть: premium_7d, premium_30d или flac_5")
+                return
+            try:
+                max_uses = int(max_uses_s)
+            except ValueError:
+                await message.answer("Кол-во должно быть числом")
+                return
+            from bot.services.promo_service import create_promo
+            promo = await create_promo(code, promo_type, max_uses, message.from_user.id)
+            if promo:
+                await message.answer(f"✅ Промокод <code>{code}</code> создан ({promo_type}, {max_uses} использований).", parse_mode="HTML")
+                await log_admin_action(message.from_user.id, "promo_create", details=f"{code} {promo_type} {max_uses}")
+            else:
+                await message.answer("Промокод с таким кодом уже существует.")
+        elif promo_sub == "list":
+            from bot.services.promo_service import list_promos
+            promos = await list_promos()
+            if not promos:
+                await message.answer("Промокодов нет.")
+            else:
+                lines = ["<b>Промокоды:</b>\n"]
+                for p in promos:
+                    lines.append(f"<code>{p['code']}</code> — {p['type']} | осталось: {p['uses_left']}/{p['max_uses']}")
+                await message.answer("\n".join(lines), parse_mode="HTML")
+        else:
+            await message.answer("Использование: /admin promo create|list")
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -715,7 +765,10 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin audit — журнал действий\n"
             "/admin export — экспорт статистики CSV\n"
             "/admin block &lt;source_id&gt; [причина] — заблокировать трек (DMCA)\n"
-            "/admin unblock &lt;source_id&gt; — разблокировать трек",
+            "/admin unblock &lt;source_id&gt; — разблокировать трек\n"
+            "/admin proxy — статус прокси-пула\n"
+            "/admin promo create &lt;код&gt; &lt;тип&gt; &lt;кол-во&gt; — создать промокод\n"
+            "/admin promo list — список промокодов",
             parse_mode="HTML",
         )
 

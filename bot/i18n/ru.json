@@ -295,5 +295,41 @@
 
   "badge_earned": "🏅 Новый бейдж: <b>{badge}</b>!\n\n{description}",
   "badges_header": "🏅 <b>Мои бейджи</b> ({count})",
-  "badges_empty": "🏅 У тебя пока нет бейджей. Слушай музыку и открывай их!"
+  "badges_empty": "🏅 У тебя пока нет бейджей. Слушай музыку и открывай их!",
+
+  "premium_90d_btn": "★ Premium 90 дней — {price} Stars",
+  "premium_365d_btn": "★ Premium 365 дней — {price} Stars",
+  "premium_90d_title": "BLACK ROOM Premium (90 дней)",
+  "premium_90d_desc": "Безлимит · 320 kbps · Без рекламы · 90 дней (скидка 22%)",
+  "premium_90d_success": "✧ <b>Premium</b> активирован на 90 дней!",
+  "premium_365d_title": "BLACK ROOM Premium (365 дней)",
+  "premium_365d_desc": "Безлимит · 320 kbps · Без рекламы · 1 год (скидка 44%)",
+  "premium_365d_success": "✧ <b>Premium</b> активирован на 365 дней!",
+  "flac_10_btn": "★ 10 FLAC треков — {price} Stars",
+  "flac_10_title": "FLAC пакет (10 треков)",
+  "flac_10_desc": "Скачай 10 треков в FLAC качестве (скидка 20%)",
+  "flac_10_success": "✧ +10 FLAC-кредитов добавлено!",
+  "gift_premium_btn": "🎁 Подарить Premium другу",
+  "gift_prompt": "🎁 Напиши @username или ID пользователя, которому хочешь подарить Premium:",
+  "gift_user_not_found": "⚠️ Пользователь не найден. Убедись, что он использовал этого бота.",
+  "gift_invoice_title": "🎁 Premium в подарок",
+  "gift_invoice_desc": "Premium на 30 дней для {target}",
+  "gift_success": "🎁 Premium на 30 дней подарен пользователю {target}!",
+  "gift_received": "🎁 <b>{from_name}</b> подарил тебе Premium на 30 дней! Наслаждайся!",
+  "promo_enter_code": "Введи промокод: <code>/promo КОД</code>",
+  "promo_not_found": "⚠️ Промокод не найден.",
+  "promo_expired": "⚠️ Промокод исчерпан.",
+  "promo_already_used": "⚠️ Ты уже использовал этот промокод.",
+  "promo_success_premium_7d": "✧ Промокод применён! <b>Premium</b> активирован на 7 дней.",
+  "promo_success_premium_30d": "✧ Промокод применён! <b>Premium</b> активирован на 30 дней.",
+  "promo_success_flac_5": "✧ Промокод применён! +5 FLAC-кредитов.",
+
+  "lb_header": "Топ игроков",
+  "lb_weekly": "За неделю",
+  "lb_alltime": "За всё время",
+  "lb_your_rank": "▸ Твоё место: #{rank}",
+  "lb_your_xp": "▸ XP: {xp} · Уровень: {level}",
+  "lb_streak": "🔥 Серия: {days} дней подряд",
+
+  "story_card_error": "⚠️ Не удалось создать карточку. Попробуй позже."
 }

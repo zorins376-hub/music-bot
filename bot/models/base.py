@@ -45,6 +45,7 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
     from bot.models.release_notification import ReleaseNotification  # noqa: F401
     from bot.models.admin_log import AdminLog  # noqa: F401
     from bot.models.blocked_track import BlockedTrack  # noqa: F401
+    from bot.models.promo_code import PromoCode, PromoActivation  # noqa: F401
 
     last_exc: BaseException | None = None
     for attempt in range(1, retries + 1):
@@ -72,6 +73,10 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_sent BOOLEAN DEFAULT false",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS release_radar_enabled BOOLEAN DEFAULT true",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS badges JSONB",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER DEFAULT 0",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_days INTEGER DEFAULT 0",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_play_date DATE",
                         # ListeningHistory columns
                         "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS action VARCHAR(20) DEFAULT 'play'",
                         "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS listen_duration INTEGER",

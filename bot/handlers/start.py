@@ -27,15 +27,18 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="✦ DAILY MIX", callback_data="action:mix"),
-            InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
+            InlineKeyboardButton(text="🎙 AI DJ", callback_data="action:dj"),
         ],
         [
             InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
-            InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
+            InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
         ],
         [
+            InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
             InlineKeyboardButton(text="🤖 AI Плейлист", callback_data="action:ai_playlist"),
-            InlineKeyboardButton(text="� Топ-чарты", callback_data="action:charts"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
         ],
         [
             InlineKeyboardButton(text="�🎦 Видео", callback_data="action:video"),
@@ -51,6 +54,9 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🏅 Бейджи", callback_data="action:badges"),
+            InlineKeyboardButton(text="🏆 Топ игроков", callback_data="action:leaderboard"),
+        ],
+        [
             InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
         ],
         [

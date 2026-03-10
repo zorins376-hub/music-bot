@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, JSON, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.models.base import Base
@@ -44,6 +44,12 @@ class User(Base):
 
     # Achievements / badges
     badges: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Gamification: XP / levels / streaks
+    xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    level: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    streak_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_play_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

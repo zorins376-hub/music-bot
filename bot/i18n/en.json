@@ -295,5 +295,41 @@
 
   "badge_earned": "🏅 New badge: <b>{badge}</b>!\n\n{description}",
   "badges_header": "🏅 <b>My Badges</b> ({count})",
-  "badges_empty": "🏅 No badges yet. Listen to music and unlock them!"
+  "badges_empty": "🏅 No badges yet. Listen to music and unlock them!",
+
+  "premium_90d_btn": "★ Premium 90 days — {price} Stars",
+  "premium_365d_btn": "★ Premium 365 days — {price} Stars",
+  "premium_90d_title": "BLACK ROOM Premium (90 days)",
+  "premium_90d_desc": "Unlimited · 320 kbps · No ads · 90 days (22% off)",
+  "premium_90d_success": "✧ <b>Premium</b> activated for 90 days!",
+  "premium_365d_title": "BLACK ROOM Premium (365 days)",
+  "premium_365d_desc": "Unlimited · 320 kbps · No ads · 1 year (44% off)",
+  "premium_365d_success": "✧ <b>Premium</b> activated for 365 days!",
+  "flac_10_btn": "★ 10 FLAC tracks — {price} Stars",
+  "flac_10_title": "FLAC Bundle (10 tracks)",
+  "flac_10_desc": "Download 10 tracks in FLAC quality (20% off)",
+  "flac_10_success": "✧ +10 FLAC credits added!",
+  "gift_premium_btn": "🎁 Gift Premium to a friend",
+  "gift_prompt": "🎁 Type the @username or ID of the user you want to gift Premium to:",
+  "gift_user_not_found": "⚠️ User not found. Make sure they've used this bot.",
+  "gift_invoice_title": "🎁 Gift Premium",
+  "gift_invoice_desc": "30 days Premium for {target}",
+  "gift_success": "🎁 30 days Premium gifted to user {target}!",
+  "gift_received": "🎁 <b>{from_name}</b> gifted you Premium for 30 days! Enjoy!",
+  "promo_enter_code": "Enter a promo code: <code>/promo CODE</code>",
+  "promo_not_found": "⚠️ Promo code not found.",
+  "promo_expired": "⚠️ Promo code has been used up.",
+  "promo_already_used": "⚠️ You've already used this promo code.",
+  "promo_success_premium_7d": "✧ Promo applied! <b>Premium</b> activated for 7 days.",
+  "promo_success_premium_30d": "✧ Promo applied! <b>Premium</b> activated for 30 days.",
+  "promo_success_flac_5": "✧ Promo applied! +5 FLAC credits.",
+
+  "lb_header": "Leaderboard",
+  "lb_weekly": "This week",
+  "lb_alltime": "All time",
+  "lb_your_rank": "▸ Your rank: #{rank}",
+  "lb_your_xp": "▸ XP: {xp} · Level: {level}",
+  "lb_streak": "🔥 Streak: {days} days in a row",
+
+  "story_card_error": "⚠️ Could not create card. Try again later."
 }

@@ -34,10 +34,15 @@ def log_runtime_info() -> None:
 
 
 def _base_opts() -> dict:
-    """Return base yt-dlp options: cookies + remote EJS components."""
+    """Return base yt-dlp options: cookies + remote EJS components + proxy."""
     opts: dict = {"remote_components": {"ejs:github"}}
     if _COOKIES_PATH.exists():
         opts["cookiefile"] = str(_COOKIES_PATH)
+    # Proxy rotation
+    from bot.services.proxy_pool import proxy_pool
+    proxy = proxy_pool.get_next()
+    if proxy:
+        opts["proxy"] = proxy
     return opts
 
 # Spotify URL regex

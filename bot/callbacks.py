@@ -56,6 +56,11 @@ class SimilarCb(CallbackData, prefix="sim"):
     tid: int  # track DB id
 
 
+class StoryCb(CallbackData, prefix="sty"):
+    """Generate story card callback."""
+    tid: int  # track DB id
+
+
 class MixCb(CallbackData, prefix="mix"):
     """Daily mix callback actions."""
     act: str  # save

@@ -142,11 +142,67 @@ async def cmd_mix(message: Message) -> None:
     await send_daily_mix(message, user.id, user.language)
 
 
+@router.message(Command("dj"))
+async def cmd_dj(message: Message) -> None:
+    """Send daily mix with a voice AI DJ intro."""
+    user = await get_or_create_user(message.from_user)
+    lang = user.language
+
+    tracks = await get_or_build_daily_mix(user.id, limit=25)
+    if not tracks:
+        await message.answer(t(lang, "mix_empty"))
+        return
+
+    # Generate and send DJ voice intro
+    try:
+        from bot.services.dj_comments import get_intro, generate_dj_voice
+        intro_text = get_intro(lang)
+        voice_data = await generate_dj_voice(intro_text, lang)
+        if voice_data:
+            from aiogram.types import BufferedInputFile
+            await message.answer_voice(
+                voice=BufferedInputFile(voice_data, filename="dj_intro.mp3"),
+                caption="🎙 AI DJ",
+            )
+    except Exception:
+        pass
+
+    await send_daily_mix(message, user.id, lang)
+
+
 @router.callback_query(lambda c: c.data == "action:mix")
 async def cb_mix(callback: CallbackQuery) -> None:
     user = await get_or_create_user(callback.from_user)
     await callback.answer()
     await send_daily_mix(callback.message, user.id, user.language)
+
+
+@router.callback_query(lambda c: c.data == "action:dj")
+async def cb_dj(callback: CallbackQuery) -> None:
+    """AI DJ callback — sends daily mix with voice intro."""
+    user = await get_or_create_user(callback.from_user)
+    await callback.answer()
+    lang = user.language
+
+    tracks = await get_or_build_daily_mix(user.id, limit=25)
+    if not tracks:
+        await callback.message.answer(t(lang, "mix_empty"))
+        return
+
+    try:
+        from bot.services.dj_comments import get_intro, generate_dj_voice
+        intro_text = get_intro(lang)
+        voice_data = await generate_dj_voice(intro_text, lang)
+        if voice_data:
+            from aiogram.types import BufferedInputFile
+            await callback.message.answer_voice(
+                voice=BufferedInputFile(voice_data, filename="dj_intro.mp3"),
+                caption="🎙 AI DJ",
+            )
+    except Exception:
+        pass
+
+    await send_daily_mix(callback.message, user.id, lang)
 
 
 @router.callback_query(MixCb.filter())

@@ -28,7 +28,7 @@ from bot.services.yandex_provider import download_yandex, search_yandex, is_yand
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 from bot.services.provider_health import record_provider_event
 from bot.services.search_engine import deduplicate_results, suggest_query
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -939,6 +939,10 @@ def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMa
                 text="🔁 Похожее",
                 callback_data=SimilarCb(tid=track_id).pack(),
             ),
+            InlineKeyboardButton(
+                text="📸 Story",
+                callback_data=StoryCb(tid=track_id).pack(),
+            ),
         ],
     ]
     # E-03: Share button
@@ -1002,6 +1006,11 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
             await callback.answer("⚠️", show_alert=True)
             return
 
+        try:
+            from bot.services.leaderboard import add_xp, XP_SHARE
+            await add_xp(user.id, XP_SHARE)
+        except Exception:
+            pass
         bot_me = await callback.bot.me()
         link = f"https://t.me/{bot_me.username}?start=tr_{share_id}"
         await callback.answer()
@@ -1024,6 +1033,42 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
     else:
         await callback.answer()
         await callback.message.answer(t(lang, "share_track_no_file"))
+
+
+@router.callback_query(StoryCb.filter())
+async def handle_story_card(callback: CallbackQuery, callback_data: StoryCb) -> None:
+    """Generate and send a story card for a track."""
+    user = await get_or_create_user(callback.from_user)
+
+    from bot.models.base import async_session
+    from bot.models.track import Track
+    from sqlalchemy import select as _sel
+
+    async with async_session() as session:
+        track = (await session.execute(_sel(Track).where(Track.id == callback_data.tid))).scalar_one_or_none()
+
+    if not track:
+        await callback.answer("⚠️ Трек не найден", show_alert=True)
+        return
+
+    await callback.answer("📸 Генерирую карточку...")
+    from bot.services.story_cards import generate_track_card
+    from bot.utils import fmt_duration
+    from aiogram.types import BufferedInputFile
+
+    card_bytes = generate_track_card(
+        artist=track.artist or "Unknown",
+        title=track.title or "Unknown",
+        track_id=track.id,
+        duration=fmt_duration(track.duration or 0),
+    )
+    if card_bytes:
+        await callback.message.answer_photo(
+            photo=BufferedInputFile(card_bytes, filename="story.png"),
+            caption="📸 Поделись этой карточкой в Stories!",
+        )
+    else:
+        await callback.message.answer("⚠️ Не удалось сгенерировать карточку (Pillow не установлен)")
 
 
 async def show_shared_track(message: Message, share_id: str) -> None:
