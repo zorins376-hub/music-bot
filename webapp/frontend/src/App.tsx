@@ -8,6 +8,7 @@ import { MiniPlayer } from "./components/MiniPlayer";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, type PlayerState, type Track } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
+import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 
 type View = "player" | "playlists" | "search" | "lyrics";
 
@@ -29,8 +30,9 @@ export function App() {
   const elapsedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadRef = useRef<HTMLAudioElement | null>(null);
-  const [accentColor, setAccentColor] = useState("rgb(124, 77, 255)");
-  const [accentColorAlpha, setAccentColorAlpha] = useState("rgba(124, 77, 255, 0.4)");
+  const [theme, setThemeState] = useState<Theme>(() => getThemeById(getSavedThemeId()));
+  const [accentColor, setAccentColor] = useState(theme.accent);
+  const [accentColorAlpha, setAccentColorAlpha] = useState(theme.accentAlpha);
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null);
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -299,6 +301,31 @@ export function App() {
     }
   }, [state.current_track?.video_id, state.is_playing]);
 
+  // Apply theme to body
+  useEffect(() => {
+    document.body.style.background = theme.bgColor;
+    document.body.style.color = theme.textColor;
+  }, [theme]);
+
+  const switchTheme = useCallback(() => {
+    setThemeState((prev) => {
+      const idx = themes.findIndex((t) => t.id === prev.id);
+      const next = themes[(idx + 1) % themes.length];
+      saveThemeId(next.id);
+      // Reset accent to new theme default
+      setAccentColor(next.accent);
+      setAccentColorAlpha(next.accentAlpha);
+      // Re-extract cover color after theme switch
+      if (state.current_track?.cover_url) {
+        extractDominantColor(state.current_track.cover_url).then((color) => {
+          setAccentColor(rgbToCSS(color));
+          setAccentColorAlpha(rgbaToCSS(color, 0.4));
+        });
+      }
+      return next;
+    });
+  }, [state.current_track?.cover_url]);
+
   // Dynamic Color Extraction from cover
   useEffect(() => {
     const coverUrl = state.current_track?.cover_url;
@@ -308,10 +335,10 @@ export function App() {
         setAccentColorAlpha(rgbaToCSS(color, 0.4));
       });
     } else {
-      setAccentColor("rgb(124, 77, 255)");
-      setAccentColorAlpha("rgba(124, 77, 255, 0.4)");
+      setAccentColor(theme.accent);
+      setAccentColorAlpha(theme.accentAlpha);
     }
-  }, [state.current_track?.cover_url]);
+  }, [state.current_track?.cover_url, theme]);
 
   useEffect(() => {
     if (userId) {
@@ -409,8 +436,37 @@ export function App() {
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
-      {/* Glassmorphism Background */}
-      {state.current_track?.cover_url && (
+      {/* Theme Background Image */}
+      {theme.bgImage && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundImage: `url(${theme.bgImage})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            zIndex: -2,
+          }}
+        />
+      )}
+      {theme.bgOverlay && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: theme.bgOverlay,
+            zIndex: -1,
+          }}
+        />
+      )}
+      {/* Glassmorphism Background (cover blur) */}
+      {state.current_track?.cover_url && !theme.bgImage && (
         <div
           style={{
             position: "fixed",
@@ -429,7 +485,7 @@ export function App() {
       )}
       <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
       {/* Nav */}
-      <nav style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "center" }}>
+      <nav style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "center", alignItems: "center" }}>
         {(["player", "playlists", "search"] as View[]).map((v) => (
           <button
             key={v}
@@ -438,8 +494,8 @@ export function App() {
               padding: "6px 14px",
               borderRadius: 16,
               border: "none",
-              background: view === v ? accentColor : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
-              color: view === v ? "#fff" : "var(--tg-theme-hint-color, #aaa)",
+              background: view === v ? accentColor : theme.navInactiveBg,
+              color: view === v ? "#fff" : theme.hintColor,
               fontSize: 13,
               cursor: "pointer",
               transition: "background 0.5s ease",
@@ -448,7 +504,40 @@ export function App() {
             {v === "player" ? "▸ Плеер" : v === "playlists" ? "▸ Плейлисты" : "◈ Поиск"}
           </button>
         ))}
+        {/* Theme switcher */}
+        <button
+          onClick={switchTheme}
+          title={theme.id === "tequila" ? "BLACK ROOM" : "𝐓𝐄𝐐𝐔𝐈𝐋𝐀"}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 16,
+            border: theme.id === "tequila" ? "1px solid rgba(255,167,38,0.5)" : "1px solid rgba(124,77,255,0.3)",
+            background: theme.id === "tequila"
+              ? "linear-gradient(135deg, rgba(255,109,0,0.25), rgba(255,213,79,0.15))"
+              : "rgba(124,77,255,0.12)",
+            color: theme.id === "tequila" ? "#ffd54f" : "#b388ff",
+            fontSize: 14,
+            cursor: "pointer",
+            transition: "all 0.4s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          {theme.id === "tequila" ? "🌙" : "🌅"}
+        </button>
       </nav>
+      {/* Theme label for TEQUILA */}
+      {theme.id === "tequila" && view === "player" && (
+        <div style={{
+          textAlign: "center",
+          marginBottom: 8,
+          opacity: 0.7,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: 3, color: "#ffd54f" }}>𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀  𝐌 𝐔 𝐒 𝐈 𝐂</div>
+          <div style={{ fontSize: 10, color: theme.hintColor, marginTop: 2 }}>inspired by 𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘</div>
+        </div>
+      )}
 
       {/* Views */}
       {view === "player" && (
