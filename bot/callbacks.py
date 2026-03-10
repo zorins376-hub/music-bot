@@ -65,3 +65,8 @@ class MixCb(CallbackData, prefix="mix"):
     """Daily mix callback actions."""
     act: str  # save
     sid: str
+
+
+class AppealCb(CallbackData, prefix="apl_d"):
+    """DMCA appeal callback."""
+    sid: str  # source_id (truncated)

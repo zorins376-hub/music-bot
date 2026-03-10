@@ -114,6 +114,21 @@ async def _build_recommendations(user_id: int, limit: int) -> list[dict]:
             if len(result) >= limit:
                 break
 
+        # Insert sponsored track at position 3-5 if available
+        try:
+            from bot.services.sponsored_engine import get_sponsored_track
+            user_genres = []
+            if user_obj and user_obj.fav_genres:
+                user_genres = user_obj.fav_genres
+            sponsored = await get_sponsored_track(user_id, user_genres=user_genres)
+            if sponsored:
+                insert_pos = min(3, len(result))
+                result.insert(insert_pos, sponsored)
+                # Trim to limit
+                result = result[:limit]
+        except Exception:
+            pass
+
         return result
 
 

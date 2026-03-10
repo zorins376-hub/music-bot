@@ -347,5 +347,25 @@
   "promote_created": "✅ Кампания #{campaign_id} создана и отправлена на модерацию.",
   "promote_error": "⚠️ Не удалось создать кампанию. Проверь ID трека.",
 
-  "history_premium_hint": "💡 С Premium ты получаешь полную историю без ограничений."
+  "history_premium_hint": "💡 С Premium ты получаешь полную историю без ограничений.",
+
+  "vc_group_only": "Голосовой чат доступен только в группах.",
+  "vc_play_usage": "Использование: /play <название трека>",
+  "vc_added_to_queue": "♪ <b>{artist} — {title}</b> добавлен в очередь (позиция: {pos})",
+  "vc_no_session": "Нет активной сессии голосового чата.",
+  "vc_skipped_to": "▸▸ Переключено на: <b>{artist} — {title}</b>",
+  "vc_queue_empty": "Очередь пуста.",
+  "vc_queue_header": "🎵 Очередь голосового чата",
+  "vc_nothing_playing": "Сейчас ничего не играет.",
+  "vc_up_next": "Далее",
+  "vc_now_playing": "▸ Сейчас играет: <b>{artist} — {title}</b> ({duration})",
+  "vc_stopped": "⏹ Сессия голосового чата завершена.",
+
+  "vk_import_detected": "🔗 Обнаружен плейлист VK Music...",
+
+  "dmca_blocked_notice": "🚫 {count} трек(ов) скрыто по требованию правообладателя.",
+  "dmca_appeal_btn": "⚖️ Оспорить",
+  "dmca_appeal_sent": "✅ Апелляция #{appeal_id} отправлена на рассмотрение.",
+  "dmca_appeal_not_found": "Заблокированный трек не найден.",
+  "dmca_appeal_error": "Не удалось создать апелляцию."
 }

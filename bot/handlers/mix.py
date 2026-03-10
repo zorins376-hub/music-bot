@@ -144,7 +144,7 @@ async def cmd_mix(message: Message) -> None:
 
 @router.message(Command("dj"))
 async def cmd_dj(message: Message) -> None:
-    """Send daily mix with a voice AI DJ intro."""
+    """Send daily mix with a voice AI DJ intro + comments after every 3rd track."""
     user = await get_or_create_user(message.from_user)
     lang = user.language
 
@@ -153,21 +153,57 @@ async def cmd_dj(message: Message) -> None:
         await message.answer(t(lang, "mix_empty"))
         return
 
-    # Generate and send DJ voice intro
+    # Check if user has TTS enabled
+    tts_enabled = True
     try:
-        from bot.services.dj_comments import get_intro, generate_dj_voice
-        intro_text = get_intro(lang)
-        voice_data = await generate_dj_voice(intro_text, lang)
-        if voice_data:
-            from aiogram.types import BufferedInputFile
-            await message.answer_voice(
-                voice=BufferedInputFile(voice_data, filename="dj_intro.mp3"),
-                caption="🎙 AI DJ",
-            )
+        fav_vibe = getattr(user, "fav_vibe", None)
+        if fav_vibe == "tts_off":
+            tts_enabled = False
     except Exception:
         pass
 
+    # Generate and send DJ voice intro
+    if tts_enabled:
+        try:
+            from bot.services.dj_comments import get_intro, generate_dj_voice
+            intro_text = get_intro(lang, name=user.first_name or "")
+            voice_data = await generate_dj_voice(intro_text, lang)
+            if voice_data:
+                from aiogram.types import BufferedInputFile
+                await message.answer_voice(
+                    voice=BufferedInputFile(voice_data, filename="dj_intro.mp3"),
+                    caption="🎙 AI DJ",
+                )
+        except Exception:
+            pass
+
     await send_daily_mix(message, user.id, lang)
+
+    # Send DJ transition comments after every 3rd track
+    if tts_enabled:
+        try:
+            from bot.services.dj_comments import get_transition, get_energy, generate_dj_voice
+            from aiogram.types import BufferedInputFile
+            import asyncio
+
+            for i in range(2, min(len(tracks), 10), 3):
+                tr = tracks[i]
+                artist = tr.get("uploader", "?")
+                title = tr.get("title", "?")
+                # Alternate between transition and energy comments
+                if i % 6 == 2:
+                    text = get_transition(artist, title, lang, name=user.first_name or "")
+                else:
+                    text = get_energy(lang, name=user.first_name or "")
+                voice_data = await generate_dj_voice(text, lang)
+                if voice_data:
+                    await message.answer_voice(
+                        voice=BufferedInputFile(voice_data, filename=f"dj_{i}.mp3"),
+                        caption=f"🎙 {text[:60]}",
+                    )
+                    await asyncio.sleep(0.3)
+        except Exception:
+            pass
 
 
 @router.callback_query(lambda c: c.data == "action:mix")
@@ -179,7 +215,7 @@ async def cb_mix(callback: CallbackQuery) -> None:
 
 @router.callback_query(lambda c: c.data == "action:dj")
 async def cb_dj(callback: CallbackQuery) -> None:
-    """AI DJ callback — sends daily mix with voice intro."""
+    """AI DJ callback — sends daily mix with voice intro + transition comments."""
     user = await get_or_create_user(callback.from_user)
     await callback.answer()
     lang = user.language
@@ -189,20 +225,54 @@ async def cb_dj(callback: CallbackQuery) -> None:
         await callback.message.answer(t(lang, "mix_empty"))
         return
 
+    tts_enabled = True
     try:
-        from bot.services.dj_comments import get_intro, generate_dj_voice
-        intro_text = get_intro(lang)
-        voice_data = await generate_dj_voice(intro_text, lang)
-        if voice_data:
-            from aiogram.types import BufferedInputFile
-            await callback.message.answer_voice(
-                voice=BufferedInputFile(voice_data, filename="dj_intro.mp3"),
-                caption="🎙 AI DJ",
-            )
+        fav_vibe = getattr(user, "fav_vibe", None)
+        if fav_vibe == "tts_off":
+            tts_enabled = False
     except Exception:
         pass
 
+    if tts_enabled:
+        try:
+            from bot.services.dj_comments import get_intro, generate_dj_voice
+            intro_text = get_intro(lang, name=user.first_name or "")
+            voice_data = await generate_dj_voice(intro_text, lang)
+            if voice_data:
+                from aiogram.types import BufferedInputFile
+                await callback.message.answer_voice(
+                    voice=BufferedInputFile(voice_data, filename="dj_intro.mp3"),
+                    caption="🎙 AI DJ",
+                )
+        except Exception:
+            pass
+
     await send_daily_mix(callback.message, user.id, lang)
+
+    # Send DJ transition comments after every 3rd track
+    if tts_enabled:
+        try:
+            from bot.services.dj_comments import get_transition, get_energy, generate_dj_voice
+            from aiogram.types import BufferedInputFile
+            import asyncio
+
+            for i in range(2, min(len(tracks), 10), 3):
+                tr = tracks[i]
+                artist = tr.get("uploader", "?")
+                title = tr.get("title", "?")
+                if i % 6 == 2:
+                    text = get_transition(artist, title, lang, name=user.first_name or "")
+                else:
+                    text = get_energy(lang, name=user.first_name or "")
+                voice_data = await generate_dj_voice(text, lang)
+                if voice_data:
+                    await callback.message.answer_voice(
+                        voice=BufferedInputFile(voice_data, filename=f"dj_{i}.mp3"),
+                        caption=f"🎙 {text[:60]}",
+                    )
+                    await asyncio.sleep(0.3)
+        except Exception:
+            pass
 
 
 @router.callback_query(MixCb.filter())

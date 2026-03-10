@@ -347,5 +347,25 @@
   "promote_created": "✅ Campaign #{campaign_id} created and sent for moderation.",
   "promote_error": "⚠️ Could not create campaign. Check the track ID.",
 
-  "history_premium_hint": "💡 With Premium you get full history without limits."
+  "history_premium_hint": "💡 With Premium you get full history without limits.",
+
+  "vc_group_only": "Voice chat is only available in groups.",
+  "vc_play_usage": "Usage: /play <track name>",
+  "vc_added_to_queue": "♪ <b>{artist} — {title}</b> added to queue (position: {pos})",
+  "vc_no_session": "No active voice chat session.",
+  "vc_skipped_to": "▸▸ Skipped to: <b>{artist} — {title}</b>",
+  "vc_queue_empty": "Queue is empty.",
+  "vc_queue_header": "🎵 Voice Chat Queue",
+  "vc_nothing_playing": "Nothing is playing right now.",
+  "vc_up_next": "Up next",
+  "vc_now_playing": "▸ Now playing: <b>{artist} — {title}</b> ({duration})",
+  "vc_stopped": "⏹ Voice chat session stopped.",
+
+  "vk_import_detected": "🔗 VK Music playlist detected...",
+
+  "dmca_blocked_notice": "🚫 {count} track(s) hidden due to copyright claims.",
+  "dmca_appeal_btn": "⚖️ Appeal",
+  "dmca_appeal_sent": "✅ Appeal #{appeal_id} submitted for review.",
+  "dmca_appeal_not_found": "Blocked track not found.",
+  "dmca_appeal_error": "Could not create appeal."
 }

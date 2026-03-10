@@ -748,6 +748,90 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         else:
             await message.answer("Использование: /admin promo create|list")
 
+    # /admin flags — list all feature flags
+    elif subcmd == "flags":
+        from bot.services.feature_flags import get_all_flags
+        flags = await get_all_flags()
+        lines = ["<b>🚩 Feature Flags:</b>\n"]
+        for name, enabled in flags.items():
+            status_icon = "✅" if enabled else "❌"
+            lines.append(f"  {status_icon} <code>{name}</code>")
+        lines.append("\nПереключить: /admin flag &lt;name&gt; on|off")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    # /admin flag <name> on|off — toggle a feature flag
+    elif subcmd == "flag":
+        if len(args) < 4:
+            await message.answer("Использование: /admin flag &lt;name&gt; on|off", parse_mode="HTML")
+            return
+        flag_name = args[2]
+        flag_value = args[3] if len(args) > 3 else ""
+        # Parse flag_name and value from args[2] which may be "name on/off"
+        parts = message.text.split(maxsplit=3)
+        if len(parts) >= 4:
+            flag_name = parts[2]
+            flag_value = parts[3].lower()
+        if flag_value not in ("on", "off"):
+            await message.answer("Значение: on или off")
+            return
+        from bot.services.feature_flags import set_flag, _DEFAULTS
+        if flag_name not in _DEFAULTS:
+            await message.answer(f"Неизвестный флаг: <code>{flag_name}</code>.\nДоступные: {', '.join(_DEFAULTS.keys())}", parse_mode="HTML")
+            return
+        await set_flag(flag_name, flag_value == "on")
+        status = "✅ ВКЛ" if flag_value == "on" else "❌ ВЫКЛ"
+        await message.answer(f"Флаг <code>{flag_name}</code> → {status}", parse_mode="HTML")
+        await log_admin_action(message.from_user.id, "flag_toggle", details=f"{flag_name}={flag_value}")
+
+    # /admin appeals — list pending DMCA appeals
+    elif subcmd == "appeals":
+        from bot.models.dmca_appeal import DmcaAppeal
+        from bot.models.blocked_track import BlockedTrack
+        async with async_session() as session:
+            result = await session.execute(
+                select(DmcaAppeal, BlockedTrack)
+                .join(BlockedTrack, BlockedTrack.id == DmcaAppeal.blocked_track_id)
+                .where(DmcaAppeal.status == "pending")
+                .order_by(DmcaAppeal.created_at.desc())
+                .limit(20)
+            )
+            appeals = result.all()
+        if not appeals:
+            await message.answer("Нет ожидающих апелляций.")
+            return
+        lines = ["<b>📋 DMCA Апелляции (pending):</b>\n"]
+        for appeal, bt in appeals:
+            lines.append(
+                f"  #{appeal.id} | user:{appeal.user_id} | трек: <code>{bt.source_id}</code>\n"
+                f"    Причина: {(appeal.reason or '-')[:80]}"
+            )
+        lines.append("\nРассмотреть: /admin appeal &lt;id&gt; approve|reject")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    # /admin appeal <id> approve|reject — review DMCA appeal
+    elif subcmd == "appeal":
+        if len(args) < 4:
+            await message.answer("Использование: /admin appeal &lt;id&gt; approve|reject", parse_mode="HTML")
+            return
+        parts = message.text.split(maxsplit=3)
+        try:
+            appeal_id = int(parts[2])
+        except (ValueError, IndexError):
+            await message.answer("ID апелляции должен быть числом.")
+            return
+        decision = parts[3].lower() if len(parts) > 3 else ""
+        if decision not in ("approve", "reject"):
+            await message.answer("Решение: approve или reject")
+            return
+        from bot.services.dmca_filter import review_appeal
+        success = await review_appeal(appeal_id, approved=(decision == "approve"), admin_id=message.from_user.id)
+        if success:
+            emoji = "✅" if decision == "approve" else "❌"
+            await message.answer(f"{emoji} Апелляция #{appeal_id} — {decision}d.")
+            await log_admin_action(message.from_user.id, f"appeal_{decision}", details=str(appeal_id))
+        else:
+            await message.answer("Апелляция не найдена или уже рассмотрена.")
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -768,7 +852,11 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin unblock &lt;source_id&gt; — разблокировать трек\n"
             "/admin proxy — статус прокси-пула\n"
             "/admin promo create &lt;код&gt; &lt;тип&gt; &lt;кол-во&gt; — создать промокод\n"
-            "/admin promo list — список промокодов",
+            "/admin promo list — список промокодов\n"
+            "/admin flags — список feature-флагов\n"
+            "/admin flag &lt;name&gt; on|off — переключить флаг\n"
+            "/admin appeals — список DMCA апелляций\n"
+            "/admin appeal &lt;id&gt; approve|reject — рассмотреть апелляцию",
             parse_mode="HTML",
         )
 

@@ -347,5 +347,25 @@
   "promote_created": "✅ #{campaign_id} кампания түзүлдү жана модерацияга жөнөтүлдү.",
   "promote_error": "⚠️ Кампания түзүү мүмкүн болгон жок. Трек ID текшер.",
 
-  "history_premium_hint": "💡 Premium менен чексиз тарых ал."
+  "history_premium_hint": "💡 Premium менен чексиз тарых ал.",
+
+  "vc_group_only": "Үн чат группаларда гана жеткиликтүү.",
+  "vc_play_usage": "Колдонуу: /play <трек аты>",
+  "vc_added_to_queue": "♪ <b>{artist} — {title}</b> кезекке кошулду (позиция: {pos})",
+  "vc_no_session": "Активдүү үн чат сессиясы жок.",
+  "vc_skipped_to": "▸▸ Которулду: <b>{artist} — {title}</b>",
+  "vc_queue_empty": "Кезек бош.",
+  "vc_queue_header": "🎵 Үн чат кезеги",
+  "vc_nothing_playing": "Азыр эч нерсе ойнобойт.",
+  "vc_up_next": "Кийинки",
+  "vc_now_playing": "▸ Азыр ойнойт: <b>{artist} — {title}</b> ({duration})",
+  "vc_stopped": "⏹ Үн чат сессиясы аяктады.",
+
+  "vk_import_detected": "🔗 VK Music плейлисти табылды...",
+
+  "dmca_blocked_notice": "🚫 {count} трек автордук укук боюнча жашырылган.",
+  "dmca_appeal_btn": "⚖️ Каршылык билдирүү",
+  "dmca_appeal_sent": "✅ #{appeal_id} каршылык билдирүү текшерүүгө жөнөтүлдү.",
+  "dmca_appeal_not_found": "Бөгөттөлгөн трек табылган жок.",
+  "dmca_appeal_error": "Каршылык билдирүү түзүү мүмкүн болгон жок."
 }

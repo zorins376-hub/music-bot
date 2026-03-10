@@ -407,10 +407,19 @@ async def _do_search(message: Message, query: str) -> None:
     script = detect_script(query)
     results = deduplicate_results(all_results, lang_hint=script, query=query)[:max_results] if all_results else []
 
-    # DMCA filter: remove blocked tracks
+    # DMCA filter: remove blocked tracks, show appeal button if any were blocked
+    blocked_count = 0
     if results:
-        from bot.services.dmca_filter import filter_blocked
+        from bot.services.dmca_filter import filter_blocked, is_blocked
+        before_count = len(results)
+        # Find the first blocked track for the appeal button
+        blocked_source_id = None
+        for r in results:
+            if is_blocked(r.get("video_id", "")):
+                blocked_source_id = r.get("video_id", "")
+                break
         results = filter_blocked(results)
+        blocked_count = before_count - len(results)
 
     if not results:
         # TASK-012: "Did you mean?" suggestions
@@ -461,6 +470,21 @@ async def _do_search(message: Message, query: str) -> None:
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+    # Show appeal button if any tracks were blocked
+    if blocked_count > 0 and blocked_source_id:
+        from bot.callbacks import AppealCb
+        appeal_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text=t(lang, "dmca_appeal_btn"),
+                callback_data=AppealCb(sid=blocked_source_id[:30]).pack(),
+            )
+        ]])
+        await message.answer(
+            t(lang, "dmca_blocked_notice", count=blocked_count),
+            reply_markup=appeal_kb,
+            parse_mode="HTML",
+        )
 
 
 async def _download_spotify_track(track_info: dict, bitrate: int) -> Path:
@@ -597,6 +621,49 @@ async def _delete_msgs(bot, chat_id: int, msg_ids: list[int]) -> None:
 
 # fmt_duration imported from bot.utils
 _fmt_duration = fmt_duration
+
+
+# ── DMCA Appeal handler ───────────────────────────────────────────────────
+
+from bot.callbacks import AppealCb
+
+
+@router.callback_query(AppealCb.filter())
+async def cb_dmca_appeal(callback: CallbackQuery, callback_data: AppealCb) -> None:
+    """Handle DMCA appeal button click."""
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    source_id = callback_data.sid
+
+    # Find the blocked track in DB
+    from bot.models.blocked_track import BlockedTrack
+    from bot.models.base import async_session as _async_session
+    from sqlalchemy import select as _select
+
+    async with _async_session() as session:
+        result = await session.execute(
+            _select(BlockedTrack).where(BlockedTrack.source_id == source_id)
+        )
+        blocked = result.scalar_one_or_none()
+
+    if not blocked:
+        await callback.answer(t(lang, "dmca_appeal_not_found"), show_alert=True)
+        return
+
+    from bot.services.dmca_filter import create_appeal
+    appeal_id = await create_appeal(
+        user_id=user.id,
+        blocked_track_id=blocked.id,
+        reason=f"User appeal for {source_id}",
+    )
+    if appeal_id:
+        await callback.answer()
+        await callback.message.edit_text(
+            t(lang, "dmca_appeal_sent", appeal_id=appeal_id),
+            parse_mode="HTML",
+        )
+    else:
+        await callback.answer(t(lang, "dmca_appeal_error"), show_alert=True)
 
 
 @router.message(Command("search"))

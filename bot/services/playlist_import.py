@@ -158,6 +158,90 @@ _APPLE_MUSIC_PLAYLIST_RE = re.compile(
 )
 
 
+# ── VK Music playlist import ────────────────────────────────────────────
+
+_VK_PLAYLIST_RE = re.compile(
+    r"https?://(?:m\.)?vk\.com/music/playlist/(-?\d+)_(\d+)(?:_([a-zA-Z0-9]+))?"
+)
+
+
+async def fetch_vk_playlist(url: str) -> tuple[str, list[dict]]:
+    """Fetch VK Music playlist name and tracks via vk_api."""
+    m = _VK_PLAYLIST_RE.search(url)
+    if not m:
+        return ("", [])
+
+    owner_id = int(m.group(1))
+    playlist_id = int(m.group(2))
+    access_key = m.group(3) or ""
+
+    if not settings.VK_TOKEN:
+        logger.warning("No VK_TOKEN for playlist import")
+        return ("", [])
+
+    try:
+        from bot.services.vk_provider import _get_vk_audio
+        import asyncio
+
+        def _fetch_sync():
+            try:
+                import vk_api
+                session = vk_api.VkApi(token=settings.VK_TOKEN)
+                vk = session.get_api()
+
+                # Get playlist info
+                try:
+                    pl_info = vk.audio.getPlaylistById(
+                        owner_id=owner_id,
+                        playlist_id=playlist_id,
+                        access_key=access_key,
+                    )
+                    name = pl_info.get("title", "VK Import")
+                except Exception:
+                    name = "VK Import"
+
+                # Get playlist tracks
+                try:
+                    resp = vk.audio.get(
+                        owner_id=owner_id,
+                        playlist_id=playlist_id,
+                        access_key=access_key,
+                        count=200,
+                    )
+                    items = resp.get("items", [])
+                except Exception:
+                    # Fallback: try via vk_audio
+                    vk_audio = _get_vk_audio()
+                    if vk_audio is None:
+                        return (name, [])
+                    items = list(vk_audio.get_iter(owner_id=owner_id, album_id=playlist_id, access_hash=access_key))
+
+                result = []
+                for item in items[:200]:
+                    artist = item.get("artist", "")
+                    title = item.get("title", "")
+                    duration = item.get("duration", 0)
+                    if not title:
+                        continue
+                    result.append({
+                        "title": title,
+                        "uploader": artist,
+                        "duration": int(duration) if duration else 0,
+                        "yt_query": f"{artist} - {title}",
+                    })
+                return (name, result)
+            except Exception as e:
+                logger.error("VK playlist fetch error: %s", e)
+                return ("", [])
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _fetch_sync)
+
+    except Exception as e:
+        logger.error("VK playlist import error: %s", e)
+        return ("", [])
+
+
 async def fetch_apple_music_playlist(url: str) -> tuple[str, list[dict]]:
     """Fetch Apple Music playlist by scraping the public page."""
     m = _APPLE_MUSIC_PLAYLIST_RE.search(url)
@@ -234,9 +318,9 @@ async def fetch_apple_music_playlist(url: str) -> tuple[str, list[dict]]:
 
 
 def detect_playlist_url(text: str) -> Optional[str]:
-    """Detect if text contains a Spotify, Yandex, or Apple Music playlist URL.
+    """Detect if text contains a Spotify, Yandex, Apple Music, or VK Music playlist URL.
 
-    Returns 'spotify', 'yandex', 'apple', or None.
+    Returns 'spotify', 'yandex', 'apple', 'vk', or None.
     """
     if _SPOTIFY_PLAYLIST_RE.search(text):
         return "spotify"
@@ -244,6 +328,8 @@ def detect_playlist_url(text: str) -> Optional[str]:
         return "yandex"
     if _APPLE_MUSIC_PLAYLIST_RE.search(text):
         return "apple"
+    if _VK_PLAYLIST_RE.search(text):
+        return "vk"
     return None
 
 
@@ -264,6 +350,8 @@ async def import_playlist_tracks(
         name, ext_tracks = await fetch_yandex_playlist(url)
     elif source == "apple":
         name, ext_tracks = await fetch_apple_music_playlist(url)
+    elif source == "vk":
+        name, ext_tracks = await fetch_vk_playlist(url)
     else:
         return ("", [], 0)
 
