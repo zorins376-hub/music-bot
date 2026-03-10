@@ -90,8 +90,12 @@ async def stream_audio(
     if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', video_id):
         raise HTTPException(status_code=400, detail="Invalid video_id")
 
-    # Check if already downloaded
+    # Check if already downloaded (and valid size > 10KB)
     mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+    if mp3_path.exists() and mp3_path.stat().st_size < 10240:
+        # Corrupt file, delete and re-download
+        logger.warning("Removing corrupt file %s (size=%d)", mp3_path, mp3_path.stat().st_size)
+        mp3_path.unlink()
     if not mp3_path.exists():
         try:
             # Determine source by prefix
@@ -350,6 +354,13 @@ async def _get_track_by_source_id(source_id: str) -> TrackSchema | None:
 
 def _db_track_to_schema(t) -> TrackSchema:
     from bot.utils import fmt_duration
+    # Generate cover URL based on source
+    cover_url = None
+    if t.source == "youtube":
+        cover_url = f"https://i.ytimg.com/vi/{t.source_id}/hqdefault.jpg"
+    elif t.source == "yandex" and t.source_id.startswith("ym_"):
+        # Yandex Music doesn't have simple cover URL, leave None for now
+        pass
     return TrackSchema(
         video_id=t.source_id,
         title=t.title or "Unknown",
@@ -358,7 +369,7 @@ def _db_track_to_schema(t) -> TrackSchema:
         duration_fmt=fmt_duration(t.duration),
         source=t.source or "youtube",
         file_id=t.file_id,
-        cover_url=f"https://i.ytimg.com/vi/{t.source_id}/hqdefault.jpg" if t.source == "youtube" else None,
+        cover_url=cover_url,
     )
 
 
