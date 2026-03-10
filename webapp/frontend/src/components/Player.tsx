@@ -291,7 +291,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       </div>
       <div style={{ padding: "0 24px", fontSize: 14, color: "var(--tg-theme-hint-color, #aaa)", marginBottom: 16 }}>
         <Marquee
-          text={track ? `${track.artist} • ${track.duration_fmt}` : "—"}
+          text={track ? `${track.artist} • ${track.duration_fmt} • 128 kbps` : "—"}
           style={{}}
         />
       </div>

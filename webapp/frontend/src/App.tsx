@@ -75,6 +75,28 @@ export function App() {
       }
     });
 
+    // Update duration from audio metadata if track has no duration
+    audio.addEventListener("loadedmetadata", () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        const realDuration = Math.floor(audio.duration);
+        setState((prev) => {
+          if (prev.current_track && (!prev.current_track.duration || prev.current_track.duration === 0)) {
+            const mins = Math.floor(realDuration / 60);
+            const secs = realDuration % 60;
+            return {
+              ...prev,
+              current_track: {
+                ...prev.current_track,
+                duration: realDuration,
+                duration_fmt: `${mins}:${secs < 10 ? "0" : ""}${secs}`,
+              },
+            };
+          }
+          return prev;
+        });
+      }
+    });
+
     return () => { audio.pause(); audio.src = ""; preload.src = ""; };
   }, []);
 

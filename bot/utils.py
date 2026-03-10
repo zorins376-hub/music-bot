@@ -2,9 +2,9 @@
 
 
 def fmt_duration(seconds: int | None) -> str:
-    """Format seconds as m:ss string. Returns '?:??' for None."""
-    if seconds is None:
-        return "?:??"
+    """Format seconds as m:ss string. Returns '-:--' for None or 0."""
+    if seconds is None or seconds == 0:
+        return "-:--"
     m, s = divmod(int(seconds), 60)
     return f"{m}:{s:02d}"
 
