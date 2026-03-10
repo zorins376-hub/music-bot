@@ -7,6 +7,13 @@ interface Props {
   onShowLyrics: (trackId: string) => void;
 }
 
+// --- Haptic Feedback Helper ---
+const haptic = (type: "light" | "medium" | "heavy" | "rigid" | "soft" = "light") => {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(type);
+  } catch {}
+};
+
 const btnStyle: Record<string, string | number> = {
   background: "none",
   border: "none",
@@ -38,12 +45,87 @@ const IconRepeat = ({ mode }: { mode: string }) => {
 };
 const IconLyrics = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
 
+// --- Marquee Component for long text ---
+function Marquee({ text, style }: { text: string; style?: Record<string, string | number> }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [needsScroll, setNeedsScroll] = useState(false);
+
+  useEffect(() => {
+    if (containerRef.current && textRef.current) {
+      setNeedsScroll(textRef.current.scrollWidth > containerRef.current.clientWidth);
+    }
+  }, [text]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        position: "relative",
+        ...style,
+      }}
+    >
+      <span
+        ref={textRef}
+        style={{
+          display: "inline-block",
+          paddingRight: needsScroll ? 50 : 0,
+          animation: needsScroll ? "marquee 8s linear infinite" : "none",
+        }}
+      >
+        {text}
+      </span>
+      {needsScroll && (
+        <span style={{ display: "inline-block", paddingRight: 50, animation: "marquee 8s linear infinite" }}>
+          {text}
+        </span>
+      )}
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export function Player({ state, onAction, onShowLyrics }: Props) {
   const track = state.current_track;
   const duration = track?.duration ?? 0;
   const [elapsed, setElapsed] = useState(0);
   const [seeking, setSeeking] = useState(false);
   const intervalRef = useRef<number | null>(null);
+
+  // Swipe tracking
+  const touchStartX = useRef<number>(0);
+  const touchEndX = useRef<number>(0);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+
+  const handleTouchStart = (e: TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchEndX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e: TouchEvent) => {
+    touchEndX.current = e.touches[0].clientX;
+    const diff = touchEndX.current - touchStartX.current;
+    setSwipeOffset(Math.max(-80, Math.min(80, diff)));
+  };
+
+  const handleTouchEnd = () => {
+    const diff = touchEndX.current - touchStartX.current;
+    if (diff > 60) {
+      haptic("medium");
+      onAction("prev");
+    } else if (diff < -60) {
+      haptic("medium");
+      onAction("next");
+    }
+    setSwipeOffset(0);
+  };
 
   // Tick elapsed time while playing
   useEffect(() => {
@@ -67,8 +149,11 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
 
   return (
     <div style={{ textAlign: "center", padding: "16px 0" }}>
-      {/* Cover container */}
+      {/* Cover container with swipe */}
       <div
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         style={{
           width: 240,
           height: 240,
@@ -81,79 +166,93 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
           fontSize: 64,
           boxShadow: track ? "0 8px 24px rgba(0,0,0,0.3)" : "none",
           overflow: "hidden",
-          transition: "transform 0.2s ease-out",
-          transform: state.is_playing ? "scale(1.02)" : "scale(1)",
+          transition: swipeOffset === 0 ? "transform 0.3s ease-out" : "none",
+          transform: `translateX(${swipeOffset}px) scale(${state.is_playing ? 1.02 : 1})`,
+          touchAction: "pan-y",
+          userSelect: "none",
         }}
       >
         {track?.cover_url ? (
           <img 
             src={track.cover_url} 
             alt="Cover" 
-            style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+            style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} 
+            draggable={false}
           />
         ) : (
           track ? "♫" : "♪"
         )}
       </div>
 
-      {/* Track info */}
-      <div style={{ marginBottom: 4, fontSize: 18, fontWeight: 600 }}>
-        {track?.title ?? "Ничего не играет"}
+      {/* Track info with Marquee */}
+      <div style={{ padding: "0 24px", marginBottom: 4 }}>
+        <Marquee
+          text={track?.title ?? "Ничего не играет"}
+          style={{ fontSize: 18, fontWeight: 600 }}
+        />
       </div>
-      <div style={{ fontSize: 14, color: "var(--tg-theme-hint-color, #aaa)", marginBottom: 16 }}>
-        {track?.artist ?? "—"}
-        {track && (
-          <span style={{ marginLeft: 8, fontSize: 12 }}>({track.duration_fmt})</span>
-        )}
+      <div style={{ padding: "0 24px", fontSize: 14, color: "var(--tg-theme-hint-color, #aaa)", marginBottom: 16 }}>
+        <Marquee
+          text={track ? `${track.artist} • ${track.duration_fmt}` : "—"}
+          style={{}}
+        />
       </div>
 
-      {/* Seek slider */}
+      {/* Seek slider - improved touch area */}
       {track && duration > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 24px", marginBottom: 8 }}>
           <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", minWidth: 36, textAlign: "right" }}>
             {fmtTime(elapsed)}
           </span>
-          <input
-            type="range"
-            min={0}
-            max={duration}
-            value={seeking ? undefined : elapsed}
-            onInput={(e) => {
-              setSeeking(true);
-              setElapsed(Number((e.target as HTMLInputElement).value));
-            }}
-            onChange={(e) => {
-              const pos = Number((e.target as HTMLInputElement).value);
-              setElapsed(pos);
-              setSeeking(false);
-              onAction("seek", track.video_id, pos);
-            }}
-            style={{ flex: 1, accentColor: "var(--tg-theme-button-color, #7c4dff)" }}
-          />
+          <div style={{ flex: 1, padding: "12px 0", touchAction: "none" }}>
+            <input
+              type="range"
+              min={0}
+              max={duration}
+              value={seeking ? undefined : elapsed}
+              onInput={(e) => {
+                setSeeking(true);
+                setElapsed(Number((e.target as HTMLInputElement).value));
+              }}
+              onChange={(e) => {
+                const pos = Number((e.target as HTMLInputElement).value);
+                setElapsed(pos);
+                setSeeking(false);
+                haptic("light");
+                onAction("seek", track.video_id, pos);
+              }}
+              style={{
+                width: "100%",
+                height: 6,
+                accentColor: "var(--tg-theme-button-color, #7c4dff)",
+                cursor: "pointer",
+              }}
+            />
+          </div>
           <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", minWidth: 36 }}>
             {fmtTime(duration)}
           </span>
         </div>
       )}
 
-      {/* Controls */}
+      {/* Controls with haptic feedback */}
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, marginTop: 16 }}>
-        <button style={btnStyle} onClick={() => onAction("shuffle")}>
+        <button style={btnStyle} onClick={() => { haptic("light"); onAction("shuffle"); }}>
           <IconShuffle active={state.shuffle} />
         </button>
-        <button style={btnStyle} onClick={() => onAction("prev")}>
+        <button style={btnStyle} onClick={() => { haptic("medium"); onAction("prev"); }}>
           <IconSkipBack />
         </button>
         <button
           style={{ ...btnStyle, background: "var(--tg-theme-button-color, #7c4dff)", color: "#fff", borderRadius: "50%", padding: 12, width: 64, height: 64, boxShadow: "0 4px 12px rgba(124, 77, 255, 0.4)" }}
-          onClick={() => onAction(state.is_playing ? "pause" : "play")}
+          onClick={() => { haptic("heavy"); onAction(state.is_playing ? "pause" : "play"); }}
         >
           {state.is_playing ? <IconPause /> : <IconPlay />}
         </button>
-        <button style={btnStyle} onClick={() => onAction("next")}>
+        <button style={btnStyle} onClick={() => { haptic("medium"); onAction("next"); }}>
           <IconSkipForward />
         </button>
-        <button style={btnStyle} onClick={() => onAction("repeat")}>
+        <button style={btnStyle} onClick={() => { haptic("light"); onAction("repeat"); }}>
           <IconRepeat mode={state.repeat_mode} />
         </button>
       </div>
@@ -161,7 +260,7 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
       {/* Lyrics button */}
       {track && (
         <button
-          onClick={() => onShowLyrics(track.video_id)}
+          onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
           style={{
             marginTop: 24,
             padding: "8px 20px",
