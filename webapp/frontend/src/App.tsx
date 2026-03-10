@@ -575,7 +575,7 @@ export function App() {
             marginTop: 3,
             letterSpacing: 2,
             textTransform: "uppercase",
-          }}>inspired by 𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘</div>
+          }}>inspired by T𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘.</div>
         </div>
       )}
 
