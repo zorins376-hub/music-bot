@@ -33,6 +33,7 @@ export function App() {
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null);
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
+  const [isWaveLoading, setIsWaveLoading] = useState(false);
 
   // Create persistent audio element
   useEffect(() => {
@@ -206,6 +207,30 @@ export function App() {
     }
   }, []);
 
+  const handleWave = useCallback(async () => {
+    if (isWaveLoading) return;
+    setIsWaveLoading(true);
+    try {
+      const recs = await fetchWave(1, 10); // user_id=1 for now
+      if (recs.length > 0) {
+        // Add all recommendations to queue
+        for (const track of recs) {
+          await sendAction("add", track.video_id);
+        }
+        // Play first if nothing playing
+        if (!state.is_playing) {
+          await sendAction("play", recs[0].video_id);
+        }
+        const s = await sendAction("status");
+        setState(s);
+      }
+    } catch (e) {
+      console.error("Wave error:", e);
+    } finally {
+      setIsWaveLoading(false);
+    }
+  }, [isWaveLoading, state.is_playing]);
+
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number) => {
       try {
@@ -272,7 +297,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}
