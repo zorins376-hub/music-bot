@@ -47,6 +47,23 @@ export function App() {
     preload.preload = "auto";
     preloadRef.current = preload;
 
+    // Keep OS media notification in sync with playback position
+    const updatePositionState = () => {
+      if ("mediaSession" in navigator && isFinite(audio.duration) && audio.duration > 0) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(audio.duration, 0),
+            playbackRate: audio.playbackRate || 1,
+            position: Math.max(audio.currentTime, 0),
+          });
+        } catch (e) {}
+      }
+    };
+    audio.addEventListener("playing", updatePositionState);
+    audio.addEventListener("pause", updatePositionState);
+    audio.addEventListener("seeked", updatePositionState);
+    audio.addEventListener("ratechange", updatePositionState);
+
     audio.addEventListener("ended", () => {
       // If preloaded, swap instantly (gapless)
       if (preloadRef.current && preloadRef.current.src && preloadRef.current.readyState >= 2) {
@@ -80,6 +97,7 @@ export function App() {
 
     // Update duration from audio metadata if track has no duration
     audio.addEventListener("loadedmetadata", () => {
+      updatePositionState();
       if (audio.duration && isFinite(audio.duration)) {
         const realDuration = Math.floor(audio.duration);
         setAudioDuration(realDuration);
@@ -163,6 +181,25 @@ export function App() {
       });
       navigator.mediaSession.setActionHandler("nexttrack", () => {
         sendAction("next").then(setState).catch(() => {});
+      });
+      
+      // Support for scrubbing/seeking from notification shade (lock screen)
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        const seekTime = details.seekTime || 0;
+        audio.currentTime = seekTime;
+        sendAction("seek", Math.floor(seekTime).toString()).then(setState).catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler("seekforward", (details) => {
+        const skip = details.seekOffset || 10;
+        const newTime = Math.min(audio.currentTime + skip, audio.duration || 0);
+        audio.currentTime = newTime;
+        sendAction("seek", Math.floor(newTime).toString()).then(setState).catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+        const skip = details.seekOffset || 10;
+        const newTime = Math.max(audio.currentTime - skip, 0);
+        audio.currentTime = newTime;
+        sendAction("seek", Math.floor(newTime).toString()).then(setState).catch(() => {});
       });
     }
   }, [state.current_track?.video_id, state.is_playing]);
