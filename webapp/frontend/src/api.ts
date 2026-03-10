@@ -83,3 +83,29 @@ export function getStreamUrl(videoId: string): string {
   const initData = encodeURIComponent(window.Telegram.WebApp.initData);
   return `${API_BASE}/stream/${videoId}?token=${initData}`;
 }
+
+export async function toggleFavorite(videoId: string): Promise<{ liked: boolean }> {
+  const r = await fetch(`${API_BASE}/favorites/${videoId}`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to toggle favorite");
+  return r.json();
+}
+
+export async function checkFavorite(videoId: string): Promise<boolean> {
+  const r = await fetch(`${API_BASE}/favorites/${videoId}`, { headers: getHeaders() });
+  if (!r.ok) return false;
+  const data = await r.json();
+  return data.liked;
+}
+
+export async function reorderQueue(queue: string[]): Promise<PlayerState> {
+  const r = await fetch(`${API_BASE}/player/reorder`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ queue }),
+  });
+  if (!r.ok) throw new Error("Failed to reorder");
+  return r.json();
+}

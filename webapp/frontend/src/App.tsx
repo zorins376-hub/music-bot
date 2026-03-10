@@ -4,7 +4,7 @@ import { TrackList } from "./components/TrackList";
 import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
-import { fetchPlayerState, sendAction, getStreamUrl, type PlayerState, type Track } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, type PlayerState, type Track } from "./api";
 
 type View = "player" | "playlists" | "search" | "lyrics";
 
@@ -117,7 +117,26 @@ export function App() {
   };
 
   return (
-    <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto" }}>
+    <div style={{ position: "relative", minHeight: "100vh" }}>
+      {/* Glassmorphism Background */}
+      {state.current_track?.cover_url && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundImage: `url(${state.current_track.cover_url})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            filter: "blur(60px) brightness(0.4)",
+            transform: "scale(1.2)",
+            zIndex: -1,
+          }}
+        />
+      )}
+      <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto" }}>
       {/* Nav */}
       <nav style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "center" }}>
         {(["player", "playlists", "search"] as View[]).map((v) => (
@@ -148,6 +167,9 @@ export function App() {
               tracks={state.queue}
               currentIndex={state.position}
               onPlay={(t) => action("play", t.video_id)}
+              onReorder={(newTracks) => {
+                reorderQueue(newTracks.map(t => t.video_id)).then(setState).catch(() => {});
+              }}
             />
           )}
         </>
@@ -160,6 +182,7 @@ export function App() {
       {view === "lyrics" && lyricsTrackId && (
         <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} />
       )}
+      </div>
     </div>
   );
 }

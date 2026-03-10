@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel
 
 from bot.config import settings
 from bot.services.downloader import download_track
@@ -363,6 +364,70 @@ async def _fetch_lyrics(track_id: str) -> str | None:
             logger.warning("Genius lyrics fetch failed: %s", e)
 
     return None
+
+
+# ── Favorites ────────────────────────────────────────────────────────────
+
+def _favorites_key(user_id: int) -> str:
+    return f"tma:favorites:{user_id}"
+
+
+@app.get("/api/favorites/{video_id}")
+async def check_favorite(video_id: str, user: dict = Depends(get_current_user)):
+    """Check if a track is in user's favorites."""
+    r = await _get_redis()
+    is_liked = await r.sismember(_favorites_key(user["id"]), video_id)
+    return {"liked": bool(is_liked)}
+
+
+@app.post("/api/favorites/{video_id}")
+async def toggle_favorite(video_id: str, user: dict = Depends(get_current_user)):
+    """Toggle track in user's favorites."""
+    r = await _get_redis()
+    key = _favorites_key(user["id"])
+    is_member = await r.sismember(key, video_id)
+    if is_member:
+        await r.srem(key, video_id)
+        return {"liked": False}
+    else:
+        await r.sadd(key, video_id)
+        return {"liked": True}
+
+
+# ── Queue Reorder ────────────────────────────────────────────────────────
+
+class ReorderRequest(BaseModel):
+    from_index: int
+    to_index: int
+
+
+@app.post("/api/player/reorder", response_model=PlayerState)
+async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_user)):
+    """Reorder a track in the queue."""
+    user_id = user["id"]
+    state = await _load_state(user_id)
+    
+    if not state.queue:
+        raise HTTPException(status_code=400, detail="Queue is empty")
+    
+    from_idx, to_idx = body.from_index, body.to_index
+    if not (0 <= from_idx < len(state.queue) and 0 <= to_idx < len(state.queue)):
+        raise HTTPException(status_code=400, detail="Invalid index")
+    
+    # Move track
+    track = state.queue.pop(from_idx)
+    state.queue.insert(to_idx, track)
+    
+    # Update position if needed
+    if state.position == from_idx:
+        state.position = to_idx
+    elif from_idx < state.position <= to_idx:
+        state.position -= 1
+    elif to_idx <= state.position < from_idx:
+        state.position += 1
+    
+    await _save_state(user_id, state)
+    return state
 
 
 # ── Frontend SPA serving ────────────────────────────────────────────────
