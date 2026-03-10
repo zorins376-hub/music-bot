@@ -234,6 +234,8 @@ export function App() {
     
     if (!state.is_playing) {
       audio.pause();
+    } else if (audio.src && audio.paused) {
+      audio.play().catch(() => {});
     }
 
     if ("mediaSession" in navigator) {
