@@ -40,3 +40,8 @@ qrcode[pil]>=7.0
 
 # ── TTS (Voice AI DJ) ────────────────────────────────────
 edge-tts>=6.1.0
+gTTS>=2.4.0
+
+# ── Import (Apple Music scraping) ─────────────────────────
+beautifulsoup4>=4.12.0
+lxml>=5.0.0

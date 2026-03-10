@@ -191,6 +191,25 @@ async def _send_recaps(bot) -> None:
             lines.append(t(lang, "recap_footer"))
 
             await bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
+
+            # Send visual story card
+            try:
+                from bot.services.story_cards import generate_recap_card
+                top_artist_names = [a for a, _ in artists]
+                top_track_str = f"{top_track[0]} — {top_track[1]}" if top_track else ""
+                card_bytes = generate_recap_card(
+                    user_name=f"@{user_id}",
+                    play_count=play_count,
+                    top_artists=top_artist_names,
+                    top_track=top_track_str,
+                )
+                if card_bytes:
+                    from aiogram.types import BufferedInputFile
+                    photo = BufferedInputFile(card_bytes, filename="recap.png")
+                    await bot.send_photo(user_id, photo)
+            except Exception as e:
+                logger.debug("Story card send failed for %s: %s", user_id, e)
+
             sent += 1
         except Exception as e:
             logger.debug("Recap send failed for %s: %s", user_id, e)

@@ -331,5 +331,21 @@
   "lb_your_xp": "▸ XP: {xp} · Деңгээл: {level}",
   "lb_streak": "🔥 Серия: {days} күн катары менен",
 
-  "story_card_error": "⚠️ Карточка жасоо мүмкүн болгон жок. Кийин аракет кыл."
+  "story_card_error": "⚠️ Карточка жасоо мүмкүн болгон жок. Кийин аракет кыл.",
+
+  "settings_tts_on": "🔊 DJ-комментарийлер: КҮЙҮК",
+  "settings_tts_off": "🔇 DJ-комментарийлер: ӨЧҮК",
+  "settings_tts_toggled_on": "DJ-комментарийлер күйгүзүлдү",
+  "settings_tts_toggled_off": "DJ-комментарийлер өчүрүлдү",
+
+  "import_progress": "⏳ Импорт: {found} / {total} трек табылды...",
+
+  "ai_playlist_save_btn": "Плейлистке сактоо",
+  "ai_playlist_saved": "✅ «{name}» плейлисти сакталды ({count} трек)",
+
+  "promote_intro": "📢 <b>Промо кампания</b>\n\nТрегиңди BLACK ROOM колдонуучуларына жылдыр.\nStars менен төлө.\n\nПромо трек ID жибер:",
+  "promote_created": "✅ #{campaign_id} кампания түзүлдү жана модерацияга жөнөтүлдү.",
+  "promote_error": "⚠️ Кампания түзүү мүмкүн болгон жок. Трек ID текшер.",
+
+  "history_premium_hint": "💡 Premium менен чексиз тарых ал."
 }

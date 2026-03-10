@@ -46,6 +46,8 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
     from bot.models.admin_log import AdminLog  # noqa: F401
     from bot.models.blocked_track import BlockedTrack  # noqa: F401
     from bot.models.promo_code import PromoCode, PromoActivation  # noqa: F401
+    from bot.models.sponsored import SponsoredCampaign, SponsoredEvent  # noqa: F401
+    from bot.models.dmca_appeal import DmcaAppeal  # noqa: F401
 
     last_exc: BaseException | None = None
     for attempt in range(1, retries + 1):
@@ -89,6 +91,8 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS bpm INTEGER",
                         "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS duration INTEGER",
                         "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS downloads INTEGER DEFAULT 0",
+                        # BlockedTrack columns
+                        "ALTER TABLE blocked_tracks ADD COLUMN IF NOT EXISTS alternative_source_id VARCHAR(100)",
                     ]
                     for stmt in _alter_stmts:
                         try:

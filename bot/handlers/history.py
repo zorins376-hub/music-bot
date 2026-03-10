@@ -77,16 +77,20 @@ async def cmd_history(message: Message) -> None:
     lang = user.language
 
     async with async_session() as session:
-        result = await session.execute(
+        q = (
             select(ListeningHistory, Track)
             .outerjoin(Track, ListeningHistory.track_id == Track.id)
             .where(
                 ListeningHistory.user_id == user.id,
                 ListeningHistory.action == "play",
             )
-            .order_by(desc(ListeningHistory.created_at))
-            .limit(10)
         )
+        # Non-premium users: limit history to last 30 days
+        if not user.is_premium:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            q = q.where(ListeningHistory.created_at >= cutoff)
+        q = q.order_by(desc(ListeningHistory.created_at)).limit(10)
+        result = await session.execute(q)
         rows = result.all()
 
     if not rows:

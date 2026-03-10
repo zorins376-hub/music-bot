@@ -331,5 +331,21 @@
   "lb_your_xp": "▸ XP: {xp} · Level: {level}",
   "lb_streak": "🔥 Streak: {days} days in a row",
 
-  "story_card_error": "⚠️ Could not create card. Try again later."
+  "story_card_error": "⚠️ Could not create card. Try again later.",
+
+  "settings_tts_on": "🔊 DJ Comments: ON",
+  "settings_tts_off": "🔇 DJ Comments: OFF",
+  "settings_tts_toggled_on": "DJ comments enabled",
+  "settings_tts_toggled_off": "DJ comments disabled",
+
+  "import_progress": "⏳ Importing: found {found} of {total} tracks...",
+
+  "ai_playlist_save_btn": "Save to playlist",
+  "ai_playlist_saved": "✅ Playlist \"{name}\" saved ({count} tracks)",
+
+  "promote_intro": "📢 <b>Promo Campaign</b>\n\nPromote your track among BLACK ROOM users.\nPayment in Stars.\n\nSend the track ID to promote:",
+  "promote_created": "✅ Campaign #{campaign_id} created and sent for moderation.",
+  "promote_error": "⚠️ Could not create campaign. Check the track ID.",
+
+  "history_premium_hint": "💡 With Premium you get full history without limits."
 }

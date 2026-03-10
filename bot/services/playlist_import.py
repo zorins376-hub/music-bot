@@ -1,5 +1,5 @@
 """
-playlist_import.py — Import playlists from Spotify and Yandex Music.
+playlist_import.py — Import playlists from Spotify, Yandex Music, and Apple Music.
 
 Fetches track list from external services, searches each track
 via search_tracks, and creates a Playlist with found tracks.
@@ -7,12 +7,15 @@ via search_tracks, and creates a Playlist with found tracks.
 import asyncio
 import logging
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from bot.config import settings
 from bot.services.downloader import search_tracks
 
 logger = logging.getLogger(__name__)
+
+# Type alias for progress callback: (found_count, total_count) -> None
+ProgressCallback = Optional[Callable[[int, int], object]]
 
 # ── Spotify playlist import ─────────────────────────────────────────────
 
@@ -150,31 +153,117 @@ async def fetch_yandex_playlist(url: str) -> tuple[str, list[dict]]:
 
 # ── URL detection helpers ────────────────────────────────────────────────
 
-def detect_playlist_url(text: str) -> Optional[str]:
-    """Detect if text contains a Spotify or Yandex playlist URL.
+_APPLE_MUSIC_PLAYLIST_RE = re.compile(
+    r"https?://music\.apple\.com/[a-z]{2}/playlist/[^/]+/(pl\.[a-zA-Z0-9]+)"
+)
 
-    Returns 'spotify', 'yandex', or None.
+
+async def fetch_apple_music_playlist(url: str) -> tuple[str, list[dict]]:
+    """Fetch Apple Music playlist by scraping the public page."""
+    m = _APPLE_MUSIC_PLAYLIST_RE.search(url)
+    if not m:
+        return ("", [])
+
+    try:
+        from bot.services.http_session import get_session
+        session = await get_session()
+
+        async with session.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            timeout=15,
+        ) as resp:
+            if resp.status != 200:
+                logger.warning("Apple Music page error: %d", resp.status)
+                return ("", [])
+            html = await resp.text()
+
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            logger.warning("beautifulsoup4 not installed, Apple Music import unavailable")
+            return ("", [])
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Get playlist name from <title>
+        title_tag = soup.find("title")
+        name = title_tag.text.split(" - ")[0].strip() if title_tag else "Apple Music Import"
+
+        result = []
+        # Apple Music renders track info in meta tags and JSON-LD
+        import json as _json
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = _json.loads(script.string or "")
+                if data.get("@type") == "MusicPlaylist":
+                    for item in data.get("track", []):
+                        artist = item.get("byArtist", {}).get("name", "")
+                        title = item.get("name", "")
+                        if artist and title:
+                            result.append({
+                                "title": title,
+                                "uploader": artist,
+                                "duration": 0,
+                                "yt_query": f"{artist} - {title}",
+                            })
+            except Exception:
+                continue
+
+        # Fallback: parse meta tags if JSON-LD didn't work
+        if not result:
+            for meta in soup.find_all("meta", property="music:song"):
+                content = meta.get("content", "")
+                if content:
+                    # Try to extract artist - title from the URL or nearby elements
+                    parts = content.rsplit("/", 1)
+                    if parts:
+                        slug = parts[-1].replace("-", " ")
+                        result.append({
+                            "title": slug,
+                            "uploader": "",
+                            "duration": 0,
+                            "yt_query": slug,
+                        })
+
+        return (name, result[:200])
+
+    except Exception as e:
+        logger.error("Apple Music playlist fetch error: %s", e)
+        return ("", [])
+
+
+def detect_playlist_url(text: str) -> Optional[str]:
+    """Detect if text contains a Spotify, Yandex, or Apple Music playlist URL.
+
+    Returns 'spotify', 'yandex', 'apple', or None.
     """
     if _SPOTIFY_PLAYLIST_RE.search(text):
         return "spotify"
     if _YANDEX_PLAYLIST_RE.search(text):
         return "yandex"
+    if _APPLE_MUSIC_PLAYLIST_RE.search(text):
+        return "apple"
     return None
 
 
 async def import_playlist_tracks(
     url: str,
     source: str,
+    progress_cb: ProgressCallback = None,
 ) -> tuple[str, list[dict], int]:
     """Import tracks from external playlist.
 
     Returns (playlist_name, found_tracks, total_count).
     found_tracks are search_tracks-compatible dicts.
+    progress_cb is called with (found_so_far, total) periodically.
     """
     if source == "spotify":
         name, ext_tracks = await fetch_spotify_playlist(url)
     elif source == "yandex":
         name, ext_tracks = await fetch_yandex_playlist(url)
+    elif source == "apple":
+        name, ext_tracks = await fetch_apple_music_playlist(url)
     else:
         return ("", [], 0)
 
@@ -183,22 +272,35 @@ async def import_playlist_tracks(
 
     total = len(ext_tracks)
 
-    # Search each track to find downloadable version
+    # Search tracks in parallel batches of 5
     found: list[dict] = []
     seen_ids: set[str] = set()
+    batch_size = 5
 
-    for tr in ext_tracks:
-        query = tr.get("yt_query") or f"{tr.get('uploader', '')} - {tr.get('title', '')}"
-        try:
-            results = await search_tracks(query.strip(), max_results=1, source="youtube")
-            if results:
-                vid = results[0].get("video_id", "")
+    for i in range(0, len(ext_tracks), batch_size):
+        batch = ext_tracks[i:i + batch_size]
+        tasks = []
+        for tr in batch:
+            query = tr.get("yt_query") or f"{tr.get('uploader', '')} - {tr.get('title', '')}"
+            tasks.append(search_tracks(query.strip(), max_results=1, source="youtube"))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, list) and res:
+                vid = res[0].get("video_id", "")
                 if vid and vid not in seen_ids:
                     seen_ids.add(vid)
-                    found.append(results[0])
-        except Exception:
-            pass
-        # Small delay to avoid rate limiting
-        await asyncio.sleep(0.3)
+                    found.append(res[0])
+
+        # Progress callback
+        if progress_cb:
+            try:
+                result = progress_cb(len(found), total)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.2)
 
     return (name, found, total)

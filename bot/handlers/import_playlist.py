@@ -83,7 +83,22 @@ async def _process_import(message: Message, user, url: str) -> None:
         t(lang, "import_detecting"), parse_mode="HTML"
     )
 
-    name, found_tracks, total = await import_playlist_tracks(url, source)
+    # Progress callback to update status message
+    _last_update = [0]
+
+    async def _progress(found: int, total: int):
+        # Update every 5 tracks to avoid flood
+        if found - _last_update[0] >= 5 or found == total:
+            _last_update[0] = found
+            try:
+                await status_msg.edit_text(
+                    t(lang, "import_progress", found=found, total=total),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    name, found_tracks, total = await import_playlist_tracks(url, source, progress_cb=_progress)
 
     if not found_tracks:
         await status_msg.edit_text(

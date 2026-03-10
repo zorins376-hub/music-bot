@@ -14,6 +14,7 @@ class BlockedTrack(Base):
     source_id: Mapped[str] = mapped_column(String(100), index=True, unique=True)
     reason: Mapped[str] = mapped_column(String(255), default="DMCA")
     blocked_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    alternative_source_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

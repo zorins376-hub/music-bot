@@ -24,6 +24,7 @@ from bot.handlers import import_playlist
 from bot.handlers import badges
 from bot.handlers import leaderboard
 from bot.handlers import settings as settings_handler
+from bot.handlers import promote
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
 from bot.middlewares.captcha import CaptchaMiddleware
@@ -332,7 +333,8 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ
     dp.include_router(ai_playlist.router)  # Prompt-to-Playlist
-    dp.include_router(import_playlist.router)  # Spotify/Yandex import
+    dp.include_router(import_playlist.router)  # Spotify/Yandex/Apple import
+    dp.include_router(promote.router)  # B2B Artist Promo
     dp.include_router(badges.router)  # Achievements/badges
     dp.include_router(leaderboard.router)  # XP leaderboard
     dp.include_router(queue.router)      # Queue

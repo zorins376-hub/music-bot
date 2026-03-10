@@ -78,3 +78,76 @@ async def unblock_track(source_id: str) -> bool:
     except Exception as e:
         logger.error("unblock_track failed: %s", e)
         return False
+
+
+async def find_alternative(artist: str, title: str) -> dict | None:
+    """Find an alternative version of a blocked track (live/cover/remix).
+
+    Returns a search_tracks-compatible dict or None.
+    """
+    from bot.services.downloader import search_tracks
+
+    alt_queries = [
+        f"{artist} {title} live",
+        f"{artist} {title} cover",
+        f"{artist} {title} remix",
+    ]
+    for q in alt_queries:
+        try:
+            results = await search_tracks(q, max_results=1, source="youtube")
+            if results:
+                vid = results[0].get("video_id", "")
+                if vid and vid not in _blocked_ids:
+                    return results[0]
+        except Exception:
+            continue
+    return None
+
+
+async def create_appeal(user_id: int, blocked_track_id: int, reason: str) -> int | None:
+    """Create a DMCA unblock appeal. Returns appeal ID or None."""
+    try:
+        from bot.models.dmca_appeal import DmcaAppeal
+        async with async_session() as session:
+            appeal = DmcaAppeal(
+                user_id=user_id,
+                blocked_track_id=blocked_track_id,
+                reason=reason,
+            )
+            session.add(appeal)
+            await session.commit()
+            return appeal.id
+    except Exception as e:
+        logger.error("create_appeal failed: %s", e)
+        return None
+
+
+async def review_appeal(appeal_id: int, approved: bool, admin_id: int) -> bool:
+    """Approve or reject a DMCA appeal. If approved, unblocks the track."""
+    try:
+        from bot.models.dmca_appeal import DmcaAppeal
+        async with async_session() as session:
+            result = await session.execute(
+                select(DmcaAppeal).where(DmcaAppeal.id == appeal_id)
+            )
+            appeal = result.scalar_one_or_none()
+            if not appeal or appeal.status != "pending":
+                return False
+
+            appeal.status = "approved" if approved else "rejected"
+            appeal.reviewed_by = admin_id
+            await session.commit()
+
+            if approved:
+                # Unblock the track
+                bt = await session.execute(
+                    select(BlockedTrack).where(BlockedTrack.id == appeal.blocked_track_id)
+                )
+                blocked = bt.scalar_one_or_none()
+                if blocked:
+                    await unblock_track(blocked.source_id)
+
+            return True
+    except Exception as e:
+        logger.error("review_appeal failed: %s", e)
+        return False

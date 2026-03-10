@@ -26,6 +26,15 @@ class ThrottleMiddleware(BaseMiddleware):
         if event.successful_payment is not None:
             return await handler(event, data)
 
+        # Premium users bypass flood throttle
+        try:
+            from bot.db import get_or_create_user
+            db_user = await get_or_create_user(user)
+            if db_user.is_premium:
+                return await handler(event, data)
+        except Exception:
+            pass
+
         try:
             flood_key = f"flood:{user.id}"
             if await cache.redis.exists(flood_key):
