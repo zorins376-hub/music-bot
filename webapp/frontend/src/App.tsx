@@ -154,15 +154,8 @@ export function App() {
     audio.addEventListener("error", () => setBuffering(false));
 
     audio.addEventListener("ended", () => {
-      // If preloaded, swap instantly (gapless)
-      if (preloadRef.current && preloadRef.current.src && preloadRef.current.readyState >= 2) {
-        const old = audioRef.current;
-        audioRef.current = preloadRef.current;
-        audioRef.current.play().catch(() => {});
-        preloadRef.current = old || new Audio();
-        preloadRef.current.preload = "auto";
-        preloadRef.current.src = "";
-      }
+      // Don't swap audio elements — it breaks AudioContext source connection.
+      // Cache + prefetch ensures the next track loads almost instantly.
       sendAction("next").then(setState).catch(() => {});
     });
     audio.addEventListener("timeupdate", () => {
@@ -227,11 +220,11 @@ export function App() {
       const inputGain = ctx.createGain();
       const outputGain = ctx.createGain();
       const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -18;
-      compressor.knee.value = 6;
-      compressor.ratio.value = 2.5;
-      compressor.attack.value = 0.005;
-      compressor.release.value = 0.18;
+      compressor.threshold.value = -8;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 3;
+      compressor.attack.value = 0.02;
+      compressor.release.value = 0.25;
 
       const filters = EQ_BANDS.map((freq, idx) => {
         const filter = ctx.createBiquadFilter();
@@ -387,13 +380,11 @@ export function App() {
       }
     };
     
-    loadAudio();
-    
-    if (!state.is_playing) {
-      audio.pause();
-    } else if (audio.src && audio.paused) {
-      audio.play().catch(() => {});
-    }
+    loadAudio().then(() => {
+      if (!state.is_playing) {
+        audio.pause();
+      }
+    });
 
     if ("mediaSession" in navigator) {
       const artworkSrc = track.cover_url || `${window.location.origin}/icon.svg`;
