@@ -71,6 +71,7 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_version VARCHAR(20)",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_sent BOOLEAN DEFAULT false",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS release_radar_enabled BOOLEAN DEFAULT true",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS badges JSONB",
                         # ListeningHistory columns
                         "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS action VARCHAR(20) DEFAULT 'play'",
                         "ALTER TABLE listening_history ADD COLUMN IF NOT EXISTS listen_duration INTEGER",
