@@ -35,6 +35,7 @@ export function App() {
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isWaveLoading, setIsWaveLoading] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   // Create persistent audio element
@@ -64,6 +65,12 @@ export function App() {
     audio.addEventListener("pause", updatePositionState);
     audio.addEventListener("seeked", updatePositionState);
     audio.addEventListener("ratechange", updatePositionState);
+
+    // Buffering detection
+    audio.addEventListener("waiting", () => setBuffering(true));
+    audio.addEventListener("playing", () => setBuffering(false));
+    audio.addEventListener("canplay", () => setBuffering(false));
+    audio.addEventListener("error", () => setBuffering(false));
 
     audio.addEventListener("ended", () => {
       // If preloaded, swap instantly (gapless)
@@ -198,6 +205,7 @@ export function App() {
     const loadAudio = async () => {
       if (currentTrackIdRef.current === track.video_id) return;
       currentTrackIdRef.current = track.video_id;
+      setBuffering(true);
       
       const apiUrl = getStreamUrl(track.video_id);
       const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
@@ -445,7 +453,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}

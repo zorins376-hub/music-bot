@@ -15,6 +15,8 @@ interface Props {
   audioDuration?: number;
   onWave?: () => void;
   isWaveLoading?: boolean;
+  elapsed?: number;
+  buffering?: boolean;
 }
 
 // --- Haptic Feedback Helper ---
@@ -156,15 +158,15 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false }: Props) {
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
-  const [elapsed, setElapsed] = useState(0);
+  const [seekValue, setSeekValue] = useState<number | null>(null);
+  const elapsed = seekValue !== null ? seekValue : externalElapsed;
   const [seeking, setSeeking] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
   const [showShareCard, setShowShareCard] = useState(false);
-  const intervalRef = useRef<number | null>(null);
 
   // Swipe tracking
   const touchStartX = useRef<number>(0);
@@ -227,19 +229,8 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
     setSwipeOffset(0);
   };
 
-  // Tick elapsed time while playing
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (state.is_playing && duration > 0) {
-      intervalRef.current = window.setInterval(() => {
-        setElapsed((e) => (e < duration ? e + 1 : 0));
-      }, 1000);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [state.is_playing, track?.video_id]);
-
-  // Reset elapsed on track change
-  useEffect(() => { setElapsed(0); }, [track?.video_id]);
+  // Reset seek value on track change
+  useEffect(() => { setSeekValue(null); }, [track?.video_id]);
 
   const fmtTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -318,13 +309,13 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               onInput={(e) => {
                 if (duration > 0) {
                   setSeeking(true);
-                  setElapsed(Number((e.target as HTMLInputElement).value));
+                  setSeekValue(Number((e.target as HTMLInputElement).value));
                 }
               }}
               onChange={(e) => {
                 if (duration > 0) {
                   const pos = Number((e.target as HTMLInputElement).value);
-                  setElapsed(pos);
+                  setSeekValue(null);
                   setSeeking(false);
                   haptic("light");
                   onAction("seek", track.video_id, pos);
@@ -354,10 +345,15 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           <IconSkipBack />
         </button>
         <button
-          style={{ ...btnStyle, background: accentColor, color: "#fff", borderRadius: "50%", padding: 12, width: 64, height: 64, boxShadow: `0 4px 12px ${accentColorAlpha}`, transition: "background 0.5s ease, box-shadow 0.5s ease" }}
+          style={{ ...btnStyle, background: accentColor, color: "#fff", borderRadius: "50%", padding: 12, width: 64, height: 64, boxShadow: `0 4px 12px ${accentColorAlpha}`, transition: "background 0.5s ease, box-shadow 0.5s ease", position: "relative" }}
           onClick={() => { haptic("heavy"); onAction(state.is_playing ? "pause" : "play"); }}
         >
-          {state.is_playing ? <IconPause /> : <IconPlay />}
+          {buffering ? (
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+              <path d="M12 2a10 10 0 0 1 10 10" />
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </svg>
+          ) : state.is_playing ? <IconPause /> : <IconPlay />}
         </button>
         <button style={btnStyle} onClick={() => { haptic("medium"); onAction("next"); }}>
           <IconSkipForward />
