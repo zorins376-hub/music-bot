@@ -3,6 +3,8 @@
 TASK-001: Fuzzy search + dedup + multi-language support (TASK-023).
 """
 
+import asyncio
+import logging
 import re
 import unicodedata
 
@@ -236,3 +238,37 @@ def suggest_query(query: str, corpus: list[str], max_suggestions: int = 1) -> li
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [s[1] for s in scored[:max_suggestions]]
+
+
+# ── Main search function ─────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+
+
+async def perform_search(query: str, limit: int = 10) -> list[dict]:
+    """Search across all providers, deduplicate and return merged results."""
+    from bot.services.downloader import search_tracks as yt_search
+
+    tasks = [yt_search(query, max_results=limit)]
+
+    # Add Yandex Music search if available
+    try:
+        from bot.services.yandex_provider import search_yandex
+        tasks.append(search_yandex(query, limit=limit))
+    except Exception:
+        pass
+
+    results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: list[dict] = []
+    for result in results_lists:
+        if isinstance(result, list):
+            merged.extend(result)
+
+    if not merged:
+        logger.warning("No search results for query: %s", query)
+        return []
+
+    lang_hint = detect_script(query)
+    deduped = deduplicate_results(merged, threshold=0.7, lang_hint=lang_hint, query=query)
+    return deduped[:limit]
