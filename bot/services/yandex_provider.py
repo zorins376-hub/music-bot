@@ -54,11 +54,26 @@ async def _get_client(token: str):
         return _clients[token]
     try:
         from yandex_music import ClientAsync
-        client = await ClientAsync(token).init()
+
+        # Pass proxy from pool if available
+        proxy = _get_proxy_url()
+        kwargs: dict = {}
+        if proxy:
+            kwargs["proxy_url"] = proxy
+        client = await ClientAsync(token, **kwargs).init()
         _clients[token] = client
         return client
     except Exception as e:
         logger.error("Yandex client init failed: %s", e)
+        return None
+
+
+def _get_proxy_url() -> str | None:
+    """Get next proxy URL from pool for Yandex HTTP requests."""
+    try:
+        from bot.services.proxy_pool import proxy_pool
+        return proxy_pool.get_next()
+    except Exception:
         return None
 
 

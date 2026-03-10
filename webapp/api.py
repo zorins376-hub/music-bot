@@ -143,6 +143,10 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
         idx = modes.index(state.repeat_mode) if state.repeat_mode in modes else 0
         state.repeat_mode = modes[(idx + 1) % len(modes)]
 
+    elif body.action == "seek":
+        # Seek position stored but actual seeking is client-side
+        pass
+
     # Update current track
     if state.queue and 0 <= state.position < len(state.queue):
         state.current_track = state.queue[state.position]

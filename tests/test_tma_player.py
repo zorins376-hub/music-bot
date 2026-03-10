@@ -85,6 +85,11 @@ class TestSchemas:
         assert a.action == "play"
         assert a.track_id == "xyz"
 
+    def test_player_action_seek(self):
+        a = PlayerAction(action="seek", track_id="xyz", position=42)
+        assert a.action == "seek"
+        assert a.position == 42
+
     def test_playlist_schema(self):
         p = PlaylistSchema(id=1, name="My Playlist", track_count=5)
         assert p.track_count == 5

@@ -39,11 +39,14 @@ export async function fetchPlayerState(userId: number): Promise<PlayerState> {
   return r.json();
 }
 
-export async function sendAction(action: string, trackId?: string): Promise<PlayerState> {
+export async function sendAction(action: string, trackId?: string, seekPos?: number): Promise<PlayerState> {
+  const body: Record<string, unknown> = { action };
+  if (trackId) body.track_id = trackId;
+  if (seekPos !== undefined) body.position = seekPos;
   const r = await fetch(`${API_BASE}/player/action`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({ action, track_id: trackId }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error("Action failed");
   return r.json();

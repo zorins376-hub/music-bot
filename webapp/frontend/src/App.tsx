@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "preact/hooks";
+import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { Player } from "./components/Player";
 import { TrackList } from "./components/TrackList";
 import { PlaylistView } from "./components/PlaylistView";
@@ -22,15 +22,37 @@ export function App() {
     shuffle: false,
   });
   const [lyricsTrackId, setLyricsTrackId] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef(0);
 
   useEffect(() => {
     if (userId) fetchPlayerState(userId).then(setState).catch(() => {});
   }, [userId]);
 
+  // Tick elapsed for lyrics sync
+  useEffect(() => {
+    if (!state.is_playing) return;
+    const id = window.setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [state.is_playing, state.current_track?.video_id]);
+
+  // Reset elapsed on track change
+  useEffect(() => {
+    elapsedRef.current = 0;
+    setElapsed(0);
+  }, [state.current_track?.video_id]);
+
   const action = useCallback(
-    async (act: string, trackId?: string) => {
+    async (act: string, trackId?: string, seekPos?: number) => {
       try {
-        const s = await sendAction(act, trackId);
+        const s = await sendAction(act, trackId, seekPos);
+        if (act === "seek" && seekPos !== undefined) {
+          elapsedRef.current = seekPos;
+          setElapsed(seekPos);
+        }
         setState(s);
       } catch {}
     },
@@ -84,7 +106,7 @@ export function App() {
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id); setView("player"); }} />}
 
       {view === "lyrics" && lyricsTrackId && (
-        <LyricsView trackId={lyricsTrackId} onBack={() => setView("player")} />
+        <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} />
       )}
     </div>
   );

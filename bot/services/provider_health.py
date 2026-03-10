@@ -77,6 +77,10 @@ class _ProviderStat:
 # Global provider stats registry
 _stats: dict[str, _ProviderStat] = defaultdict(_ProviderStat)
 
+# Providers with health below this threshold are auto-disabled
+_AUTO_DISABLE_THRESHOLD = 0.3
+_disabled_providers: set[str] = set()
+
 PROVIDERS = ("youtube", "yandex", "spotify", "vk", "soundcloud", "local")
 
 
@@ -104,6 +108,7 @@ class provider_timer:
             _stats[key].record_success(elapsed)
         else:
             _stats[key].record_failure(elapsed, str(exc_val or ""))
+        _check_auto_disable(self.provider)
         return False  # don't suppress exception
 
 
@@ -114,6 +119,37 @@ def record_provider_event(provider: str, operation: str, latency: float, success
         _stats[key].record_success(latency)
     else:
         _stats[key].record_failure(latency, error)
+    # Auto-disable check after recording
+    _check_auto_disable(provider)
+
+
+def _check_auto_disable(provider: str) -> None:
+    """Disable provider if aggregate health across all operations < threshold."""
+    scores = []
+    for key, stat in _stats.items():
+        if key.startswith(f"{provider}:") and stat.total >= 5:
+            scores.append(stat.health_score)
+    if not scores:
+        return
+    avg_health = sum(scores) / len(scores)
+    if avg_health < _AUTO_DISABLE_THRESHOLD:
+        if provider not in _disabled_providers:
+            _disabled_providers.add(provider)
+            logger.warning("Provider %s auto-disabled (health %.2f < %.2f)", provider, avg_health, _AUTO_DISABLE_THRESHOLD)
+    elif provider in _disabled_providers:
+        # Auto-recover when health improves
+        _disabled_providers.discard(provider)
+        logger.info("Provider %s auto-recovered (health %.2f)", provider, avg_health)
+
+
+def is_provider_disabled(provider: str) -> bool:
+    """Check if a provider is currently auto-disabled due to low health."""
+    return provider in _disabled_providers
+
+
+def get_disabled_providers() -> set[str]:
+    """Return set of currently disabled provider names."""
+    return set(_disabled_providers)
 
 
 def get_provider_health(provider: str | None = None) -> dict:
