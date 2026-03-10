@@ -7,7 +7,7 @@ import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, type PlayerState, type Track } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
-import { getStreamUrl as getCachedStreamUrl } from "./offlineCache";
+import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 
 type View = "player" | "playlists" | "search" | "lyrics";
 
@@ -82,8 +82,8 @@ export function App() {
       elapsedRef.current = t;
       setElapsed(t);
 
-      // Gapless: preload next track 15 seconds before end
-      if (audio.duration && audio.duration - audio.currentTime < 15 && audio.duration > 20) {
+      // Gapless: preload next track 30 seconds before end
+      if (audio.duration && audio.duration - audio.currentTime < 30 && audio.duration > 35) {
         const nextIdx = (state.position + 1) % state.queue.length;
         if (state.queue.length > 1 && preloadRef.current) {
           const nextTrack = state.queue[nextIdx];
@@ -205,6 +205,18 @@ export function App() {
       
       if (state.is_playing) {
         audio.play().catch(() => {});
+      }
+
+      // Prefetch next 2 tracks in queue so they start instantly
+      if (state.queue.length > 1) {
+        const nextIds: string[] = [];
+        for (let i = 1; i <= 2; i++) {
+          const idx = (state.position + i) % state.queue.length;
+          if (state.queue[idx]?.video_id !== track.video_id) {
+            nextIds.push(state.queue[idx].video_id);
+          }
+        }
+        if (nextIds.length) prefetchTracks(nextIds);
       }
     };
     

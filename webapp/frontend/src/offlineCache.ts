@@ -128,7 +128,7 @@ async function deleteTrack(videoId: string): Promise<void> {
   });
 }
 
-// Get cached stream URL or fetch and cache
+// Get cached stream URL or return API URL for direct streaming
 export async function getStreamUrl(videoId: string, apiUrl: string): Promise<string> {
   try {
     // Check cache first
@@ -138,24 +138,51 @@ export async function getStreamUrl(videoId: string, apiUrl: string): Promise<str
       return URL.createObjectURL(cached);
     }
     
-    // Fetch from API
-    console.log(`[Cache] Miss, fetching: ${videoId}`);
-    const response = await fetch(apiUrl);
+    // No cache — return direct API stream URL for immediate playback
+    // The browser will start playing as data arrives (no waiting for full download)
+    console.log(`[Cache] Miss, streaming direct: ${videoId}`);
     
-    if (response.ok) {
-      const blob = await response.blob();
-      
-      // Cache in background (don't await)
-      cacheTrack(videoId, blob).catch(console.error);
-      
-      return URL.createObjectURL(blob);
-    }
+    // Cache in background (don't block playback)
+    backgroundCache(videoId, apiUrl);
+    
+    return apiUrl;
   } catch (e) {
     console.error("[Cache] Error:", e);
   }
   
   // Fallback to direct URL
   return apiUrl;
+}
+
+// Background fetch + cache (does not block playback)
+const _bgCacheInFlight = new Set<string>();
+function backgroundCache(videoId: string, apiUrl: string) {
+  if (_bgCacheInFlight.has(videoId)) return;
+  _bgCacheInFlight.add(videoId);
+  fetch(apiUrl)
+    .then(r => r.ok ? r.blob() : null)
+    .then(blob => {
+      if (blob && blob.size > 10240) {
+        return cacheTrack(videoId, blob);
+      }
+    })
+    .catch(() => {})
+    .finally(() => _bgCacheInFlight.delete(videoId));
+}
+
+// Prefetch stream URLs for upcoming tracks (tells backend to resolve URLs in advance)
+export async function prefetchTracks(videoIds: string[]): Promise<void> {
+  if (!videoIds.length) return;
+  try {
+    await fetch("/api/prefetch", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+      },
+      body: JSON.stringify({ video_ids: videoIds }),
+    });
+  } catch {}
 }
 
 export async function getCacheStats(): Promise<{ count: number; size: number }> {

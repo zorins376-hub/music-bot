@@ -135,8 +135,10 @@ def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
-        "socket_timeout": 15,
-        "format": "bestaudio/best",
+        "socket_timeout": 10,
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "extract_flat": False,
+        "no_check_certificates": True,
         **_base_opts(),
     }
     try:
