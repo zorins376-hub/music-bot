@@ -602,7 +602,7 @@ export function App() {
         </>
       )}
 
-      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id); setView("player"); }} />}
+      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 

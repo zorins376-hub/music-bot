@@ -10,13 +10,15 @@ interface ShareCardProps {
   };
   onClose: () => void;
   accentColor?: string;
+  themeId?: string;
 }
 
 /**
  * ShareCard — generates a viral share card for Instagram Stories / social media.
  * Uses canvas to create an image with track info + QR code.
  */
-export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCardProps) {
+export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "blackroom" }: ShareCardProps) {
+  const isTequila = themeId === "tequila";
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [cardUrl, setCardUrl] = useState<string | null>(null);
@@ -49,10 +51,18 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
     // Background gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, bgColor);
-    gradient.addColorStop(0.5, "#1a1a2e");
-    gradient.addColorStop(1, "#0d0d1a");
+    gradient.addColorStop(0.5, isTequila ? "#2b170d" : "#1a1a2e");
+    gradient.addColorStop(1, isTequila ? "#120a06" : "#0d0d1a");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (isTequila) {
+      const glow = ctx.createRadialGradient(canvas.width / 2, 240, 100, canvas.width / 2, 240, 700);
+      glow.addColorStop(0, "rgba(255, 213, 79, 0.18)");
+      glow.addColorStop(1, "rgba(255, 213, 79, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     // Draw cover image (if available)
     if (track.cover_url) {
@@ -79,9 +89,9 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
         ctx.restore();
 
         // Add shadow/glow effect
-        ctx.shadowColor = bgColor;
+        ctx.shadowColor = isTequila ? "rgba(255, 167, 38, 0.8)" : bgColor;
         ctx.shadowBlur = 60;
-        ctx.strokeStyle = "rgba(255,255,255,0.1)";
+        ctx.strokeStyle = isTequila ? "rgba(255, 213, 79, 0.28)" : "rgba(255,255,255,0.1)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.roundRect(coverX, coverY, coverSize, coverSize, 40);
@@ -93,7 +103,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
     }
 
     // Track title
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = isTequila ? "#fef0e0" : "#ffffff";
     ctx.font = "bold 64px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -107,35 +117,41 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
     });
 
     // Artist name
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fillStyle = isTequila ? "rgba(254,240,224,0.78)" : "rgba(255,255,255,0.7)";
     ctx.font = "48px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText(track.artist || "Unknown Artist", canvas.width / 2, titleY + titleLines.length * 75 + 50);
 
     // Duration badge
     if (track.duration_fmt) {
-      ctx.fillStyle = "rgba(255,255,255,0.1)";
+      ctx.fillStyle = isTequila ? "rgba(255,213,79,0.12)" : "rgba(255,255,255,0.1)";
       ctx.beginPath();
       ctx.roundRect(canvas.width / 2 - 80, titleY + titleLines.length * 75 + 110, 160, 50, 25);
       ctx.fill();
       
-      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      ctx.fillStyle = isTequila ? "#ffd54f" : "rgba(255,255,255,0.8)";
       ctx.font = "32px -apple-system, BlinkMacSystemFont, sans-serif";
       ctx.fillText(track.duration_fmt, canvas.width / 2, titleY + titleLines.length * 75 + 135);
     }
 
-    // BLACK ROOM branding
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    // Branding
+    ctx.fillStyle = isTequila ? "rgba(255,213,79,0.72)" : "rgba(255,255,255,0.5)";
     ctx.font = "bold 36px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText("BLACK ROOM", canvas.width / 2, 1700);
+    ctx.fillText(isTequila ? "𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀  𝐌 𝐔 𝐒 𝐈 𝐂" : "BLACK ROOM", canvas.width / 2, 1700);
+
+    if (isTequila) {
+      ctx.fillStyle = "rgba(200,168,130,0.92)";
+      ctx.font = "28px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillText("inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘.", canvas.width / 2, 1752);
+    }
 
     // Swipe up hint
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillStyle = isTequila ? "rgba(200,168,130,0.78)" : "rgba(255,255,255,0.4)";
     ctx.font = "28px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText("⬆ Swipe up to listen", canvas.width / 2, 1780);
+    ctx.fillText("⬆ Swipe up to listen", canvas.width / 2, isTequila ? 1810 : 1780);
 
     // Music note decoration
     ctx.font = "120px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillStyle = isTequila ? "rgba(255,213,79,0.1)" : "rgba(255,255,255,0.1)";
     ctx.fillText("♪", 100, 200);
     ctx.fillText("♫", canvas.width - 150, 1600);
 
@@ -147,7 +163,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
       }
       setIsGenerating(false);
     }, "image/png");
-  }, [track, accentColor]);
+  }, [track, accentColor, isTequila]);
 
   const handleShare = useCallback(async () => {
     if (!cardUrl) return;
@@ -163,7 +179,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
           await navigator.share({
             files: [file],
             title: `${track.artist} — ${track.title}`,
-            text: "Listen on BLACK ROOM 🎵",
+            text: isTequila ? "Listen on 𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀 𝐌 𝐔 𝐒 𝐈 𝐂 ✨" : "Listen on BLACK ROOM 🎵",
           });
           return;
         }
@@ -172,20 +188,20 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
       // Fallback: download
       const a = document.createElement("a");
       a.href = cardUrl;
-      a.download = `${track.title}_blackroom.png`;
+      a.download = `${track.title}_${isTequila ? "tequila_music" : "blackroom"}.png`;
       a.click();
     } catch (e) {
       console.error("Share error:", e);
     }
-  }, [cardUrl, track]);
+  }, [cardUrl, track, isTequila]);
 
   const handleDownload = useCallback(() => {
     if (!cardUrl) return;
     const a = document.createElement("a");
     a.href = cardUrl;
-    a.download = `${track.title}_blackroom.png`;
+    a.download = `${track.title}_${isTequila ? "tequila_music" : "blackroom"}.png`;
     a.click();
-  }, [cardUrl, track.title]);
+  }, [cardUrl, track.title, isTequila]);
 
   // Generate on mount
   if (!cardUrl && !isGenerating) {
@@ -200,7 +216,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
         left: 0,
         right: 0,
         bottom: 0,
-        background: "rgba(0,0,0,0.9)",
+        background: isTequila ? "rgba(12, 6, 3, 0.92)" : "rgba(0,0,0,0.9)",
         zIndex: 1000,
         display: "flex",
         flexDirection: "column",
@@ -216,12 +232,12 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
           position: "absolute",
           top: 20,
           right: 20,
-          background: "rgba(255,255,255,0.1)",
-          border: "none",
+          background: isTequila ? "rgba(255, 213, 79, 0.12)" : "rgba(255,255,255,0.1)",
+          border: isTequila ? "1px solid rgba(255, 213, 79, 0.16)" : "none",
           borderRadius: "50%",
           width: 44,
           height: 44,
-          color: "#fff",
+          color: isTequila ? "#ffd54f" : "#fff",
           fontSize: 24,
           cursor: "pointer",
         }}
@@ -237,6 +253,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
           overflow: "hidden",
           borderRadius: 20,
           boxShadow: `0 0 60px ${dominantColor}40`,
+          border: isTequila ? "1px solid rgba(255, 213, 79, 0.16)" : "none",
         }}
       >
         <canvas
@@ -252,7 +269,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
       {/* Actions */}
       <div style={{ marginTop: 20, display: "flex", gap: 12 }}>
         {isGenerating ? (
-          <div style={{ color: "#fff", fontSize: 16 }}>Generating...</div>
+          <div style={{ color: isTequila ? "#fef0e0" : "#fff", fontSize: 16 }}>Generating...</div>
         ) : (
           <>
             <button
@@ -261,11 +278,12 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
                 padding: "12px 28px",
                 borderRadius: 24,
                 border: "none",
-                background: dominantColor,
-                color: "#fff",
+                background: isTequila ? "linear-gradient(135deg, #ff6d00, #ffa726)" : dominantColor,
+                color: isTequila ? "#1a120b" : "#fff",
                 fontSize: 16,
                 fontWeight: 600,
                 cursor: "pointer",
+                boxShadow: isTequila ? "0 8px 24px rgba(255, 109, 0, 0.3)" : "none",
               }}
             >
               📤 Share
@@ -275,9 +293,9 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
               style={{
                 padding: "12px 28px",
                 borderRadius: 24,
-                border: "none",
-                background: "rgba(255,255,255,0.1)",
-                color: "#fff",
+                border: isTequila ? "1px solid rgba(255, 213, 79, 0.16)" : "none",
+                background: isTequila ? "rgba(40, 25, 15, 0.62)" : "rgba(255,255,255,0.1)",
+                color: isTequila ? "#fef0e0" : "#fff",
                 fontSize: 16,
                 fontWeight: 600,
                 cursor: "pointer",
@@ -289,7 +307,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCard
         )}
       </div>
 
-      <p style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
+      <p style={{ marginTop: 16, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.5)", fontSize: 14 }}>
         Share to Instagram Stories, Telegram, etc.
       </p>
     </div>

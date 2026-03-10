@@ -659,6 +659,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             track={track}
             onClose={() => setShowShareCard(false)}
             accentColor={accentColor}
+            themeId={themeId}
           />
         )}
       </div>
@@ -988,6 +989,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           track={track}
           onClose={() => setShowShareCard(false)}
           accentColor={accentColor}
+          themeId={themeId}
         />
       )}
     </div>
