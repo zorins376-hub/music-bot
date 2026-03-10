@@ -31,6 +31,9 @@ from bot.models.base import init_db
 # ── In-memory stream URL cache (avoids repeated yt-dlp resolves) ─────────
 _stream_url_cache: dict[str, tuple[str, float]] = {}  # video_id -> (url, expires_at)
 _STREAM_URL_TTL = 1800  # 30 minutes (YouTube URLs valid ~6h)
+_stream_url_inflight: dict[str, asyncio.Future[str | None]] = {}
+_stream_url_lock = asyncio.Lock()
+_stream_url_resolve_semaphore = asyncio.Semaphore(1)
 from webapp.auth import verify_init_data
 from webapp.schemas import (
     LyricsResponse,
@@ -288,9 +291,7 @@ async def stream_audio(
                     stream_url = cached[0]
                     logger.debug("Stream URL cache hit for %s", video_id)
                 else:
-                    stream_url = await resolve_youtube_audio_stream_url(video_id)
-                    if stream_url:
-                        _stream_url_cache[video_id] = (stream_url, _time.time() + _STREAM_URL_TTL)
+                    stream_url = await _resolve_stream_url_cached(video_id)
                 if stream_url:
                     from bot.services.http_session import get_session
 
@@ -355,11 +356,6 @@ async def stream_audio(
                             response_headers["Content-Length"] = content_length
                         if content_range:
                             response_headers["Content-Range"] = content_range
-
-                        # Start background chunked download so file is cached for next time
-                        asyncio.ensure_future(
-                            _background_cache(video_id, stream_url, mp3_path)
-                        )
 
                         return StreamingResponse(
                             _iter_upstream(),
@@ -434,6 +430,36 @@ async def stream_audio(
 # ── Helper: Redis player state ──────────────────────────────────────────
 
 
+async def _resolve_stream_url_cached(video_id: str) -> str | None:
+    import time as _time
+
+    cached = _stream_url_cache.get(video_id)
+    if cached and cached[1] > _time.time():
+        return cached[0]
+
+    async with _stream_url_lock:
+        existing = _stream_url_inflight.get(video_id)
+        if existing is not None:
+            return await existing
+
+        future: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
+        _stream_url_inflight[video_id] = future
+
+    try:
+        async with _stream_url_resolve_semaphore:
+            url = await resolve_youtube_audio_stream_url(video_id)
+            if url:
+                _stream_url_cache[video_id] = (url, _time.time() + _STREAM_URL_TTL)
+            future.set_result(url)
+            return url
+    except Exception as e:
+        future.set_exception(e)
+        raise
+    finally:
+        async with _stream_url_lock:
+            _stream_url_inflight.pop(video_id, None)
+
+
 async def _prefetch_stream_url(video_id: str) -> str | None:
     """Resolve and cache a stream URL without downloading (for prefetch)."""
     import time as _time
@@ -444,10 +470,7 @@ async def _prefetch_stream_url(video_id: str) -> str | None:
     mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
     if mp3_path.exists() and mp3_path.stat().st_size > 10240:
         return None
-    url = await resolve_youtube_audio_stream_url(video_id)
-    if url:
-        _stream_url_cache[video_id] = (url, _time.time() + _STREAM_URL_TTL)
-    return url
+    return await _resolve_stream_url_cached(video_id)
 
 
 @app.post("/api/prefetch")
@@ -460,17 +483,19 @@ async def prefetch_tracks(
     if not init_data or verify_init_data(init_data) is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
     body = await request.json()
-    video_ids = body.get("video_ids", [])[:5]  # max 5 at once
-    # Resolve in parallel, fire-and-forget
+    video_ids = body.get("video_ids", [])[:2]  # keep prefetch cheap on small containers
     results = {}
-    if video_ids:
-        tasks = [_prefetch_stream_url(vid) for vid in video_ids if isinstance(vid, str)]
-        resolved = await asyncio.gather(*tasks, return_exceptions=True)
-        for vid, url in zip(video_ids, resolved):
+    for vid in video_ids:
+        if not isinstance(vid, str):
+            continue
+        try:
+            url = await _prefetch_stream_url(vid)
             if isinstance(url, str):
                 results[vid] = "ready"
             else:
                 results[vid] = "cached" if (settings.DOWNLOAD_DIR / f"{vid}.mp3").exists() else "pending"
+        except Exception:
+            results[vid] = "pending"
     return {"prefetched": results}
 
 

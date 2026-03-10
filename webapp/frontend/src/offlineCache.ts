@@ -171,16 +171,26 @@ function backgroundCache(videoId: string, apiUrl: string) {
 }
 
 // Prefetch stream URLs for upcoming tracks (tells backend to resolve URLs in advance)
+const _prefetchRequestedUntil = new Map<string, number>();
 export async function prefetchTracks(videoIds: string[]): Promise<void> {
   if (!videoIds.length) return;
   try {
+    const now = Date.now();
+    const filtered = videoIds
+      .filter((id) => typeof id === "string" && id.length > 0)
+      .filter((id) => (_prefetchRequestedUntil.get(id) || 0) < now)
+      .slice(0, 2);
+    if (!filtered.length) return;
+
+    filtered.forEach((id) => _prefetchRequestedUntil.set(id, now + 2 * 60 * 1000));
+
     await fetch("/api/prefetch", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
       },
-      body: JSON.stringify({ video_ids: videoIds }),
+      body: JSON.stringify({ video_ids: filtered }),
     });
   } catch {}
 }
