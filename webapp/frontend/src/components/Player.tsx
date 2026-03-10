@@ -274,13 +274,6 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   };
 
   const qualityLabel = quality === "auto" ? "Auto" : `${quality} kbps`;
-  const statusBadges = (warm = false) => (
-    <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-      {isPremium && <AudioBadge label="Premium" active warm={warm} />}
-      {isAdmin && <AudioBadge label="Admin" active warm={warm} />}
-    </div>
-  );
-
   const audioControlsPanel = (warm = false) => canUseAudioControls ? (
     <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
@@ -492,7 +485,6 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             text={track ? `${track.artist}  ·  ${track.duration_fmt}  ·  ${qualityLabel}` : "—"}
             style={{ fontSize: 13, color: "#c8a882", marginTop: 4 }}
           />
-          {statusBadges(true)}
         </div>
 
         {/* Seek slider — warm */}
@@ -889,7 +881,6 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           style={{}}
         />
       </div>
-      {statusBadges(false)}
 
       {/* Seek slider - improved touch area */}
       {track && (
