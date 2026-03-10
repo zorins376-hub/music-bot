@@ -30,6 +30,8 @@ export function App() {
   const preloadRef = useRef<HTMLAudioElement | null>(null);
   const [accentColor, setAccentColor] = useState("rgb(124, 77, 255)");
   const [accentColorAlpha, setAccentColorAlpha] = useState("rgba(124, 77, 255, 0.4)");
+  const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null);
+  const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -137,11 +139,47 @@ export function App() {
 
   useEffect(() => {
     if (userId) fetchPlayerState(userId).then(setState).catch(() => {});
+    // Handle deep link from share: startapp=play_VIDEOID
+    const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    if (startParam && startParam.startsWith("play_")) {
+      const videoId = startParam.slice(5);
+      if (videoId) {
+        sendAction("play", videoId).then(setState).catch(() => {});
+      }
+    }
   }, [userId]);
   useEffect(() => {
     elapsedRef.current = 0;
     setElapsed(0);
   }, [state.current_track?.video_id]);
+
+  // Sleep Timer countdown
+  useEffect(() => {
+    if (!sleepTimerEnd) { setSleepRemaining(null); return; }
+    const tick = () => {
+      const left = Math.max(0, Math.round((sleepTimerEnd - Date.now()) / 1000));
+      setSleepRemaining(left);
+      if (left <= 0) {
+        setSleepTimerEnd(null);
+        setSleepRemaining(null);
+        // Pause playback
+        if (audioRef.current) audioRef.current.pause();
+        sendAction("pause").then(setState).catch(() => {});
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [sleepTimerEnd]);
+
+  const handleSleepTimer = useCallback((minutes: number | null) => {
+    if (minutes === null) {
+      setSleepTimerEnd(null);
+      setSleepRemaining(null);
+    } else {
+      setSleepTimerEnd(Date.now() + minutes * 60 * 1000);
+    }
+  }, []);
 
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number) => {
@@ -207,7 +245,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}

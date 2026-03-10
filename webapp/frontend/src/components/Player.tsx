@@ -8,6 +8,8 @@ interface Props {
   onShowLyrics: (trackId: string) => void;
   accentColor?: string;
   accentColorAlpha?: string;
+  onSleepTimer?: (minutes: number | null) => void;
+  sleepTimerRemaining?: number | null;
 }
 
 // --- Haptic Feedback Helper ---
@@ -149,12 +151,13 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)" }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining }: Props) {
   const track = state.current_track;
   const duration = track?.duration ?? 0;
   const [elapsed, setElapsed] = useState(0);
   const [seeking, setSeeking] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
+  const [showSleepMenu, setShowSleepMenu] = useState(false);
   const intervalRef = useRef<number | null>(null);
 
   // Swipe tracking
@@ -178,6 +181,21 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       const newState = await toggleFavorite(track.video_id);
       setIsLiked(newState);
     } catch {}
+  };
+
+  const handleShare = () => {
+    if (!track) return;
+    haptic("medium");
+    const text = `🎵 ${track.title} — ${track.artist}`;
+    const url = `https://t.me/TSmymusicbot_bot/app?startapp=play_${track.video_id}`;
+    try {
+      window.Telegram?.WebApp?.openTelegramLink?.(
+        `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
+      );
+    } catch {
+      // Fallback
+      window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, "_blank");
+    }
   };
 
   const handleTouchStart = (e: TouchEvent) => {
@@ -336,29 +354,29 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
         </button>
       </div>
 
-      {/* Lyrics & Like buttons */}
+      {/* Lyrics, Like, Share, Sleep buttons */}
       {track && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 24 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 24, flexWrap: "wrap" }}>
           <button
             onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
             style={{
-              padding: "8px 20px",
+              padding: "8px 16px",
               borderRadius: 20,
               border: "1px solid var(--tg-theme-hint-color, #555)",
               background: "transparent",
               color: "var(--tg-theme-text-color, #eee)",
-              fontSize: 14,
+              fontSize: 13,
               cursor: "pointer",
               display: "inline-flex",
               alignItems: "center",
             }}
           >
-            <IconLyrics /> Текст песни
+            <IconLyrics /> Текст
           </button>
           <button
             onClick={handleLikeToggle}
             style={{
-              padding: "8px 16px",
+              padding: "8px 14px",
               borderRadius: 20,
               border: `1px solid ${isLiked ? "#ff4081" : "var(--tg-theme-hint-color, #555)"}`,
               background: isLiked ? "rgba(255, 64, 129, 0.1)" : "transparent",
@@ -371,6 +389,105 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           >
             <IconHeart filled={isLiked} />
           </button>
+          <button
+            onClick={handleShare}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 20,
+              border: "1px solid var(--tg-theme-hint-color, #555)",
+              background: "transparent",
+              color: "var(--tg-theme-text-color, #eee)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+            </svg>
+          </button>
+          <button
+            onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 20,
+              border: `1px solid ${sleepTimerRemaining ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
+              background: sleepTimerRemaining ? `${accentColorAlpha}` : "transparent",
+              color: sleepTimerRemaining ? accentColor : "var(--tg-theme-text-color, #eee)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              transition: "all 0.3s ease",
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+            {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : ""}
+          </button>
+        </div>
+      )}
+
+      {/* Sleep Timer Menu */}
+      {showSleepMenu && (
+        <div style={{
+          marginTop: 12,
+          padding: 12,
+          borderRadius: 16,
+          background: "rgba(30, 30, 50, 0.9)",
+          backdropFilter: "blur(16px)",
+          display: "flex",
+          gap: 8,
+          justifyContent: "center",
+          flexWrap: "wrap",
+        }}>
+          {[5, 15, 30, 45, 60].map((m) => (
+            <button
+              key={m}
+              onClick={() => {
+                haptic("medium");
+                onSleepTimer?.(m);
+                setShowSleepMenu(false);
+              }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 12,
+                border: "none",
+                background: "rgba(255,255,255,0.1)",
+                color: "var(--tg-theme-text-color, #eee)",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              {m} мин
+            </button>
+          ))}
+          {sleepTimerRemaining && (
+            <button
+              onClick={() => {
+                haptic("light");
+                onSleepTimer?.(null);
+                setShowSleepMenu(false);
+              }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 12,
+                border: "none",
+                background: "rgba(255, 64, 129, 0.2)",
+                color: "#ff4081",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Отмена
+            </button>
+          )}
         </div>
       )}
     </div>
