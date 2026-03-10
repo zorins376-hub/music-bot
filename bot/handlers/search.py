@@ -28,6 +28,8 @@ from bot.services.yandex_provider import download_yandex, search_yandex, is_yand
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 from bot.services.provider_health import record_provider_event
 from bot.services.search_engine import deduplicate_results, suggest_query
+from bot.services.analytics import track_event
+from bot.services.share_links import create_share_link, resolve_share_link
 from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb
 from bot.utils import fmt_duration
 
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 _TRACK_SHARE_TTL = 30 * 24 * 3600  # 30 days
+_DOWNLOAD_LOCK_TTL = 10
 
 
 def _classify_download_error(err_msg: str) -> str:
@@ -113,6 +116,32 @@ async def _safe_edit(msg, text: str) -> None:
     """Edit message text, ignoring any Telegram errors."""
     try:
         await msg.edit_text(text)
+    except Exception:
+        pass
+
+
+def _download_lock_key(user_id: int, track_id: str) -> str:
+    return f"download:{user_id}:{track_id}"
+
+
+async def _acquire_download_lock(user_id: int, track_id: str, ttl: int = _DOWNLOAD_LOCK_TTL) -> bool:
+    """Acquire a short Redis lock for a user+track download flow.
+
+    Fail-open if Redis is unavailable to avoid blocking playback.
+    """
+    try:
+        key = _download_lock_key(user_id, track_id)
+        acquired = await cache.redis.set(key, "1", ex=ttl, nx=True)
+        return bool(acquired)
+    except Exception:
+        return True
+
+
+async def _release_download_lock(user_id: int, track_id: str) -> None:
+    """Release user+track download lock (best-effort)."""
+    try:
+        key = _download_lock_key(user_id, track_id)
+        await cache.redis.delete(key)
     except Exception:
         pass
 
@@ -751,168 +780,175 @@ async def handle_track_select(
     track_info = results[callback_data.i]
     _share_q = f"{track_info.get('uploader', '')} - {track_info.get('title', '')}"
     video_id = track_info["video_id"]
+    if not await _acquire_download_lock(user.id, video_id):
+        return
+
     default_br = int(await _get_bot_setting("default_bitrate", "192"))
     bitrate = int(user.quality) if user.quality in ("128", "192", "320") else _smart_bitrate(
         track_info.get("source"), track_info.get("duration"), default_br
     )
     _af = _is_ad_free(user)
 
-    # If track already has a file_id from local DB (channel tracks)
-    local_fid = track_info.get("file_id")
-    if local_fid:
-        caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-        await callback.message.answer_audio(
-            audio=local_fid,
-            title=track_info["title"],
-            performer=track_info["uploader"],
-            duration=int(track_info["duration"]) if track_info.get("duration") else None,
-            caption=caption,
-        )
-        tid = await _post_download(user.id, track_info, local_fid, bitrate)
-        if is_group:
-            await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
-        else:
-            await callback.message.answer(
-                t(lang, "rate_track"),
-                reply_markup=_feedback_keyboard(tid, _share_q),
-            )
-        return
-
-    # Проверяем Redis кэш
-    file_id = await cache.get_file_id(video_id, bitrate)
-    if file_id:
-        cache_hits.inc()
-        caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-        await callback.message.answer_audio(
-            audio=file_id,
-            title=track_info["title"],
-            performer=track_info["uploader"],
-            duration=int(track_info["duration"]) if track_info.get("duration") else None,
-            caption=caption,
-        )
-        tid = await _post_download(user.id, track_info, file_id, bitrate)
-        if is_group:
-            await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
-        else:
-            await callback.message.answer(
-                t(lang, "rate_track"),
-                reply_markup=_feedback_keyboard(tid, _share_q),
-            )
-        return
-
-    status = await callback.message.answer(t(lang, "downloading"))
-    await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
-    cache_misses.inc()
-
-    progress_cb = _make_progress_cb(status, lang)
-    mp3_path: Path | None = None
-    _dl_id = uuid.uuid4().hex[:8]
-
     try:
-        if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
-            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
-            await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
-        elif track_info.get("source") == "vk" and track_info.get("vk_url"):
-            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
-            await download_vk(track_info["vk_url"], mp3_path)
-        elif track_info.get("source") == "spotify":
-            mp3_path = await _download_spotify_track(track_info, bitrate)
-        else:
-            dl_vid = video_id
-            if not _is_valid_yt_id(video_id):
-                dl_vid = await _resolve_yt_video_id(track_info)
-                if not dl_vid:
-                    await status.edit_text(t(lang, "error_download"))
-                    return
-            mp3_path = await download_track(dl_vid, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
-        file_size = mp3_path.stat().st_size
 
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
-            cleanup_file(mp3_path)
-            mp3_path = None
-            await status.edit_text(t(lang, "error_too_large"))
-            try:
-                dl_vid_fb = video_id if _is_valid_yt_id(video_id) else (await _resolve_yt_video_id(track_info) or video_id)
-                mp3_path = await download_track(dl_vid_fb, 128, dl_id=_dl_id)
-                bitrate = 128
-                file_size = mp3_path.stat().st_size
-            except Exception:
-                mp3_path = None
-                await status.edit_text(t(lang, "error_too_large_final"))
-                return
-            if file_size > settings.MAX_FILE_SIZE:
+        # If track already has a file_id from local DB (channel tracks)
+        local_fid = track_info.get("file_id")
+        if local_fid:
+            caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
+            await callback.message.answer_audio(
+                audio=local_fid,
+                title=track_info["title"],
+                performer=track_info["uploader"],
+                duration=int(track_info["duration"]) if track_info.get("duration") else None,
+                caption=caption,
+            )
+            tid = await _post_download(user.id, track_info, local_fid, bitrate)
+            if is_group:
+                await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+            else:
+                await callback.message.answer(
+                    t(lang, "rate_track"),
+                    reply_markup=_feedback_keyboard(tid, _share_q),
+                )
+            return
+
+        # Проверяем Redis кэш
+        file_id = await cache.get_file_id(video_id, bitrate)
+        if file_id:
+            cache_hits.inc()
+            caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
+            await callback.message.answer_audio(
+                audio=file_id,
+                title=track_info["title"],
+                performer=track_info["uploader"],
+                duration=int(track_info["duration"]) if track_info.get("duration") else None,
+                caption=caption,
+            )
+            tid = await _post_download(user.id, track_info, file_id, bitrate)
+            if is_group:
+                await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+            else:
+                await callback.message.answer(
+                    t(lang, "rate_track"),
+                    reply_markup=_feedback_keyboard(tid, _share_q),
+                )
+            return
+
+        status = await callback.message.answer(t(lang, "downloading"))
+        await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+        cache_misses.inc()
+
+        progress_cb = _make_progress_cb(status, lang)
+        mp3_path: Path | None = None
+        _dl_id = uuid.uuid4().hex[:8]
+
+        try:
+            if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
+                mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
+                await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
+            elif track_info.get("source") == "vk" and track_info.get("vk_url"):
+                mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
+                await download_vk(track_info["vk_url"], mp3_path)
+            elif track_info.get("source") == "spotify":
+                mp3_path = await _download_spotify_track(track_info, bitrate)
+            else:
+                dl_vid = video_id
+                if not _is_valid_yt_id(video_id):
+                    dl_vid = await _resolve_yt_video_id(track_info)
+                    if not dl_vid:
+                        await status.edit_text(t(lang, "error_download"))
+                        return
+                mp3_path = await download_track(dl_vid, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
+            file_size = mp3_path.stat().st_size
+
+            if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
                 cleanup_file(mp3_path)
                 mp3_path = None
-                await status.edit_text(t(lang, "error_too_large_final"))
-                return
+                await status.edit_text(t(lang, "error_too_large"))
+                try:
+                    dl_vid_fb = video_id if _is_valid_yt_id(video_id) else (await _resolve_yt_video_id(track_info) or video_id)
+                    mp3_path = await download_track(dl_vid_fb, 128, dl_id=_dl_id)
+                    bitrate = 128
+                    file_size = mp3_path.stat().st_size
+                except Exception:
+                    mp3_path = None
+                    await status.edit_text(t(lang, "error_too_large_final"))
+                    return
+                if file_size > settings.MAX_FILE_SIZE:
+                    cleanup_file(mp3_path)
+                    mp3_path = None
+                    await status.edit_text(t(lang, "error_too_large_final"))
+                    return
 
-        sent = await callback.message.answer_audio(
-            audio=FSInputFile(mp3_path),
-            title=track_info["title"],
-            performer=track_info["uploader"],
-            duration=int(track_info["duration"]) if track_info.get("duration") else None,
-            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
-        )
-
-        await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
-        tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
-        await status.delete()
-        if is_group:
-            await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
-        else:
-            await callback.message.answer(
-                t(lang, "rate_track"),
-                reply_markup=_feedback_keyboard(tid, _share_q),
+            sent = await callback.message.answer_audio(
+                audio=FSInputFile(mp3_path),
+                title=track_info["title"],
+                performer=track_info["uploader"],
+                duration=int(track_info["duration"]) if track_info.get("duration") else None,
+                caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
             )
 
-    except Exception as e:
-        err_msg = str(e)
-        logger.error("Download error for %s: %s", video_id, err_msg)
-        # C-07: Auto-retry with a different source
-        failed_source = track_info.get("source", "youtube")
-        retry_query = f"{track_info.get('uploader', '')} {track_info.get('title', '')}".strip()
-        if retry_query and failed_source != "youtube":
-            try:
-                await status.edit_text(f"⚠️ {failed_source} недоступен, ищу альтернативу...")
-                alt_results = await search_tracks(retry_query, max_results=1, source="youtube")
-                if alt_results:
-                    retry_id = uuid.uuid4().hex[:8]
-                    retry_path = await download_track(alt_results[0]["video_id"], bitrate, dl_id=retry_id)
-                    try:
-                        sent = await callback.message.answer_audio(
-                            audio=FSInputFile(retry_path),
-                            title=track_info["title"],
-                            performer=track_info["uploader"],
-                            duration=int(track_info["duration"]) if track_info.get("duration") else None,
-                            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
-                        )
-                        await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
-                        tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
-                        await status.delete()
-                        if not is_group:
-                            await callback.message.answer(
-                                t(lang, "rate_track"),
-                                reply_markup=_feedback_keyboard(tid, _share_q),
+            await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+            tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+            await status.delete()
+            if is_group:
+                await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+            else:
+                await callback.message.answer(
+                    t(lang, "rate_track"),
+                    reply_markup=_feedback_keyboard(tid, _share_q),
+                )
+
+        except Exception as e:
+            err_msg = str(e)
+            logger.error("Download error for %s: %s", video_id, err_msg)
+            # C-07: Auto-retry with a different source
+            failed_source = track_info.get("source", "youtube")
+            retry_query = f"{track_info.get('uploader', '')} {track_info.get('title', '')}".strip()
+            if retry_query and failed_source != "youtube":
+                try:
+                    await status.edit_text(f"⚠️ {failed_source} недоступен, ищу альтернативу...")
+                    alt_results = await search_tracks(retry_query, max_results=1, source="youtube")
+                    if alt_results:
+                        retry_id = uuid.uuid4().hex[:8]
+                        retry_path = await download_track(alt_results[0]["video_id"], bitrate, dl_id=retry_id)
+                        try:
+                            sent = await callback.message.answer_audio(
+                                audio=FSInputFile(retry_path),
+                                title=track_info["title"],
+                                performer=track_info["uploader"],
+                                duration=int(track_info["duration"]) if track_info.get("duration") else None,
+                                caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
                             )
-                        return
-                    finally:
-                        cleanup_file(retry_path)
-            except Exception as retry_err:
-                logger.debug("Auto-retry also failed: %s", retry_err)
-        # Add a retry button so the user can try again
-        retry_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text="🔄 " + t(lang, "retry_btn"),
-                callback_data=TrackCallback(sid=session_id, i=idx).pack(),
-            )]
-        ])
-        await status.edit_text(
-            t(lang, _classify_download_error(err_msg)),
-            reply_markup=retry_kb,
-        )
+                            await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+                            tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+                            await status.delete()
+                            if not is_group:
+                                await callback.message.answer(
+                                    t(lang, "rate_track"),
+                                    reply_markup=_feedback_keyboard(tid, _share_q),
+                                )
+                            return
+                        finally:
+                            cleanup_file(retry_path)
+                except Exception as retry_err:
+                    logger.debug("Auto-retry also failed: %s", retry_err)
+            # Add a retry button so the user can try again
+            retry_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🔄 " + t(lang, "retry_btn"),
+                    callback_data=TrackCallback(sid=callback_data.sid, i=callback_data.i).pack(),
+                )]
+            ])
+            await status.edit_text(
+                t(lang, _classify_download_error(err_msg)),
+                reply_markup=retry_kb,
+            )
+        finally:
+            if mp3_path:
+                cleanup_file(mp3_path)
     finally:
-        if mp3_path:
-            cleanup_file(mp3_path)
+        await _release_download_lock(user.id, video_id)
 
 
 async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: int) -> int:
@@ -1065,10 +1101,13 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
         return
 
     if callback_data.act == "mk":
-        share_id = secrets.token_urlsafe(8)
-        payload = _json.dumps({"track_id": track.id, "user_id": user.id})
         try:
-            await cache.redis.setex(f"share:track:{share_id}", _TRACK_SHARE_TTL, payload)
+            share_id = await create_share_link(
+                owner_id=user.id,
+                entity_type="track",
+                entity_id=track.id,
+                ttl_seconds=_TRACK_SHARE_TTL,
+            )
         except Exception:
             await callback.answer("⚠️", show_alert=True)
             return
@@ -1085,6 +1124,7 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
             t(lang, "share_track_created", title=track.title or "?", link=link),
             parse_mode="HTML",
         )
+        await track_event(user.id, "track_share", track_id=track.id, share_id=share_id)
         return
 
     # act == "dl"
@@ -1143,21 +1183,13 @@ async def show_shared_track(message: Message, share_id: str) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
 
-    try:
-        raw = await cache.redis.get(f"share:track:{share_id}")
-    except Exception:
-        raw = None
-
-    if not raw:
+    data = await resolve_share_link(share_id)
+    if not data or data.get("entity_type") != "track":
         await message.answer(t(lang, "share_track_expired"))
         return
 
-    try:
-        data = _json.loads(raw)
-        track_id = int(data.get("track_id", 0))
-    except Exception:
-        await message.answer(t(lang, "share_track_expired"))
-        return
+    track_id = int(data.get("entity_id") or 0)
+    await track_event(user.id, "shared_track_open", share_id=share_id, track_id=track_id)
 
     from bot.models.base import async_session
     from bot.models.track import Track
@@ -1229,21 +1261,25 @@ async def handle_lyrics(callback: CallbackQuery, callback_data: LyricsCb) -> Non
 
     lines = lyrics_data["lines"]
     url = lyrics_data.get("url", "")
-    text_parts = [f"📝 <b>{artist} — {title}</b>\n"]
-    text_parts.extend(lines)
-    if url:
-        text_parts.append(f"\n<a href=\"{url}\">{t(lang, 'lyrics_full_link')}</a>")
+    footer = f"<a href=\"{url}\">{t(lang, 'lyrics_full_link')}</a>" if url else ""
+    chunks = _split_long_text_lines(
+        header=f"📝 <b>{artist} — {title}</b>",
+        lines=lines,
+        footer=footer,
+        max_len=3900,
+    )
 
     translate_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🌐 Перевод", callback_data=LyrTransCb(tid=callback_data.tid).pack()),
     ]])
 
-    await callback.message.answer(
-        "\n".join(text_parts),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=translate_kb,
-    )
+    for index, chunk in enumerate(chunks):
+        await callback.message.answer(
+            chunk,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=translate_kb if index == 0 else None,
+        )
 
 
 @router.callback_query(LyrTransCb.filter())
@@ -1287,13 +1323,48 @@ async def handle_lyrics_translate(callback: CallbackQuery, callback_data: LyrTra
         await callback.message.answer(t(lang, "lyrics_translate_fail"))
         return
 
-    text_parts = [f"🌐 <b>{artist} — {title_str}</b> ({target.upper()})\n"]
-    text_parts.extend(translated)
-
-    await callback.message.answer(
-        "\n".join(text_parts),
-        parse_mode="HTML",
+    chunks = _split_long_text_lines(
+        header=f"🌐 <b>{artist} — {title_str}</b> ({target.upper()})",
+        lines=translated,
+        max_len=3900,
     )
+    for chunk in chunks:
+        await callback.message.answer(
+            chunk,
+            parse_mode="HTML",
+        )
+
+
+def _split_long_text_lines(
+    header: str,
+    lines: list[str],
+    footer: str = "",
+    max_len: int = 3900,
+) -> list[str]:
+    chunks: list[str] = []
+    current = (header or "").strip()
+
+    for raw_line in lines or []:
+        line = str(raw_line)
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > max_len and current:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+
+    if footer:
+        candidate = f"{current}\n\n{footer}" if current else footer
+        if len(candidate) > max_len and current:
+            chunks.append(current)
+            current = footer
+        else:
+            current = candidate
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 @router.callback_query(SimilarCb.filter())

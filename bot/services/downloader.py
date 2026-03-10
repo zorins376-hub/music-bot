@@ -9,12 +9,20 @@ from pathlib import Path
 import yt_dlp
 
 from bot.config import settings, _COOKIES_PATH
-from bot.utils import fmt_duration as _fmt_duration
+from bot.utils import fmt_duration as _utils_fmt_duration
 
 logger = logging.getLogger(__name__)
 
 # Dedicated thread pool for yt-dlp I/O operations
 _ytdl_pool = ThreadPoolExecutor(max_workers=settings.YTDL_WORKERS, thread_name_prefix="ytdl")
+
+
+def _fmt_duration(seconds: int | None) -> str:
+    if seconds is None or seconds < 0:
+        return "-:--"
+    if seconds == 0:
+        return "0:00"
+    return _utils_fmt_duration(seconds)
 
 
 def log_runtime_info() -> None:

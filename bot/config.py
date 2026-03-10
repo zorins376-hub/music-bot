@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     # ── Redis ─────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://redis:6379/0" if _IN_DOCKER else "redis://localhost:6379/0"
+    REDIS_MAX_OPS_PER_SEC: int = 0  # 0 = disabled
+    REDIS_BURST: int = 50
 
     # ── Webhook ───────────────────────────────────────────────────────────
     USE_WEBHOOK: bool = False
@@ -89,6 +91,9 @@ class Settings(BaseSettings):
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
     YANDEX_TOKENS: Optional[str] = None  # пул токенов через запятую (ротация)
+    YANDEX_TOKEN_EXPIRES_AT: Optional[str] = None  # single token expiry (unix ts / ISO8601)
+    YANDEX_TOKENS_EXPIRES_AT: Optional[str] = None  # comma-separated expiries aligned with YANDEX_TOKENS
+    YANDEX_ALERT_TELEGRAM: bool = True
     # ── VK Music ───────────────────────────────────────────────────────────────
     VK_TOKEN: Optional[str] = None       # Kate Mobile / VK Android token
     VK_LOGIN: Optional[str] = None
@@ -96,6 +101,11 @@ class Settings(BaseSettings):
 
     # ── OpenAI (Prompt-to-Playlist) ──────────────────────────────────────
     OPENAI_API_KEY: Optional[str] = None
+
+    # ── Analytics export ───────────────────────────────────────────────────
+    ANALYTICS_EXPORT_URL: Optional[str] = None
+    ANALYTICS_EXPORT_TOKEN: Optional[str] = None
+    ANALYTICS_EXPORT_TIMEOUT_SEC: float = 2.0
 
     # ── Proxy pool ────────────────────────────────────────────────────────
     PROXY_POOL: Optional[str] = None  # comma-separated: socks5://ip:port,http://ip:port
@@ -115,9 +125,29 @@ class Settings(BaseSettings):
     # ── TMA Player (1.1) ─────────────────────────────────────────────────
     TMA_URL: Optional[str] = None  # e.g. https://example.com/tma/
 
-    # ── ML Recommendations (3.1) ─────────────────────────────────────────
-    ML_MODEL_PATH: str = str(_BASE / "data" / "models")
-    ML_RETRAIN_HOUR: int = 3  # UTC hour for nightly retraining
+    # ── ML Recommendations ────────────────────────────────────────────────
+    ML_ENABLED: bool = False                     # Master switch: ML on/off
+    ML_AB_TEST_ENABLED: bool = False             # A/B test mode
+    ML_MODEL_DIR: Path = _BASE / "data" / "models"
+    ML_RETRAIN_HOUR: int = 4                     # UTC hour for nightly training
+    ML_MIN_INTERACTIONS: int = 100               # Minimum interactions to train
+    ML_MIN_USERS: int = 10                       # Minimum users to train ALS
+    ML_ALS_FACTORS: int = 64                     # ALS embedding dimension
+    ML_ALS_ITERATIONS: int = 15                  # ALS training iterations
+    ML_ALS_REGULARIZATION: float = 0.01
+    ML_W2V_VECTOR_SIZE: int = 64                 # Word2Vec embedding dimension
+    ML_W2V_WINDOW: int = 5
+    ML_W2V_EPOCHS: int = 10
+    ML_SESSION_GAP_MINUTES: int = 30             # Gap between sessions
+    ML_SCORER_W_ALS: float = 0.40                # ALS weight in hybrid scorer
+    ML_SCORER_W_EMB: float = 0.25                # Embedding weight
+    ML_SCORER_W_POP: float = 0.15                # Popularity weight
+    ML_SCORER_W_FRESH: float = 0.10              # Freshness weight
+    ML_SCORER_W_TIME: float = 0.10               # Time-of-day weight
+    ML_MAX_PER_ARTIST: int = 2                   # Diversity: max tracks per artist
+    ML_MAX_PER_GENRE: int = 3                    # Diversity: max tracks per genre
+    ML_COLD_START_THRESHOLD: int = 5             # Min plays for ML (vs pure content-based)
+    ML_RECO_CACHE_TTL: int = 3600                # ML reco cache TTL (seconds)
 
     # ── Bot Fleet / Sharding (5.2) ────────────────────────────────────────
     NODE_ID: Optional[str] = None  # e.g. "node-1"
@@ -128,6 +158,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+config = settings
 
 settings.DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)

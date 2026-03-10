@@ -12,11 +12,37 @@ import itertools
 import logging
 import re
 import tempfile
+import aiohttp
+from datetime import datetime, timezone
 from pathlib import Path
 
 from bot.config import settings
+from bot.services.cache import cache
 
 logger = logging.getLogger(__name__)
+
+_PROACTIVE_REFRESH_SECONDS = 3600
+_ADMIN_ALERT_THROTTLE_SECONDS = 900
+_ADMIN_ALERT_THROTTLE_KEY = "alert:yandex_token_refresh_fail:throttle"
+
+
+def _parse_expiry(raw: str | None) -> int | None:
+    if not raw:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    try:
+        if value.isdigit():
+            return int(value)
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return None
 
 # ── Token pool (round-robin) ──────────────────────────────────────────────
 
@@ -35,8 +61,108 @@ def _load_tokens() -> list[str]:
     return tokens
 
 
+def _load_token_expiries(tokens: list[str]) -> dict[str, int]:
+    expiries: dict[str, int] = {}
+
+    pool_raw = getattr(settings, "YANDEX_TOKENS_EXPIRES_AT", None) or ""
+    pool_exp = [x.strip() for x in pool_raw.split(",")] if pool_raw else []
+    for idx, token in enumerate(tokens):
+        if idx < len(pool_exp):
+            ts = _parse_expiry(pool_exp[idx])
+            if ts:
+                expiries[token] = ts
+
+    single = (settings.YANDEX_MUSIC_TOKEN or "").strip()
+    single_exp = _parse_expiry(getattr(settings, "YANDEX_TOKEN_EXPIRES_AT", None))
+    if single and single_exp:
+        expiries[single] = single_exp
+
+    return expiries
+
+
 _tokens = _load_tokens()
 _token_cycle = itertools.cycle(_tokens) if _tokens else None
+_token_expiries = _load_token_expiries(_tokens)
+
+
+def _token_expires_at(token: str) -> int | None:
+    return _token_expiries.get(token)
+
+
+def _is_token_expiring_soon(token: str, *, now_ts: int | None = None) -> bool:
+    expires_at = _token_expires_at(token)
+    if not expires_at:
+        return False
+    if now_ts is None:
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+    return expires_at - now_ts <= _PROACTIVE_REFRESH_SECONDS
+
+
+async def _admin_alert(text: str) -> None:
+    should_send = True
+    try:
+        throttle_ok = await cache.redis.set(
+            _ADMIN_ALERT_THROTTLE_KEY,
+            "1",
+            ex=_ADMIN_ALERT_THROTTLE_SECONDS,
+            nx=True,
+        )
+        should_send = bool(throttle_ok)
+        await cache.redis.setex("alert:yandex_token_refresh_fail", _ADMIN_ALERT_THROTTLE_SECONDS, text)
+    except Exception:
+        pass
+
+    if should_send:
+        await _send_admin_telegram_alert(text)
+
+    logger.error(text)
+
+
+async def _send_admin_telegram_alert(text: str) -> None:
+    if not getattr(settings, "YANDEX_ALERT_TELEGRAM", True):
+        return
+    if not settings.BOT_TOKEN or not settings.ADMIN_IDS:
+        return
+
+    url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+    msg = f"⚠️ Yandex token alert\n\n{text}"
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=4)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for admin_id in settings.ADMIN_IDS:
+                try:
+                    await session.post(
+                        url,
+                        json={
+                            "chat_id": int(admin_id),
+                            "text": msg,
+                        },
+                    )
+                except Exception:
+                    continue
+    except Exception:
+        return
+
+
+async def _refresh_token_if_needed(token: str) -> str | None:
+    """Return a usable token.
+
+    If current token expires in <= 1 hour, rotate to another token that is not
+    expiring soon. If no such token exists, raise admin alert and return None.
+    """
+    if not _is_token_expiring_soon(token):
+        return token
+
+    # Drop cached client proactively so stale auth state is not reused.
+    _clients.pop(token, None)
+
+    for candidate in _tokens:
+        if candidate != token and not _is_token_expiring_soon(candidate):
+            return candidate
+
+    await _admin_alert("Yandex token refresh failed: all configured tokens expire within 1 hour")
+    return None
 
 
 def _next_token() -> str | None:
@@ -118,6 +244,9 @@ async def search_yandex(query: str, limit: int = 5) -> list[dict]:
     token = _next_token()
     if not token:
         return []
+    token = await _refresh_token_if_needed(token)
+    if not token:
+        return []
     try:
         from yandex_music import ClientAsync  # noqa: F401
     except ImportError:
@@ -157,6 +286,9 @@ async def download_yandex(track_id: int, dest: Path, bitrate: int = 320, token: 
         token = _next_token()
     if not token:
         raise RuntimeError("No Yandex token configured")
+    token = await _refresh_token_if_needed(token)
+    if not token:
+        raise RuntimeError("No valid Yandex token available")
     try:
         from yandex_music import ClientAsync  # noqa: F401
     except ImportError:
@@ -220,6 +352,9 @@ async def resolve_yandex_url(url: str) -> dict | None:
     token = _next_token()
     if not token:
         logger.warning("resolve_yandex_url: no Yandex token configured")
+        return None
+    token = await _refresh_token_if_needed(token)
+    if not token:
         return None
     try:
         from yandex_music import ClientAsync  # noqa: F401

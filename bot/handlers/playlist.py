@@ -25,6 +25,7 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.playlist import Playlist, PlaylistTrack
 from bot.models.track import Track
+from bot.services.share_links import create_share_link, resolve_share_link
 from bot.callbacks import AddToPlCb
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track
@@ -137,6 +138,14 @@ def _playlist_view_kb(
 @router.message(Command("playlist"))
 async def cmd_playlist(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
+    text = (message.text or "").strip()
+    parts = text.split(maxsplit=2)
+    if len(parts) >= 2 and parts[1].lower() == "export":
+        if len(parts) < 3 or not parts[2].strip():
+            await message.answer(t(user.language, "pl_export_usage"))
+            return
+        await _export_playlist_by_name(message, user.id, user.language, parts[2].strip())
+        return
     await _show_playlists(message, user.id, user.language, edit=False)
 
 
@@ -461,16 +470,24 @@ async def cb_export(callback: CallbackQuery, callback_data: PlCb) -> None:
         if not pl or pl.user_id != user.id:
             await callback.message.answer(t(user.language, "pl_not_found"))
             return
-        result = await session.execute(
-            select(Track)
-            .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
-            .where(PlaylistTrack.playlist_id == pl.id)
-            .order_by(PlaylistTrack.position)
-        )
-        tracks = list(result.scalars().all())
+        tracks = await _get_playlist_tracks(session, pl.id)
 
+    await _send_playlist_export(callback.message, user.language, pl, tracks)
+
+
+async def _get_playlist_tracks(session, playlist_id: int) -> list[Track]:
+    result = await session.execute(
+        select(Track)
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position)
+    )
+    return list(result.scalars().all())
+
+
+async def _send_playlist_export(message: Message, lang: str, pl: Playlist, tracks: list[Track]) -> None:
     if not tracks:
-        await callback.message.answer(t(user.language, "pl_empty"))
+        await message.answer(t(lang, "pl_empty"))
         return
 
     lines = [f"# {pl.name}\n"]
@@ -480,10 +497,27 @@ async def cb_export(callback: CallbackQuery, callback_data: PlCb) -> None:
 
     txt_content = "\n".join(lines).encode("utf-8")
     safe_name = pl.name.replace(" ", "_")[:30]
-    await callback.message.answer_document(
+    await message.answer_document(
         document=BufferedInputFile(txt_content, filename=f"playlist_{safe_name}.txt"),
-        caption=f"📤 {pl.name} — {len(tracks)} треков",
+        caption=t(lang, "pl_export_caption", name=pl.name, count=len(tracks)),
     )
+
+
+async def _export_playlist_by_name(message: Message, user_id: int, lang: str, playlist_name: str) -> None:
+    async with async_session() as session:
+        pl = await session.scalar(
+            select(Playlist)
+            .where(
+                Playlist.user_id == user_id,
+                func.lower(Playlist.name) == playlist_name.lower(),
+            )
+        )
+        if not pl:
+            await message.answer(t(lang, "pl_not_found"))
+            return
+        tracks = await _get_playlist_tracks(session, pl.id)
+
+    await _send_playlist_export(message, lang, pl, tracks)
 
 
 # ── Add track to playlist (called from search after download) ────────────
@@ -564,8 +598,6 @@ _SHARE_TTL = 30 * 24 * 3600  # 30 days
 @router.callback_query(PlCb.filter(F.act == "shr"))
 async def cb_share_playlist(callback: CallbackQuery, callback_data: PlCb) -> None:
     """Generate a shareable deep-link for a playlist."""
-    from bot.services.cache import cache
-
     await callback.answer()
     user = await get_or_create_user(callback.from_user)
     async with async_session() as session:
@@ -574,10 +606,13 @@ async def cb_share_playlist(callback: CallbackQuery, callback_data: PlCb) -> Non
             await callback.message.answer(t(user.language, "pl_not_found"))
             return
 
-    share_id = secrets.token_urlsafe(8)
-    payload = _json.dumps({"user_id": user.id, "playlist_id": pl.id})
     try:
-        await cache.redis.setex(f"share:{share_id}", _SHARE_TTL, payload)
+        share_id = await create_share_link(
+            owner_id=user.id,
+            entity_type="playlist",
+            entity_id=pl.id,
+            ttl_seconds=_SHARE_TTL,
+        )
     except Exception:
         await callback.message.answer("⚠️ Не удалось создать ссылку.")
         return
@@ -594,23 +629,15 @@ async def cb_share_playlist(callback: CallbackQuery, callback_data: PlCb) -> Non
 
 async def show_shared_playlist(message: Message, share_id: str) -> None:
     """Display a shared playlist to the recipient (called from start.py deep-link)."""
-    from bot.services.cache import cache
-
     user = await get_or_create_user(message.from_user)
     lang = user.language
 
-    try:
-        raw = await cache.redis.get(f"share:{share_id}")
-    except Exception:
-        raw = None
-
-    if not raw:
+    data = await resolve_share_link(share_id)
+    if not data or data.get("entity_type") != "playlist":
         await message.answer(t(lang, "pl_share_expired"))
         return
 
-    data = _json.loads(raw)
-    playlist_id = data["playlist_id"]
-    owner_id = data["user_id"]
+    playlist_id = int(data.get("entity_id") or 0)
 
     async with async_session() as session:
         pl = await session.get(Playlist, playlist_id)

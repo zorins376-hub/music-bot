@@ -160,6 +160,7 @@ class TestCreatePlaylist:
         from bot.handlers.playlist import create_playlist_name
         mock_goc.return_value = _make_user()
         session = AsyncMock()
+        session.add = MagicMock()
         mock_sess.return_value.__aenter__ = AsyncMock(return_value=session)
         mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -333,3 +334,75 @@ class TestAddToPlCb:
         from bot.handlers.playlist import AddToPlCb
         cb = AddToPlCb(tid=42)
         assert cb.pid == 0
+
+
+# ── /playlist export ────────────────────────────────────────────────────
+
+class TestPlaylistExportCommand:
+    @pytest.mark.asyncio
+    @patch("bot.handlers.playlist._export_playlist_by_name", new_callable=AsyncMock)
+    @patch("bot.handlers.playlist.get_or_create_user", new_callable=AsyncMock)
+    async def test_cmd_playlist_export_calls_export_by_name(self, mock_goc, mock_export):
+        from bot.handlers.playlist import cmd_playlist
+        mock_goc.return_value = _make_user(user_id=10)
+        msg = make_message("/playlist export My Mix")
+        msg.text = "/playlist export My Mix"
+
+        await cmd_playlist(msg)
+
+        mock_export.assert_awaited_once_with(msg, 10, "ru", "My Mix")
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.playlist._show_playlists", new_callable=AsyncMock)
+    @patch("bot.handlers.playlist.get_or_create_user", new_callable=AsyncMock)
+    async def test_cmd_playlist_export_requires_name(self, mock_goc, mock_show):
+        from bot.handlers.playlist import cmd_playlist
+        mock_goc.return_value = _make_user(user_id=10)
+        msg = make_message("/playlist export")
+        msg.text = "/playlist export"
+
+        await cmd_playlist(msg)
+
+        msg.answer.assert_called_once()
+        mock_show.assert_not_called()
+
+
+class TestExportPlaylistByName:
+    @pytest.mark.asyncio
+    @patch("bot.handlers.playlist.async_session")
+    async def test_export_playlist_by_name_sends_document(self, mock_sess):
+        from bot.handlers.playlist import _export_playlist_by_name
+
+        pl = _make_playlist(pl_id=5, user_id=1, name="My Mix")
+        tr = _make_track(track_id=1, title="Song", artist="Artist", duration=120)
+
+        scalar_result = MagicMock()
+        scalar_result.scalars.return_value.all.return_value = [tr]
+
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=pl)
+        session.execute = AsyncMock(return_value=scalar_result)
+        mock_sess.return_value.__aenter__ = AsyncMock(return_value=session)
+        mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        msg = make_message("/playlist export My Mix")
+        msg.answer_document = AsyncMock()
+
+        await _export_playlist_by_name(msg, user_id=1, lang="ru", playlist_name="My Mix")
+
+        msg.answer_document.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.playlist.async_session")
+    async def test_export_playlist_by_name_not_found(self, mock_sess):
+        from bot.handlers.playlist import _export_playlist_by_name
+
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=None)
+        mock_sess.return_value.__aenter__ = AsyncMock(return_value=session)
+        mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        msg = make_message("/playlist export Unknown")
+        await _export_playlist_by_name(msg, user_id=1, lang="ru", playlist_name="Unknown")
+
+        msg.answer.assert_called_once()

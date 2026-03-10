@@ -48,6 +48,10 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
     from bot.models.promo_code import PromoCode, PromoActivation  # noqa: F401
     from bot.models.sponsored import SponsoredCampaign, SponsoredEvent  # noqa: F401
     from bot.models.dmca_appeal import DmcaAppeal  # noqa: F401
+    from bot.models.daily_mix import DailyMix, DailyMixTrack  # noqa: F401
+    from bot.models.share_link import ShareLink  # noqa: F401
+    from bot.models.artist_watchlist import ArtistWatchlist  # noqa: F401
+    from bot.models.family_plan import FamilyPlan, FamilyMember, FamilyInvite  # noqa: F401
 
     last_exc: BaseException | None = None
     for attempt in range(1, retries + 1):

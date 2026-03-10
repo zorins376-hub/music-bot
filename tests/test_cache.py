@@ -92,3 +92,44 @@ class TestCacheRateLimit:
         user_id = 777
         allowed, _ = await cache_with_fake_redis.check_rate_limit(user_id, is_premium=True)
         assert allowed is True
+
+
+@pytest.mark.asyncio
+class TestCacheRuntimeMetrics:
+    async def test_runtime_metrics_track_hits_and_latency(self, cache_with_fake_redis):
+        await cache_with_fake_redis.set_file_id("mtrack", "FID_METRIC", 192)
+        await cache_with_fake_redis.get_file_id("mtrack", 192)      # hit
+        await cache_with_fake_redis.get_file_id("missing", 192)     # miss
+
+        metrics = cache_with_fake_redis.get_runtime_metrics()
+
+        assert metrics["gets"] >= 2
+        assert metrics["hits"] >= 1
+        assert 0 <= metrics["hit_rate"] <= 100
+        assert metrics["avg_latency_ms"] >= 0
+
+
+@pytest.mark.asyncio
+class TestRateLimitedRedis:
+    async def test_passthrough_set_get(self):
+        import fakeredis.aioredis as fakeredis
+        from bot.services.cache import RateLimitedRedis
+
+        raw = fakeredis.FakeRedis(decode_responses=True)
+        rr = RateLimitedRedis(raw, max_ops_per_sec=0, burst=5)
+
+        await rr.set("k1", "v1")
+        assert await rr.get("k1") == "v1"
+
+    async def test_throttled_wrapper_still_operates(self):
+        import fakeredis.aioredis as fakeredis
+        from bot.services.cache import RateLimitedRedis
+
+        raw = fakeredis.FakeRedis(decode_responses=True)
+        rr = RateLimitedRedis(raw, max_ops_per_sec=2, burst=1)
+
+        await rr.set("k2", "v2")
+        await rr.get("k2")
+        await rr.get("missing")
+
+        assert await rr.get("k2") == "v2"

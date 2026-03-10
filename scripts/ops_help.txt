@@ -1,0 +1,56 @@
+Ops Launcher Quick Help
+
+A) Verify flows
+1) Full verify (backup + assert + smoke)
+   scripts\ops.cmd verify -Commit release-2026-03-10 -Operator devops
+   pwsh -File scripts/ops.ps1 verify -Commit release-2026-03-10 -Operator devops
+
+2) Fast verify (no backup)
+   scripts\ops.cmd verify -NoBackup -Commit hotfix -Operator oncall
+   pwsh -File scripts/ops.ps1 verify -NoBackup -Commit hotfix -Operator oncall
+
+3) Dry-run verify (no DB calls)
+   scripts\ops.cmd verify -DryRun -NoBackup -Commit preview -Operator oncall
+   pwsh -File scripts/ops.ps1 verify -DryRun -NoBackup -Commit preview -Operator oncall
+
+4) Verify with artifacts rotation
+   scripts\ops.cmd verify -RotateArtifacts -KeepArtifacts 30 -Commit release -Operator devops
+   pwsh -File scripts/ops.ps1 verify -RotateArtifacts -KeepArtifacts 30 -Commit release -Operator devops
+
+B) Cleanup flows
+1) Standalone cleanup
+   scripts\ops.cmd cleanup -KeepArtifacts 30
+   pwsh -File scripts/ops.ps1 cleanup -KeepArtifacts 30
+
+2) Dry-run cleanup
+   scripts\ops.cmd cleanup -KeepArtifacts 30 -DryRun
+   pwsh -File scripts/ops.ps1 cleanup -KeepArtifacts 30 -DryRun
+
+C) Smoke checks
+1) Full launcher smoke suite
+   scripts\smoke_scripts.cmd
+   pwsh -File scripts/smoke_scripts.ps1
+   scripts\ops.cmd smoke
+   pwsh -File scripts/ops.ps1 smoke
+
+D) Help
+   scripts\ops.cmd /?
+   scripts\prod_verify.cmd /?
+   scripts\cleanup_reports.cmd /?
+
+E) Environment status snapshot
+   scripts\status.cmd
+   pwsh -File scripts/status.ps1
+   scripts\ops.cmd status
+   pwsh -File scripts/ops.ps1 status
+
+Notes
+- KeepArtifacts valid range: 1..500
+- If COMMIT is omitted, prod_verify auto-detects git short SHA
+- If OPERATOR is omitted, prod_verify uses USERNAME/USER env
+- In environments without make, prod_verify falls back to direct pg_dump/psql
+
+F) Production execution report skeleton
+   scripts\ops.cmd report -Commit release-2026-03-10 -Operator devops
+   pwsh -File scripts/ops.ps1 report -Commit release-2026-03-10 -Operator devops
+   make prod-new-report COMMIT=release-2026-03-10 OPERATOR=devops

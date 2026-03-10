@@ -1,15 +1,16 @@
 """
-ai_dj.py — Рекомендательная система «По вашему вкусу» (v2).
+ai_dj.py — Рекомендательная система «По вашему вкусу» (v3 ML).
 
 Hybrid approach:
-  1. Collaborative filtering — SQL-based: find users with similar listening,
-     recommend tracks they played but current user hasn't.
-  2. Content-based — by genre/artist from user profile & history.
-  3. Fallback — top popular tracks for the week.
+  1. ML-based: ALS + Word2Vec embeddings + popularity + freshness (when ML_ENABLED)
+  2. Collaborative filtering — SQL-based: find users with similar listening
+  3. Content-based — by genre/artist from user profile & history
+  4. Fallback — top popular tracks for the week
 
-60 % collaborative + 40 % content-based (when both available).
+ML path: 5-component scorer (ALS 40% + Embed 25% + Pop 15% + Fresh 10% + Time 10%)
+SQL fallback: 60% collaborative + 40% content-based
 Min 50 listens → collaborative, otherwise content-based / fallback.
-Redis cache TTL 1 h.
+Redis cache TTL 1h.
 """
 import json
 import logging
@@ -18,54 +19,203 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, and_
 
+from bot.config import config
+
 logger = logging.getLogger(__name__)
 
-# Minimum play count before collaborative filtering activates
+# Minimum play count before collaborative/ML filtering activates
 _MIN_PLAYS_FOR_COLLAB = 50
 
 
-async def get_recommendations(user_id: int, limit: int = 10) -> list[dict]:
+async def get_recommendations(
+    user_id: int, limit: int = 10, log_for_ab: bool = False
+) -> list[dict]:
     """
     Return a list of recommended track dicts (with video_id, title, etc.).
     Uses Redis cache (TTL 1h). Falls back gracefully.
+    
+    Args:
+        user_id: target user
+        limit: max results
+        log_for_ab: if True, log recommendations to recommendation_log for A/B testing
+        
+    Returns:
+        List of track dicts with additional 'algo' field indicating recommendation source
     """
     from bot.services.cache import cache
+    from recommender.config import ml_config
 
-    cache_key = f"reco:{user_id}"
-    try:
-        cached = await cache.redis.get(cache_key)
-        if cached:
-            recs = json.loads(cached)
-            return recs[:limit]
-    except Exception:
-        pass
-
-    recs = await _build_recommendations(user_id, limit)
-
-    if recs:
+    # Skip cache if A/B logging to ensure fresh algo assignment
+    if not log_for_ab:
+        cache_key = f"reco:{user_id}"
         try:
+            cached = await cache.redis.get(cache_key)
+            if cached:
+                recs = json.loads(cached)
+                return recs[:limit]
+        except Exception:
+            pass
+
+    recs, algo = await _build_recommendations_with_ab(user_id, limit)
+
+    if recs and not log_for_ab:
+        try:
+            cache_key = f"reco:{user_id}"
             await cache.redis.setex(cache_key, 3600, json.dumps(recs, ensure_ascii=False))
         except Exception:
             pass
 
+    # Log for A/B testing if enabled
+    if log_for_ab and recs and ml_config.ab_test_enabled:
+        await _log_recommendations(user_id, recs, algo)
+
     return recs[:limit]
 
 
-async def _build_recommendations(user_id: int, limit: int) -> list[dict]:
-    """Build hybrid recommendations: ML scorer first, SQL fallback."""
+async def _log_recommendations(user_id: int, recs: list[dict], algo: str) -> None:
+    """Log recommendations to recommendation_log for A/B analysis."""
+    from bot.models.base import async_session
+    from bot.models.recommendation_log import RecommendationLog
+
+    try:
+        async with async_session() as session:
+            for pos, rec in enumerate(recs):
+                # Get track_id from source_id if available
+                track_id = rec.get("track_id") or 0
+                if not track_id and rec.get("video_id"):
+                    # Look up track_id from source_id
+                    from bot.models.track import Track
+                    result = await session.execute(
+                        select(Track.id).where(Track.source_id == rec["video_id"])
+                    )
+                    row = result.scalar()
+                    track_id = row if row else 0
+
+                log_entry = RecommendationLog(
+                    user_id=user_id,
+                    track_id=track_id,
+                    algo=algo,
+                    position=pos,
+                    score=rec.get("score"),
+                )
+                session.add(log_entry)
+            await session.commit()
+    except Exception as e:
+        logger.warning("Failed to log recommendations: %s", e)
+
+
+async def log_recommendation_click(user_id: int, track_id: int | None = None, source_id: str | None = None) -> bool:
+    """
+    Log that user clicked on a recommended track (for CTR calculation).
+    
+    Updates the most recent recommendation_log entry for this user+track.
+    
+    Args:
+        user_id: user who clicked
+        track_id: database track ID (preferred)
+        source_id: track source_id if track_id not available
+        
+    Returns:
+        True if click was logged, False otherwise
+    """
+    from bot.models.base import async_session
+    from bot.models.recommendation_log import RecommendationLog
+    from sqlalchemy import update, desc
+
+    if not track_id and not source_id:
+        return False
+
+    try:
+        async with async_session() as session:
+            # Resolve track_id from source_id if needed
+            if not track_id and source_id:
+                from bot.models.track import Track
+                result = await session.execute(
+                    select(Track.id).where(Track.source_id == source_id)
+                )
+                track_id = result.scalar()
+                if not track_id:
+                    return False
+
+            # Find and update most recent recommendation for this user+track
+            # (within last hour to avoid updating old entries)
+            from datetime import datetime, timedelta, timezone
+            one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+            
+            result = await session.execute(
+                update(RecommendationLog)
+                .where(
+                    RecommendationLog.user_id == user_id,
+                    RecommendationLog.track_id == track_id,
+                    RecommendationLog.clicked == False,
+                    RecommendationLog.created_at >= one_hour_ago,
+                )
+                .values(clicked=True)
+            )
+            await session.commit()
+            return result.rowcount > 0
+    except Exception as e:
+        logger.warning("Failed to log recommendation click: %s", e)
+        return False
+
+
+async def _build_recommendations_with_ab(user_id: int, limit: int) -> tuple[list[dict], str]:
+    """Build recommendations with A/B test routing.
+    
+    Returns tuple of (recommendations, algo_name).
+    """
+    from recommender.config import ml_config
+    import random
+    
+    algo = "sql"  # default
+    
+    # A/B test routing if enabled
+    if ml_config.ab_test_enabled and config.ML_ENABLED:
+        # Use user_id hash for consistent group assignment
+        if user_id % 2 == 0:
+            algo = "ml"
+        else:
+            algo = "sql"
+    elif config.ML_ENABLED:
+        algo = "ml"
+
+    if config.ML_ENABLED:
+        recs = await _build_recommendations(user_id, limit, force_algo=algo)
+    else:
+        recs = await _build_recommendations(user_id, limit)
+    return recs, algo
+
+
+async def _build_recommendations(
+    user_id: int, limit: int, force_algo: str | None = None
+) -> list[dict]:
+    """Build hybrid recommendations: ML scorer first, SQL fallback.
+    
+    Args:
+        user_id: target user
+        limit: max results
+        force_algo: if set, force specific algo ("ml" or "sql"). Used for A/B testing.
+    """
     from bot.models.base import async_session
     from bot.models.track import ListeningHistory, Track
     from bot.models.user import User
 
-    # ── Try ML-based scoring first ───────────────────────────────────────
-    try:
-        from recommender.model_store import model_exists
-        if model_exists():
-            ml_results = await _ml_recommendations(user_id, limit)
-            if ml_results:
-                return ml_results
-    except Exception as e:
-        logger.warning("ML reco failed, falling back to SQL: %s", e)
+    # ── Try ML-based scoring (if enabled and not forced to SQL) ──────────
+    use_ml = (
+        config.ML_ENABLED 
+        and (force_algo is None or force_algo == "ml")
+    )
+    
+    if use_ml:
+        try:
+            from recommender.model_store import model_store
+            if model_store.is_ready:
+                ml_results = await _ml_recommendations(user_id, limit)
+                if ml_results:
+                    logger.debug("ML reco returned %d tracks for user %d", len(ml_results), user_id)
+                    return ml_results
+        except Exception as e:
+            logger.warning("ML reco failed, falling back to SQL: %s", e)
 
     # ── SQL fallback ─────────────────────────────────────────────────────
     async with async_session() as session:
@@ -273,12 +423,13 @@ async def _popular_fallback(session, listened_ids: set[int], limit: int) -> list
 def _track_to_dict(track) -> dict:
     """Convert a Track model to the dict format used by search results."""
     from bot.utils import fmt_duration
+    duration = track.duration if track.duration is not None else 0
     return {
         "video_id": track.source_id,
         "title": track.title or "Unknown",
         "uploader": track.artist or "Unknown",
-        "duration": track.duration or 0,
-        "duration_fmt": fmt_duration(track.duration),
+        "duration": duration,
+        "duration_fmt": (fmt_duration(duration) if duration > 0 else "?:??"),
         "source": track.source or "youtube",
         "file_id": track.file_id,
     }
@@ -338,42 +489,189 @@ async def update_user_profile(user_id: int) -> None:
 
 
 async def _ml_recommendations(user_id: int, limit: int) -> list[dict]:
-    """Score tracks using ML scorer (ALS + embeddings + popularity)."""
+    """Score tracks using ML HybridScorer (ALS + embeddings + popularity + freshness + time)."""
     from bot.models.base import async_session
     from bot.models.track import ListeningHistory, Track
-    from recommender.scorer import score_tracks
+    from bot.models.user import User
+    from recommender.scorer import HybridScorer, ScoringContext
 
     async with async_session() as session:
-        # Get user's listened IDs
+        # Get user + profile
+        user_obj = await session.get(User, user_id)
+        preferred_hours = None
+        if user_obj and hasattr(user_obj, "preferred_hours"):
+            preferred_hours = user_obj.preferred_hours
+
+        # Get user's listened history with source_ids (recent 50 for context, all for exclusion)
         listened_r = await session.execute(
-            select(ListeningHistory.track_id).where(
+            select(
+                ListeningHistory.track_id,
+                Track.source_id,
+                ListeningHistory.created_at,
+            )
+            .join(Track, Track.id == ListeningHistory.track_id)
+            .where(
                 ListeningHistory.user_id == user_id,
                 ListeningHistory.action == "play",
                 ListeningHistory.track_id.is_not(None),
             )
+            .order_by(ListeningHistory.created_at.desc())
         )
-        listened_ids = {row[0] for row in listened_r.all()}
+        history = listened_r.all()
+        listened_ids = {row[0] for row in history}
+        # Extract source_ids for embedding lookup (most recent first)
+        recent_source_ids = [row[1] for row in history[:50] if row[1]]
 
         if len(listened_ids) < _MIN_PLAYS_FOR_COLLAB:
             return []
 
-        # Get candidate pool: all tracks with file_id
+        # Get candidate pool: all tracks with file_id, include metadata
         candidates_r = await session.execute(
-            select(Track.id, Track.artist).where(Track.file_id.is_not(None)).limit(10000)
+            select(
+                Track.id,
+                Track.source_id,
+                Track.artist,
+                Track.genre,
+                Track.downloads,  # as proxy for play_count
+                Track.created_at,
+            )
+            .where(Track.file_id.is_not(None))
+            .limit(10000)
         )
         candidates = candidates_r.all()
-        candidate_ids = [r[0] for r in candidates]
-        track_artists = {r[0]: (r[1] or "unknown") for r in candidates}
+        
+        # Build candidate dicts for scorer
+        candidate_dicts = [
+            {
+                "id": r[0],
+                "source_id": r[1] or "",
+                "artist": r[2] or "",
+                "genre": r[3] or "",
+                "play_count": r[4] or 0,
+                "added_at": r[5],
+            }
+            for r in candidates
+        ]
 
-        # Score
-        ranked_ids = score_tracks(user_id, candidate_ids, listened_ids, track_artists, limit=limit * 2)
-        if not ranked_ids:
+        # Build scoring context with source_ids for embeddings
+        ctx = ScoringContext(
+            current_hour_utc=datetime.now(timezone.utc).hour,
+            recent_source_ids=recent_source_ids,
+            listened_ids=listened_ids,
+            preferred_hours=preferred_hours,
+        )
+
+        # Score with HybridScorer
+        scorer = HybridScorer()
+        scored = scorer.score(user_id, candidate_dicts, ctx)
+        filtered = scorer.apply_diversity(scored, limit=limit * 2)
+
+        if not filtered:
             return []
 
-        # Load track details
+        # Load full track objects for result
+        ranked_ids = [t.track_id for t in filtered]
         tracks_r = await session.execute(
             select(Track).where(Track.id.in_(ranked_ids))
         )
         track_map = {t.id: t for t in tracks_r.scalars().all()}
 
         return [_track_to_dict(track_map[tid]) for tid in ranked_ids if tid in track_map][:limit]
+
+
+async def get_similar_tracks(track_id: int, limit: int = 10) -> list[dict]:
+    """
+    Get tracks similar to a given track using embeddings.
+    
+    Used by mini app "Similar Tracks" feature.
+    
+    Args:
+        track_id: source track ID (database ID)
+        limit: max results
+        
+    Returns:
+        List of similar track dicts
+    """
+    from bot.models.base import async_session
+    from bot.models.track import Track
+    from bot.services.cache import cache
+
+    # Check cache first
+    cache_key = f"similar:{track_id}"
+    try:
+        cached = await cache.redis.get(cache_key)
+        if cached:
+            return json.loads(cached)[:limit]
+    except Exception:
+        pass
+
+    result: list[dict] = []
+
+    # Get source track to find its source_id
+    async with async_session() as session:
+        source_track = await session.get(Track, track_id)
+        if not source_track:
+            return []
+        
+        source_id = source_track.source_id
+
+    # ── Try ML embeddings first ──────────────────────────────────────────
+    if config.ML_ENABLED and source_id:
+        try:
+            from recommender.embeddings import TrackEmbeddings
+            embeddings = TrackEmbeddings()
+            
+            # get_similar_tracks returns [(source_id, score), ...]
+            similar_pairs = embeddings.get_similar_tracks(source_id, topn=limit * 2)
+            
+            if similar_pairs:
+                similar_source_ids = [sid for sid, score in similar_pairs]
+                async with async_session() as session:
+                    tracks_r = await session.execute(
+                        select(Track).where(Track.source_id.in_(similar_source_ids))
+                    )
+                    track_map = {t.source_id: t for t in tracks_r.scalars().all()}
+                    # Maintain similarity order
+                    result = [
+                        _track_to_dict(track_map[sid]) 
+                        for sid in similar_source_ids 
+                        if sid in track_map
+                    ]
+        except Exception as e:
+            logger.warning("ML similar tracks failed: %s", e)
+
+    # ── SQL fallback: same artist/genre ──────────────────────────────────
+    if not result:
+        async with async_session() as session:
+            source_track = await session.get(Track, track_id)
+            if not source_track:
+                return []
+
+            conditions = []
+            if source_track.artist:
+                conditions.append(Track.artist.ilike(f"%{source_track.artist}%"))
+            if source_track.genre:
+                conditions.append(Track.genre == source_track.genre)
+
+            if conditions:
+                from sqlalchemy import or_
+                tracks_r = await session.execute(
+                    select(Track)
+                    .where(
+                        or_(*conditions),
+                        Track.id != track_id,
+                        Track.file_id.is_not(None),
+                    )
+                    .order_by(Track.downloads.desc())
+                    .limit(limit)
+                )
+                result = [_track_to_dict(t) for t in tracks_r.scalars().all()]
+
+    # Cache result
+    if result:
+        try:
+            await cache.redis.setex(cache_key, 3600, json.dumps(result, ensure_ascii=False))
+        except Exception:
+            pass
+
+    return result[:limit]

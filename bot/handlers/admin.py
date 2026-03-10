@@ -300,6 +300,90 @@ async def _build_detailed_stats() -> str:
     lines.append("<b>📈 Retention:</b>")
     lines.append(f"  D1: <b>{ret_1d}%</b> | D7: <b>{ret_7d}%</b> | D30: <b>{ret_30d}%</b>")
 
+    cache_metrics = cache.get_runtime_metrics()
+    lines.append("")
+    lines.append("<b>⚡ Cache performance:</b>")
+    lines.append(
+        f"  Hit rate: <b>{cache_metrics['hit_rate']:.1f}%</b> "
+        f"({cache_metrics['hits']}/{cache_metrics['gets']})"
+    )
+    lines.append(f"  Avg Redis GET latency: <b>{cache_metrics['avg_latency_ms']:.2f} ms</b>")
+
+    return "\n".join(lines)
+
+
+async def _build_ab_dashboard() -> str:
+    """Build A/B test dashboard showing ML vs SQL recommendation CTR."""
+    from datetime import datetime, timedelta, timezone
+    from bot.config import settings
+
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    # Check if A/B test is enabled
+    if not settings.ML_AB_TEST_ENABLED:
+        return (
+            "<b>🔬 A/B Test Dashboard</b>\n\n"
+            "A/B тестирование отключено.\n"
+            "Включить: установить <code>ML_AB_TEST_ENABLED=true</code>"
+        )
+
+    try:
+        from bot.models.recommendation_log import RecommendationLog
+    except ImportError:
+        return (
+            "<b>🔬 A/B Test Dashboard</b>\n\n"
+            "⚠️ Модель RecommendationLog не найдена.\n"
+            "Требуется миграция базы данных."
+        )
+
+    async with async_session() as session:
+        # Get stats per algo type for the last 7 days
+        stats_r = await session.execute(
+            select(
+                RecommendationLog.algo,
+                func.count().label("total"),
+                func.sum(case((RecommendationLog.clicked == True, 1), else_=0)).label("clicks"),
+            )
+            .where(RecommendationLog.created_at >= week_ago)
+            .group_by(RecommendationLog.algo)
+        )
+        stats = {row[0]: {"total": row[1], "clicks": row[2] or 0} for row in stats_r.all()}
+
+    if not stats:
+        return (
+            "<b>🔬 A/B Test Dashboard (7 дней)</b>\n"
+            "─────────────────────────\n"
+            "Нет данных. Логирование рекомендаций ещё не началось."
+        )
+
+    lines = ["<b>🔬 A/B Рекомендации (7 дней):</b>", "─────────────────────────"]
+
+    # ML stats
+    ml = stats.get("ml", {"total": 0, "clicks": 0})
+    ml_ctr = (ml["clicks"] * 100 / ml["total"]) if ml["total"] else 0
+    lines.append(f"ML:  показано {ml['total']}, кликнуто {ml['clicks']}, CTR = {ml_ctr:.1f}%")
+
+    # SQL stats
+    sql = stats.get("sql", {"total": 0, "clicks": 0})
+    sql_ctr = (sql["clicks"] * 100 / sql["total"]) if sql["total"] else 0
+    lines.append(f"SQL: показано {sql['total']}, кликнуто {sql['clicks']}, CTR = {sql_ctr:.1f}%")
+
+    # Popular fallback stats
+    popular = stats.get("popular", {"total": 0, "clicks": 0})
+    if popular["total"]:
+        pop_ctr = (popular["clicks"] * 100 / popular["total"])
+        lines.append(f"POP: показано {popular['total']}, кликнуто {popular['clicks']}, CTR = {pop_ctr:.1f}%")
+
+    # Lift calculation (ML vs SQL)
+    lines.append("─────────────────────────")
+    if sql_ctr > 0:
+        lift = ((ml_ctr - sql_ctr) / sql_ctr) * 100
+        lift_sign = "+" if lift >= 0 else ""
+        lines.append(f"Lift (ML vs SQL): <b>{lift_sign}{lift:.1f}%</b>")
+    else:
+        lines.append("Lift: недостаточно данных SQL")
+
     return "\n".join(lines)
 
 
@@ -832,6 +916,11 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         else:
             await message.answer("Апелляция не найдена или уже рассмотрена.")
 
+    # /admin ab — A/B test dashboard for recommendation system
+    elif subcmd == "ab":
+        text = await _build_ab_dashboard()
+        await message.answer(text, parse_mode="HTML")
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -856,7 +945,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin flags — список feature-флагов\n"
             "/admin flag &lt;name&gt; on|off — переключить флаг\n"
             "/admin appeals — список DMCA апелляций\n"
-            "/admin appeal &lt;id&gt; approve|reject — рассмотреть апелляцию",
+            "/admin appeal &lt;id&gt; approve|reject — рассмотреть апелляцию\n"
+            "/admin ab — A/B тест рекомендаций (CTR)",
             parse_mode="HTML",
         )
 

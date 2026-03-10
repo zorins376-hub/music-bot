@@ -33,6 +33,10 @@ async def db_tables(engine):
     from bot.models.user import User  # noqa
     from bot.models.track import Track, ListeningHistory, Payment  # noqa
     from bot.models.playlist import Playlist, PlaylistTrack  # noqa
+    from bot.models.daily_mix import DailyMix, DailyMixTrack  # noqa
+    from bot.models.share_link import ShareLink  # noqa
+    from bot.models.artist_watchlist import ArtistWatchlist  # noqa
+    from bot.models.release_notification import ReleaseNotification  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

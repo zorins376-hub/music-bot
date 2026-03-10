@@ -1,0 +1,33 @@
+Production Verify Quick Commands
+
+1) Full verify (backup + assert + smoke)
+   make prod-verify-report COMMIT=release-2026-03-10 OPERATOR=devops
+
+2) Fast verify (no backup)
+   make prod-verify-report-no-backup COMMIT=hotfix OPERATOR=oncall
+
+3) Dry-run plan check (no DB calls)
+   make prod-verify-report-dry-run COMMIT=preview OPERATOR=oncall
+
+4) Windows without make (direct)
+   scripts\prod_verify.cmd -DryRun -NoBackup -Commit preview -Operator oncall
+
+5) Show built-in help
+   scripts\prod_verify.cmd /?
+   pwsh -File scripts/prod_verify.ps1 -Help
+
+6) Rotate old reports/logs (keep latest 30)
+   make prod-verify-report-rotate KEEP=30 COMMIT=release-2026-03-10 OPERATOR=devops
+   (KEEP range: 1..500)
+
+7) Standalone cleanup (without running verify)
+   make cleanup-reports KEEP=30
+   make cleanup-reports-dry-run KEEP=30
+   scripts\cleanup_reports.cmd -KeepArtifacts 30 -DryRun
+
+8) Cleanup help
+   scripts\cleanup_reports.cmd /?
+
+9) Unified launcher
+   scripts\ops.cmd verify -DryRun -NoBackup -Commit preview -Operator oncall
+   scripts\ops.cmd cleanup -KeepArtifacts 30 -DryRun

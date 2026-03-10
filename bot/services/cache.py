@@ -1,7 +1,9 @@
 import json
 import logging
 import time
+import asyncio
 from collections import defaultdict
+from collections import deque
 
 import redis.asyncio as aioredis
 
@@ -23,22 +25,128 @@ def _make_redis() -> aioredis.Redis:
     return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
+class RateLimitedRedis:
+    """Thin Redis proxy with optional per-process request throttling."""
+
+    def __init__(self, client: aioredis.Redis, max_ops_per_sec: int = 0, burst: int = 50) -> None:
+        self._client = client
+        self._max_ops_per_sec = max(0, int(max_ops_per_sec or 0))
+        self._burst = max(1, int(burst or 1))
+        self._recent_ops: deque[float] = deque()
+        self._lock = asyncio.Lock()
+
+    async def _throttle(self) -> None:
+        if self._max_ops_per_sec <= 0:
+            return
+
+        limit = min(self._burst, self._max_ops_per_sec)
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                cutoff = now - 1.0
+                while self._recent_ops and self._recent_ops[0] <= cutoff:
+                    self._recent_ops.popleft()
+
+                if len(self._recent_ops) < limit:
+                    self._recent_ops.append(now)
+                    return
+
+                wait_for = max(0.0, self._recent_ops[0] + 1.0 - now)
+
+            if wait_for > 0:
+                await asyncio.sleep(wait_for)
+            else:
+                await asyncio.sleep(0)
+
+    async def get(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.get(*args, **kwargs)
+
+    async def set(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.set(*args, **kwargs)
+
+    async def setex(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.setex(*args, **kwargs)
+
+    async def exists(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.exists(*args, **kwargs)
+
+    async def ttl(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.ttl(*args, **kwargs)
+
+    async def incr(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.incr(*args, **kwargs)
+
+    async def expire(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.expire(*args, **kwargs)
+
+    async def publish(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.publish(*args, **kwargs)
+
+    async def lrange(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.lrange(*args, **kwargs)
+
+    async def delete(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.delete(*args, **kwargs)
+
+    async def rpush(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.rpush(*args, **kwargs)
+
+    async def sadd(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.sadd(*args, **kwargs)
+
+    async def smembers(self, *args, **kwargs):
+        await self._throttle()
+        return await self._client.smembers(*args, **kwargs)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    def __getattr__(self, item):
+        return getattr(self._client, item)
+
+
 class Cache:
     def __init__(self) -> None:
-        self._redis: aioredis.Redis | None = None
+        self._redis: aioredis.Redis | RateLimitedRedis | None = None
+        self._metrics: dict[str, float] = {
+            "gets": 0,
+            "hits": 0,
+            "latency_ms_total": 0.0,
+            "latency_samples": 0,
+        }
 
     @property
-    def redis(self) -> aioredis.Redis:
+    def redis(self) -> aioredis.Redis | RateLimitedRedis:
         if self._redis is None:
-            self._redis = _make_redis()
+            self._redis = RateLimitedRedis(
+                _make_redis(),
+                max_ops_per_sec=settings.REDIS_MAX_OPS_PER_SEC,
+                burst=settings.REDIS_BURST,
+            )
         return self._redis
 
     # ── File ID cache ───────────────────────────────────────────────────────
 
     async def get_file_id(self, source_id: str, bitrate: int = 192) -> str | None:
+        start = time.perf_counter()
         try:
-            return await self.redis.get(f"fid:{source_id}:{bitrate}")
+            value = await self.redis.get(f"fid:{source_id}:{bitrate}")
+            self._record_get_metric(hit=bool(value), started_at=start)
+            return value
         except Exception:
+            self._record_get_metric(hit=False, started_at=start)
             return None
 
     async def set_file_id(
@@ -64,22 +172,50 @@ class Cache:
             pass
 
     async def get_search(self, session_id: str) -> list[dict] | None:
+        start = time.perf_counter()
         try:
             data = await self.redis.get(f"search:{session_id}")
+            self._record_get_metric(hit=bool(data), started_at=start)
             return json.loads(data) if data else None
         except Exception:
+            self._record_get_metric(hit=False, started_at=start)
             return None
 
     # ── Global search cache (by query string) ────────────────────────────
 
     async def get_query_cache(self, query: str, source: str = "youtube") -> list[dict] | None:
         """Return cached search results for a query, or None."""
+        start = time.perf_counter()
         try:
             key = f"qcache:{source}:{query.lower().strip()}"
             data = await self.redis.get(key)
+            self._record_get_metric(hit=bool(data), started_at=start)
             return json.loads(data) if data else None
         except Exception:
+            self._record_get_metric(hit=False, started_at=start)
             return None
+
+    def _record_get_metric(self, hit: bool, started_at: float) -> None:
+        latency_ms = (time.perf_counter() - started_at) * 1000.0
+        self._metrics["gets"] += 1
+        self._metrics["latency_samples"] += 1
+        self._metrics["latency_ms_total"] += latency_ms
+        if hit:
+            self._metrics["hits"] += 1
+
+    def get_runtime_metrics(self) -> dict[str, float]:
+        gets = int(self._metrics.get("gets", 0))
+        hits = int(self._metrics.get("hits", 0))
+        latency_samples = int(self._metrics.get("latency_samples", 0))
+        latency_total = float(self._metrics.get("latency_ms_total", 0.0))
+        hit_rate = (hits * 100.0 / gets) if gets else 0.0
+        avg_latency_ms = (latency_total / latency_samples) if latency_samples else 0.0
+        return {
+            "gets": gets,
+            "hits": hits,
+            "hit_rate": hit_rate,
+            "avg_latency_ms": avg_latency_ms,
+        }
 
     async def set_query_cache(self, query: str, results: list[dict], source: str = "youtube") -> None:
         """Cache search results for a query (120s TTL)."""

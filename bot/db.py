@@ -166,8 +166,33 @@ async def record_listening_event(
                 await _update_streak_and_xp(user_id, XP_PLAY)
             except Exception:
                 pass
+            # Auto-update profile every 10 plays
+            try:
+                play_count = await _get_user_play_count(user_id)
+                if play_count > 0 and play_count % 10 == 0:
+                    from recommender.profile_updater import trigger_profile_update
+                    trigger_profile_update(user_id)
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("record_listening_event failed for user %s: %s", user_id, e)
+
+
+async def _get_user_play_count(user_id: int) -> int:
+    """Get total play count for user (for profile update trigger)."""
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(ListeningHistory)
+                .where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                )
+            )
+            return result.scalar() or 0
+    except Exception:
+        return 0
 
 
 async def _update_streak_and_xp(user_id: int, xp_amount: int) -> None:

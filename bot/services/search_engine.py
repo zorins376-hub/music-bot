@@ -6,6 +6,11 @@ TASK-001: Fuzzy search + dedup + multi-language support (TASK-023).
 import re
 import unicodedata
 
+try:
+    from rapidfuzz import fuzz as _rf_fuzz
+except Exception:
+    _rf_fuzz = None
+
 # ── Transliteration tables ────────────────────────────────────────────────
 
 _CYR_TO_LAT = {
@@ -209,6 +214,11 @@ def suggest_query(query: str, corpus: list[str], max_suggestions: int = 1) -> li
             return 0.0
         return 2 * len(bg_a & bg_b) / (len(bg_a) + len(bg_b))
 
+    def _rapidfuzz_sim(a: str, b: str) -> float:
+        if _rf_fuzz is None:
+            return 0.0
+        return float(_rf_fuzz.token_set_ratio(a, b)) / 100.0
+
     scored: list[tuple[float, str]] = []
     for entry in corpus:
         entry_norm = normalize_query(entry)
@@ -216,7 +226,11 @@ def suggest_query(query: str, corpus: list[str], max_suggestions: int = 1) -> li
             continue
         jac = _jaccard_similarity(norm, entry_norm)
         big = _bigram_sim(norm, entry_norm)
-        score = jac * 0.4 + big * 0.6
+        rf = _rapidfuzz_sim(norm, entry_norm)
+        if _rf_fuzz is not None:
+            score = jac * 0.25 + big * 0.35 + rf * 0.40
+        else:
+            score = jac * 0.4 + big * 0.6
         if score > 0.3:
             scored.append((score, entry))
 

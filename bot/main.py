@@ -26,6 +26,7 @@ from bot.handlers import leaderboard
 from bot.handlers import settings as settings_handler
 from bot.handlers import promote
 from bot.handlers import voice_chat
+from bot.handlers import family
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
 from bot.middlewares.captcha import CaptchaMiddleware
@@ -342,6 +343,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(release_radar.router)  # Release Radar
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
+    dp.include_router(family.router)     # Family Plan
     dp.include_router(recommend.router)  # AI DJ
     dp.include_router(ai_playlist.router)  # Prompt-to-Playlist
     dp.include_router(import_playlist.router)  # Spotify/Yandex/Apple import

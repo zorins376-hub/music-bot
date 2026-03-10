@@ -11,6 +11,8 @@ def _make_user(uid=100, quality="192", is_premium=False, lang="ru"):
     u.quality = quality
     u.is_premium = is_premium
     u.language = lang
+    u.release_radar_enabled = True
+    u.fav_vibe = None
     return u
 
 
@@ -38,6 +40,12 @@ class TestQualityKeyboard:
         # Others without checkmark
         assert any("128" in t and "✓" not in t for t in all_texts)
 
+    def test_auto_option_present(self):
+        from bot.handlers.settings import _quality_keyboard
+        kb = _quality_keyboard(is_premium=False, current="192")
+        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        assert any("Auto" in t for t in all_texts)
+
 
 @pytest.mark.asyncio
 class TestCmdSettings:
@@ -54,6 +62,27 @@ class TestCmdSettings:
         msg.answer.assert_called_once()
         _, kwargs = msg.answer.call_args
         assert kwargs.get("reply_markup") is not None
+
+    async def test_settings_releases_off_command(self):
+        from bot.handlers.settings import cmd_settings
+        user = _make_user()
+        msg = AsyncMock()
+        msg.from_user = MagicMock(id=100, username="t", first_name="T")
+        msg.text = "/settings releases off"
+        msg.answer = AsyncMock()
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("bot.handlers.settings.get_or_create_user", new_callable=AsyncMock, return_value=user), \
+             patch("bot.handlers.settings.async_session", return_value=mock_session):
+            await cmd_settings(msg)
+
+        mock_session.execute.assert_called_once()
+        msg.answer.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -133,3 +162,56 @@ class TestHandleQualityChange:
 
         await handle_quality_change(cb)
         cb.answer.assert_called_once()
+
+    async def test_auto_quality_allowed_for_free_user(self):
+        from bot.handlers.settings import handle_quality_change
+
+        user = _make_user(is_premium=False)
+        cb = AsyncMock()
+        cb.data = "quality:auto"
+        cb.from_user = MagicMock(id=100)
+        cb.answer = AsyncMock()
+        cb.message = AsyncMock()
+        cb.message.edit_text = AsyncMock()
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("bot.handlers.settings.get_or_create_user", new_callable=AsyncMock, return_value=user), \
+             patch("bot.handlers.settings.async_session", return_value=mock_session):
+            await handle_quality_change(cb)
+
+        mock_session.execute.assert_called_once()
+        cb.message.edit_text.assert_called_once()
+
+
+@pytest.mark.asyncio
+class TestReleaseRadarSettingsToggle:
+    async def test_callback_toggle_releases(self):
+        from bot.handlers.settings import handle_releases_toggle
+
+        user = _make_user()
+        user.release_radar_enabled = True
+        cb = AsyncMock()
+        cb.data = "settings:releases"
+        cb.from_user = MagicMock(id=100)
+        cb.answer = AsyncMock()
+        cb.message = AsyncMock()
+        cb.message.edit_reply_markup = AsyncMock()
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("bot.handlers.settings.get_or_create_user", new_callable=AsyncMock, return_value=user), \
+             patch("bot.handlers.settings.async_session", return_value=mock_session):
+            await handle_releases_toggle(cb)
+
+        cb.answer.assert_called_once()
+        mock_session.execute.assert_called_once()
+        cb.message.edit_reply_markup.assert_called_once()

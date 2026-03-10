@@ -13,8 +13,10 @@ from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.playlist import Playlist, PlaylistTrack
 from bot.models.track import Track
+from bot.services.analytics import track_event
 from bot.services.cache import cache
 from bot.services.daily_mix import get_or_build_daily_mix
+from bot.services.share_links import create_share_link, resolve_share_link
 
 router = Router()
 
@@ -125,6 +127,8 @@ async def send_daily_mix(message: Message, user_id: int, lang: str) -> None:
     if not tracks:
         await message.answer(t(lang, "mix_empty"))
         return
+
+    await track_event(user_id, "mix_open", count=len(tracks))
 
     session_id = secrets.token_urlsafe(6)
     await cache.store_search(session_id, tracks)
@@ -290,10 +294,14 @@ async def cb_mix_action(callback: CallbackQuery, callback_data: MixCb) -> None:
             await callback.answer(t(lang, "mix_expired"), show_alert=True)
             return
 
-        share_id = secrets.token_urlsafe(8)
-        payload = json.dumps({"owner_id": user.id, "tracks": tracks[:30]}, ensure_ascii=False)
         try:
-            await cache.redis.setex(f"share:mix:{share_id}", _MIX_SHARE_TTL, payload)
+            share_id = await create_share_link(
+                owner_id=user.id,
+                entity_type="mix",
+                entity_id=0,
+                ttl_seconds=_MIX_SHARE_TTL,
+                payload={"tracks": tracks[:30]},
+            )
         except Exception:
             await callback.answer("⚠️", show_alert=True)
             return
@@ -305,21 +313,16 @@ async def cb_mix_action(callback: CallbackQuery, callback_data: MixCb) -> None:
             t(lang, "mix_share_created", link=link),
             parse_mode="HTML",
         )
+        await track_event(user.id, "mix_share", share_id=share_id)
         return
 
     if callback_data.act == "clone":
-        try:
-            raw = await cache.redis.get(f"share:mix:{callback_data.sid}")
-        except Exception:
-            raw = None
-        if not raw:
+        data = await resolve_share_link(callback_data.sid)
+        if not data or data.get("entity_type") != "mix":
             await callback.answer(t(lang, "mix_share_expired"), show_alert=True)
             return
-        try:
-            data = json.loads(raw)
-            tracks = data.get("tracks") or []
-        except Exception:
-            tracks = []
+        payload = data.get("payload") or {}
+        tracks = payload.get("tracks") or []
         if not tracks:
             await callback.answer(t(lang, "mix_share_expired"), show_alert=True)
             return
@@ -334,6 +337,7 @@ async def cb_mix_action(callback: CallbackQuery, callback_data: MixCb) -> None:
             await callback.answer(t(lang, "pl_limit"), show_alert=True)
             return
         await callback.answer(t(lang, "mix_cloned", count=added), show_alert=True)
+        await track_event(user.id, "mix_clone", count=added)
         return
 
     tracks = await cache.get_search(callback_data.sid)
@@ -351,6 +355,7 @@ async def cb_mix_action(callback: CallbackQuery, callback_data: MixCb) -> None:
         await callback.answer(t(lang, "pl_limit"), show_alert=True)
         return
     await callback.answer(t(lang, "mix_saved", count=added), show_alert=True)
+    await track_event(user.id, "mix_save", count=added)
 
 
 async def show_shared_mix(message: Message, share_id: str) -> None:
@@ -358,20 +363,13 @@ async def show_shared_mix(message: Message, share_id: str) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
 
-    try:
-        raw = await cache.redis.get(f"share:mix:{share_id}")
-    except Exception:
-        raw = None
-
-    if not raw:
+    data = await resolve_share_link(share_id)
+    if not data or data.get("entity_type") != "mix":
         await message.answer(t(lang, "mix_share_expired"))
         return
 
-    try:
-        data = json.loads(raw)
-        tracks = data.get("tracks") or []
-    except Exception:
-        tracks = []
+    payload = data.get("payload") or {}
+    tracks = payload.get("tracks") or []
 
     if not tracks:
         await message.answer(t(lang, "mix_share_expired"))

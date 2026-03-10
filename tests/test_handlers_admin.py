@@ -180,3 +180,59 @@ class TestAdminForwardState:
     def test_fwd_state_is_dict(self):
         from bot.handlers.admin import _admin_fwd_state
         assert isinstance(_admin_fwd_state, dict)
+
+
+@pytest.mark.asyncio
+class TestDetailedStatsCacheSection:
+    async def test_build_detailed_stats_includes_cache_metrics(self):
+        from bot.handlers.admin import _build_detailed_stats
+
+        class _RowResult:
+            def __init__(self, one_value=None, all_value=None):
+                self._one_value = one_value
+                self._all_value = all_value or []
+
+            def one(self):
+                return self._one_value
+
+            def all(self):
+                return self._all_value
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                _RowResult((1, 0, 0, 0, 0, 0, 0, 0, 0, 0)),  # users
+                _RowResult((0, 0, 0)),                       # payments
+                _RowResult((0, 0)),                          # tracks
+                _RowResult((0, 0, 0, 0, 0)),                 # listening
+                _RowResult(all_value=[]),                    # source stats
+                _RowResult(all_value=[]),                    # top queries
+                _RowResult(all_value=[]),                    # top tracks
+                _RowResult(all_value=[]),                    # lang stats
+                _RowResult(all_value=[]),                    # top today
+            ]
+        )
+        session.scalar = AsyncMock(side_effect=[0, 0, 0, 0, 0, 0])
+
+        class _SessionCtx:
+            async def __aenter__(self):
+                return session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        fake_cache = MagicMock()
+        fake_cache.get_runtime_metrics.return_value = {
+            "gets": 10,
+            "hits": 7,
+            "hit_rate": 70.0,
+            "avg_latency_ms": 2.5,
+        }
+
+        with patch("bot.handlers.admin.async_session", return_value=_SessionCtx()), \
+             patch("bot.handlers.admin.cache", fake_cache):
+            text = await _build_detailed_stats()
+
+        assert "Cache performance" in text
+        assert "70.0%" in text
+        assert "2.50 ms" in text

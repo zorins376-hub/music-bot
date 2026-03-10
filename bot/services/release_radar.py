@@ -3,7 +3,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -13,7 +13,7 @@ from bot.services.cache import cache
 
 logger = logging.getLogger(__name__)
 
-_RADAR_HOUR = 12  # UTC
+_RADAR_INTERVAL_HOURS = 6
 
 
 async def start_release_radar_scheduler(bot) -> None:
@@ -23,9 +23,7 @@ async def start_release_radar_scheduler(bot) -> None:
 async def _radar_loop(bot) -> None:
     while True:
         now = datetime.now(timezone.utc)
-        target = now.replace(hour=_RADAR_HOUR, minute=0, second=0, microsecond=0)
-        if now >= target:
-            target += timedelta(days=1)
+        target = _next_radar_target(now)
         wait_seconds = (target - now).total_seconds()
         logger.info("Release radar next run in %.0f seconds", wait_seconds)
         await asyncio.sleep(wait_seconds)
@@ -36,7 +34,17 @@ async def _radar_loop(bot) -> None:
             logger.error("Release radar failed: %s", e)
 
 
+def _next_radar_target(now: datetime) -> datetime:
+    current = now.astimezone(timezone.utc)
+    base = current.replace(minute=0, second=0, microsecond=0)
+    next_hour = ((base.hour // _RADAR_INTERVAL_HOURS) + 1) * _RADAR_INTERVAL_HOURS
+    if next_hour >= 24:
+        return (base + timedelta(days=1)).replace(hour=0)
+    return base.replace(hour=next_hour)
+
+
 async def _send_release_radar(bot) -> None:
+    from bot.models.artist_watchlist import ArtistWatchlist
     from bot.models.base import async_session
     from bot.models.release_notification import ReleaseNotification
     from bot.models.track import ListeningHistory, Track
@@ -69,26 +77,17 @@ async def _send_release_radar(bot) -> None:
         user_ids = [u.id for u in users]
         fresh_track_ids = [t.id for t in fresh_tracks]
 
-        # Batch: top 8 artists per user (single query)
-        top_artists_r = await session.execute(
-            select(
-                ListeningHistory.user_id,
-                Track.artist,
-                func.count(ListeningHistory.id).label("cnt"),
-            )
-            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-            .where(
-                ListeningHistory.user_id.in_(user_ids),
-                ListeningHistory.action == "play",
-                Track.artist.is_not(None),
-            )
-            .group_by(ListeningHistory.user_id, Track.artist)
-            .order_by(ListeningHistory.user_id, func.count(ListeningHistory.id).desc())
+        await _rebuild_watchlist_for_users(session, users)
+
+        watchlist_r = await session.execute(
+            select(ArtistWatchlist.user_id, ArtistWatchlist.normalized_name)
+            .where(ArtistWatchlist.user_id.in_(user_ids))
+            .order_by(ArtistWatchlist.weight.desc())
         )
-        user_top_artists: dict[int, list[str]] = defaultdict(list)
-        for row in top_artists_r.all():
-            if len(user_top_artists[row[0]]) < 8:
-                user_top_artists[row[0]].append((row[1] or "").strip().lower())
+        user_watchlist: dict[int, list[str]] = defaultdict(list)
+        for row in watchlist_r.all():
+            if len(user_watchlist[row[0]]) < 8 and row[1]:
+                user_watchlist[row[0]].append(row[1])
 
         # Batch: existing notifications for all user+fresh_track combos
         existing_notif_r = await session.execute(
@@ -105,15 +104,19 @@ async def _send_release_radar(bot) -> None:
         for user in users:
             preferred_artists: set[str] = set()
             if user.fav_artists:
-                preferred_artists.update(a.strip().lower() for a in user.fav_artists if isinstance(a, str) and a.strip())
-            preferred_artists.update(a for a in user_top_artists.get(user.id, []) if a)
+                preferred_artists.update(
+                    _normalize_artist_name(a)
+                    for a in user.fav_artists
+                    if isinstance(a, str) and a.strip()
+                )
+            preferred_artists.update(a for a in user_watchlist.get(user.id, []) if a)
 
             if not preferred_artists:
                 continue
 
             candidates = []
             for track in fresh_tracks:
-                artist = (track.artist or "").strip().lower()
+                artist = _normalize_artist_name(track.artist or "")
                 if not artist:
                     continue
                 if any(a in artist or artist in a for a in preferred_artists):
@@ -221,3 +224,88 @@ async def _send_release_radar(bot) -> None:
                 pass
 
         logger.info("Release radar sent to %d users", sent_count)
+
+
+def _normalize_artist_name(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+async def _rebuild_watchlist_for_users(session, users) -> None:
+    from bot.models.artist_watchlist import ArtistWatchlist
+    from bot.models.track import ListeningHistory, Track
+
+    user_ids = [u.id for u in users]
+    if not user_ids:
+        return
+
+    top_artists_r = await session.execute(
+        select(
+            ListeningHistory.user_id,
+            Track.artist,
+            func.count(ListeningHistory.id).label("cnt"),
+        )
+        .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+        .where(
+            ListeningHistory.user_id.in_(user_ids),
+            ListeningHistory.action == "play",
+            Track.artist.is_not(None),
+        )
+        .group_by(ListeningHistory.user_id, Track.artist)
+        .order_by(ListeningHistory.user_id, func.count(ListeningHistory.id).desc())
+    )
+
+    from collections import defaultdict
+
+    top_artists_map: dict[int, list[tuple[str, float]]] = defaultdict(list)
+    for user_id, artist, cnt in top_artists_r.all():
+        if artist and len(top_artists_map[user_id]) < 8:
+            top_artists_map[user_id].append((artist, float(cnt or 0)))
+
+    for user in users:
+        signal_rows = []
+        for artist_name, cnt in top_artists_map.get(user.id, []):
+            signal_rows.append((artist_name, cnt, "history"))
+
+        if getattr(user, "fav_artists", None):
+            for fav_artist in user.fav_artists:
+                if isinstance(fav_artist, str) and fav_artist.strip():
+                    signal_rows.append((fav_artist, 5.0, "favorite"))
+
+        ranked = _rank_watchlist_candidates(signal_rows)
+
+        await session.execute(delete(ArtistWatchlist).where(ArtistWatchlist.user_id == user.id))
+        for artist_name, norm_name, weight, source in ranked[:8]:
+            session.add(
+                ArtistWatchlist(
+                    user_id=user.id,
+                    artist_name=artist_name,
+                    normalized_name=norm_name,
+                    weight=weight,
+                    source=source,
+                )
+            )
+
+    await session.commit()
+
+
+def _rank_watchlist_candidates(rows: list[tuple[str, float, str]]) -> list[tuple[str, str, float, str]]:
+    merged: dict[str, tuple[str, float, str]] = {}
+    for artist_name, weight, source in rows:
+        normalized = _normalize_artist_name(artist_name)
+        if not normalized:
+            continue
+        current = merged.get(normalized)
+        if current is None:
+            merged[normalized] = (artist_name.strip(), weight, source)
+        else:
+            prev_name, prev_weight, prev_source = current
+            new_weight = prev_weight + weight
+            new_source = "favorite" if prev_source == "favorite" or source == "favorite" else "history"
+            merged[normalized] = (prev_name, new_weight, new_source)
+
+    ranked = [
+        (name, normalized, weight, source)
+        for normalized, (name, weight, source) in merged.items()
+    ]
+    ranked.sort(key=lambda x: x[2], reverse=True)
+    return ranked

@@ -26,6 +26,7 @@ class User(Base):
     fav_artists: Mapped[list | None] = mapped_column(JSON, nullable=True)
     fav_vibe: Mapped[str | None] = mapped_column(String(50), nullable=True)
     avg_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    preferred_hours: Mapped[list | None] = mapped_column(JSON, nullable=True)  # ML: top listening hours (UTC)
     onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Micro-payments (F-02)

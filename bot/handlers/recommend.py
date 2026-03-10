@@ -164,9 +164,15 @@ async def handle_artists_input(message: Message, state: FSMContext) -> None:
 
 async def _show_recommendations(message: Message, user: User) -> None:
     lang = user.language
+    from bot.config import settings
 
     # Use AI DJ engine (collaborative + content-based + fallback)
-    all_tracks = await get_recommendations(user.id, limit=10)
+    # Enable A/B logging if feature is enabled
+    log_for_ab = settings.ML_AB_TEST_ENABLED
+    if log_for_ab:
+        all_tracks = await get_recommendations(user.id, limit=10, log_for_ab=True)
+    else:
+        all_tracks = await get_recommendations(user.id, limit=10)
 
     # If AI DJ returns nothing, try YouTube search by fav artists/genres
     if not all_tracks:

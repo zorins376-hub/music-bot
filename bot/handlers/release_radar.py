@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -6,7 +8,9 @@ from sqlalchemy import update
 from bot.db import get_or_create_user
 from bot.i18n import t
 from bot.models.base import async_session
+from bot.models.release_notification import ReleaseNotification
 from bot.models.user import User
+from bot.services.analytics import track_event
 
 router = Router()
 
@@ -72,6 +76,8 @@ async def cb_radar_toggle(callback: CallbackQuery) -> None:
         reply_markup=_radar_keyboard(lang, new_value),
         parse_mode="HTML",
     )
+    if not new_value:
+        await track_event(user.id, "release_opt_out")
 
 
 @router.callback_query(lambda c: c.data == "radar:disable")
@@ -89,6 +95,7 @@ async def cb_radar_disable(callback: CallbackQuery) -> None:
     await callback.message.edit_reply_markup(
         reply_markup=_radar_quick_keyboard(lang, False)
     )
+    await track_event(user.id, "release_opt_out")
 
 
 @router.callback_query(lambda c: c.data == "radar:enable")
@@ -113,7 +120,20 @@ async def cb_radar_open(callback: CallbackQuery) -> None:
     user = await get_or_create_user(callback.from_user)
     lang = user.language
     status = t(lang, "radar_status_on") if user.release_radar_enabled else t(lang, "radar_status_off")
+
+    async with async_session() as session:
+        await session.execute(
+            update(ReleaseNotification)
+            .where(
+                ReleaseNotification.user_id == user.id,
+                ReleaseNotification.opened_at.is_(None),
+            )
+            .values(opened_at=datetime.now(timezone.utc))
+        )
+        await session.commit()
+
     await callback.answer()
+    await track_event(user.id, "release_open")
     await callback.message.answer(
         t(lang, "radar_header", status=status),
         reply_markup=_radar_keyboard(lang, user.release_radar_enabled),

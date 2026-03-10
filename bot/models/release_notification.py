@@ -21,3 +21,4 @@ class ReleaseNotification(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

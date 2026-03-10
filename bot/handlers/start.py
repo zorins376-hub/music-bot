@@ -58,6 +58,9 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
+            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="action:family"),
+        ],
+        [
             InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
         ],
         [
@@ -136,6 +139,11 @@ async def cmd_start(message: Message) -> None:
         elif payload.startswith("ref_"):
             from bot.handlers.referral import process_referral
             await process_referral(message, payload[4:])
+        # Family plan deep-link: /start fam_<invite_code>
+        elif payload.startswith("fam_"):
+            from bot.handlers.family import handle_family_deeplink
+            if await handle_family_deeplink(message, payload):
+                return
 
     # Check for new features to show
     new_features = get_new_features(user.language, user.last_seen_version)
@@ -338,6 +346,15 @@ async def _show_profile(message: Message, tg_user) -> None:
         lines.append(t(lang, "profile_artists", artists=", ".join(user.fav_artists)))
 
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── Family Plan ──────────────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data == "action:family")
+async def handle_family_button(callback: CallbackQuery) -> None:
+    await callback.answer()
+    from bot.handlers.family import cmd_family
+    await cmd_family(callback.message)
 
 
 # ── Taste Profile ────────────────────────────────────────────────────────

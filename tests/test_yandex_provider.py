@@ -182,6 +182,53 @@ class TestTrackToDict:
         result = _track_to_dict(mock_track)
         assert result is None
 
+
+class TestYandexTokenExpiry:
+    @pytest.mark.asyncio
+    async def test_search_rotates_from_expiring_token(self):
+        from bot.services import yandex_provider as yp
+
+        with patch.object(yp, "_is_token_expiring_soon", side_effect=lambda t, now_ts=None: t == "tok1"), \
+             patch.object(yp, "_tokens", ["tok1", "tok2"]), \
+             patch.object(yp, "_next_token", return_value="tok1"), \
+             patch.dict("sys.modules", {"yandex_music": MagicMock()}), \
+             patch("bot.services.yandex_provider._get_client", new_callable=AsyncMock) as mock_get_client:
+            mock_artist = MagicMock()
+            mock_artist.name = "Artist"
+            mock_track = MagicMock()
+            mock_track.id = 100
+            mock_track.title = "Song"
+            mock_track.artists = [mock_artist]
+            mock_track.duration_ms = 180000
+
+            mock_search_result = MagicMock()
+            mock_search_result.tracks = MagicMock()
+            mock_search_result.tracks.results = [mock_track]
+
+            mock_client = AsyncMock()
+            mock_client.search = AsyncMock(return_value=mock_search_result)
+            mock_get_client.return_value = mock_client
+
+            results = await yp.search_yandex("Song", limit=1)
+
+        assert len(results) == 1
+        assert results[0]["_ym_token"] == "tok2"
+        mock_get_client.assert_awaited_once_with("tok2")
+
+    @pytest.mark.asyncio
+    async def test_search_alerts_when_all_tokens_expiring(self):
+        from bot.services import yandex_provider as yp
+
+        with patch.object(yp, "_is_token_expiring_soon", return_value=True), \
+             patch.object(yp, "_tokens", ["tok1"]), \
+             patch.object(yp, "_next_token", return_value="tok1"), \
+             patch.dict("sys.modules", {"yandex_music": MagicMock()}), \
+             patch("bot.services.yandex_provider._admin_alert", new_callable=AsyncMock) as mock_alert:
+            result = await yp.search_yandex("Song", limit=1)
+
+        assert result == []
+        mock_alert.assert_awaited_once()
+
     def test_too_long_track_filtered(self):
         from bot.services.yandex_provider import _track_to_dict
         from bot.config import settings
@@ -193,3 +240,36 @@ class TestTrackToDict:
 
         result = _track_to_dict(mock_track)
         assert result is None
+
+
+@pytest.mark.asyncio
+class TestYandexAdminAlert:
+    async def test_admin_alert_sends_telegram_when_throttle_allows(self):
+        from bot.services import yandex_provider as yp
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.setex = AsyncMock()
+
+        with patch.object(yp, "cache") as mock_cache, \
+             patch.object(yp, "_send_admin_telegram_alert", new_callable=AsyncMock) as mock_send:
+            mock_cache.redis = mock_redis
+            await yp._admin_alert("alert-text")
+
+        mock_send.assert_awaited_once()
+        mock_redis.set.assert_awaited_once()
+        mock_redis.setex.assert_awaited_once()
+
+    async def test_admin_alert_skips_telegram_when_throttled(self):
+        from bot.services import yandex_provider as yp
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=False)
+        mock_redis.setex = AsyncMock()
+
+        with patch.object(yp, "cache") as mock_cache, \
+             patch.object(yp, "_send_admin_telegram_alert", new_callable=AsyncMock) as mock_send:
+            mock_cache.redis = mock_redis
+            await yp._admin_alert("alert-text")
+
+        mock_send.assert_not_awaited()

@@ -55,3 +55,4 @@ numpy>=1.26.0
 implicit>=0.7.0
 scipy>=1.11.0
 gensim>=4.3.0
+rapidfuzz>=3.9.0

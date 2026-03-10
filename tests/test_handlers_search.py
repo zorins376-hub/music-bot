@@ -31,6 +31,34 @@ def _track_info(video_id="abc123", title="Test Song", uploader="Artist"):
     }
 
 
+class TestLyricsChunking:
+    def test_split_long_text_lines_splits_when_limit_exceeded(self):
+        from bot.handlers.search import _split_long_text_lines
+
+        chunks = _split_long_text_lines(
+            header="HEADER",
+            lines=["a" * 8, "b" * 8],
+            max_len=15,
+        )
+
+        assert len(chunks) == 2
+        assert chunks[0].startswith("HEADER")
+        assert "bbbbbbbb" in chunks[1]
+
+    def test_split_long_text_lines_keeps_footer(self):
+        from bot.handlers.search import _split_long_text_lines
+
+        chunks = _split_long_text_lines(
+            header="H",
+            lines=["line"],
+            footer="F" * 20,
+            max_len=12,
+        )
+
+        assert len(chunks) == 2
+        assert chunks[-1] == "F" * 20
+
+
 # ── _track_caption ───────────────────────────────────────────────────────
 
 class TestTrackCaption:
@@ -85,11 +113,11 @@ class TestFmtDuration:
 
     def test_zero(self):
         from bot.handlers.search import _fmt_duration
-        assert _fmt_duration(0) == "0:00"
+        assert _fmt_duration(0) == "-:--"
 
     def test_none(self):
         from bot.handlers.search import _fmt_duration
-        assert _fmt_duration(None) == "?:??"
+        assert _fmt_duration(None) == "-:--"
 
     def test_exact_minute(self):
         from bot.handlers.search import _fmt_duration
@@ -98,6 +126,20 @@ class TestFmtDuration:
     def test_under_minute(self):
         from bot.handlers.search import _fmt_duration
         assert _fmt_duration(45) == "0:45"
+
+
+class TestSmartBitrate:
+    def test_yandex_prefers_320(self):
+        from bot.handlers.search import _smart_bitrate
+        assert _smart_bitrate("yandex", 240, 192) == 320
+
+    def test_long_track_caps_to_192(self):
+        from bot.handlers.search import _smart_bitrate
+        assert _smart_bitrate("youtube", 400, 320) == 192
+
+    def test_short_track_uses_default(self):
+        from bot.handlers.search import _smart_bitrate
+        assert _smart_bitrate("youtube", 180, 192) == 192
 
 
 # ── _feedback_keyboard ──────────────────────────────────────────────────
@@ -379,6 +421,23 @@ class TestHandleTrackSelect:
         cb_data = TrackCallback(sid="s1", i=0)
         await handle_track_select(cb, cb_data)
         cb.message.answer_audio.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_click_lock_skips_second_download(self):
+        from bot.handlers import search as search_mod
+        from bot.handlers.search import handle_track_select, TrackCallback
+
+        with patch.object(search_mod, "get_or_create_user", new_callable=AsyncMock) as mock_goc, \
+             patch.object(search_mod, "cache") as mock_cache, \
+             patch.object(search_mod, "_acquire_download_lock", new_callable=AsyncMock, return_value=False):
+            mock_goc.return_value = _make_user()
+            mock_cache.get_search = AsyncMock(return_value=[_track_info()])
+
+            cb = make_callback()
+            cb_data = TrackCallback(sid="s1", i=0)
+            await handle_track_select(cb, cb_data)
+
+            cb.message.answer_audio.assert_not_called()
 
 
 # ── handle_feedback ──────────────────────────────────────────────────────

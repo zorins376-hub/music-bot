@@ -8,7 +8,7 @@ Steps:
   4. Compute popularity scores
   5. Save all artifacts to disk
 
-Scheduled to run daily at ML_RETRAIN_HOUR (default: 3 AM UTC).
+Scheduled to run daily at ML_RETRAIN_HOUR (default: 4 AM UTC).
 """
 import asyncio
 import logging
@@ -19,6 +19,7 @@ import numpy as np
 
 from recommender.embeddings import build_sessions, train_embeddings
 from recommender.model_store import (
+    ModelStore,
     save_als,
     save_embeddings,
     save_popularity,
@@ -180,7 +181,22 @@ async def _compute_popularity(plays: list) -> None:
 async def start_ml_training_scheduler() -> None:
     """Schedule nightly ML training."""
     from bot.config import settings
+    
+    # Check if ML is enabled
+    if not settings.ML_ENABLED:
+        logger.info("ML disabled (ML_ENABLED=False), training scheduler not starting")
+        return
+    
     retrain_hour = settings.ML_RETRAIN_HOUR
+    
+    # Load existing models on startup
+    try:
+        store = ModelStore.get()
+        await store.load_latest()
+        if store.is_ready:
+            logger.info(f"Loaded existing ML models v{store.version}")
+    except Exception as e:
+        logger.warning(f"Could not load ML models: {e}")
 
     async def _loop():
         while True:
@@ -194,6 +210,9 @@ async def start_ml_training_scheduler() -> None:
             await asyncio.sleep(wait)
             try:
                 await run_training()
+                # Reload models after training
+                store = ModelStore.get()
+                await store.load_latest()
             except Exception as e:
                 logger.error("ML training error: %s", e)
 

@@ -92,3 +92,119 @@ def train_embeddings(sessions: list[list[str]]) -> tuple[np.ndarray, list[int]] 
 
     logger.info("Trained embeddings: %d tracks, dim=%d", len(track_ids), _EMBEDDING_DIM)
     return embeddings, track_ids
+
+
+class TrackEmbeddings:
+    """Wrapper around ModelStore for track similarity using Word2Vec embeddings.
+    
+    Usage:
+        from recommender.model_store import ModelStore
+        from recommender.embeddings import TrackEmbeddings
+        
+        store = ModelStore.get()
+        emb = TrackEmbeddings(store)
+        
+        similar = emb.get_similar_tracks("dQw4w9WgXcQ", topn=20)
+        # Returns: [("abc123", 0.95), ("xyz789", 0.87), ...]
+    """
+    
+    def __init__(self, model_store: "ModelStore | None" = None):
+        if model_store is None:
+            from recommender.model_store import ModelStore
+            model_store = ModelStore.get()
+        self._store = model_store
+    
+    def get_similar_tracks(
+        self, source_id: str, topn: int = 20
+    ) -> list[tuple[str, float]]:
+        """Get similar tracks by source_id using Word2Vec cosine similarity.
+        
+        Returns list of (source_id, similarity_score) pairs.
+        Returns empty list if track not in vocabulary or model not loaded.
+        """
+        return self._store.get_similar_tracks(source_id, topn)
+    
+    def get_track_vector(self, source_id: str) -> np.ndarray | None:
+        """Get embedding vector for a single track.
+        
+        Returns None if track not in vocabulary or model not loaded.
+        """
+        return self._store.get_track_vector(source_id)
+    
+    def get_session_vector(self, source_ids: list[str]) -> np.ndarray | None:
+        """Get average embedding of multiple tracks.
+        
+        Useful for computing "user taste vector" from recent listens.
+        Returns None if no tracks found or model not loaded.
+        """
+        return self._store.get_session_vector(source_ids)
+    
+    def cosine_similarity(
+        self, source_id_a: str, source_id_b: str
+    ) -> float | None:
+        """Compute cosine similarity between two tracks.
+        
+        Returns None if either track not in vocabulary.
+        """
+        vec_a = self.get_track_vector(source_id_a)
+        vec_b = self.get_track_vector(source_id_b)
+        
+        if vec_a is None or vec_b is None:
+            return None
+        
+        # Cosine similarity
+        dot = np.dot(vec_a, vec_b)
+        norm_a = np.linalg.norm(vec_a)
+        norm_b = np.linalg.norm(vec_b)
+        
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        
+        return float(dot / (norm_a * norm_b))
+    
+    @staticmethod
+    def cosine_similarity_vectors(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
+        """Compute cosine similarity between two pre-fetched vectors.
+        
+        Args:
+            vec_a: First embedding vector (numpy array)
+            vec_b: Second embedding vector (numpy array)
+            
+        Returns:
+            Cosine similarity score (-1 to 1)
+        """
+        dot = np.dot(vec_a, vec_b)
+        norm_a = np.linalg.norm(vec_a)
+        norm_b = np.linalg.norm(vec_b)
+        
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        
+        return float(dot / (norm_a * norm_b))
+    
+    def get_user_taste_similarity(
+        self, recent_track_ids: list[str], candidate_id: str
+    ) -> float | None:
+        """Compute similarity between user's recent tracks and a candidate track.
+        
+        Uses average embedding of recent tracks as "taste vector".
+        """
+        taste_vec = self.get_session_vector(recent_track_ids)
+        candidate_vec = self.get_track_vector(candidate_id)
+        
+        if taste_vec is None or candidate_vec is None:
+            return None
+        
+        dot = np.dot(taste_vec, candidate_vec)
+        norm_a = np.linalg.norm(taste_vec)
+        norm_b = np.linalg.norm(candidate_vec)
+        
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        
+        return float(dot / (norm_a * norm_b))
+    
+    @property
+    def is_ready(self) -> bool:
+        """Check if Word2Vec model is loaded and ready."""
+        return self._store.w2v_ready

@@ -1,0 +1,324 @@
+import { useRef, useState, useCallback } from "preact/hooks";
+import { extractDominantColor, rgbToCSS } from "../colorExtractor";
+
+interface ShareCardProps {
+  track: {
+    title: string;
+    artist: string;
+    cover_url?: string;
+    duration_fmt?: string;
+  };
+  onClose: () => void;
+  accentColor?: string;
+}
+
+/**
+ * ShareCard — generates a viral share card for Instagram Stories / social media.
+ * Uses canvas to create an image with track info + QR code.
+ */
+export function ShareCard({ track, onClose, accentColor = "#7c4dff" }: ShareCardProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [cardUrl, setCardUrl] = useState<string | null>(null);
+  const [dominantColor, setDominantColor] = useState(accentColor);
+
+  const generateCard = useCallback(async () => {
+    if (!canvasRef.current) return;
+    setIsGenerating(true);
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Set canvas size (Instagram Story ratio 9:16)
+    canvas.width = 1080;
+    canvas.height = 1920;
+
+    // Extract color from cover
+    let bgColor = accentColor;
+    if (track.cover_url) {
+      try {
+        const color = await extractDominantColor(track.cover_url);
+        bgColor = rgbToCSS(color);
+        setDominantColor(bgColor);
+      } catch {
+        // Use default
+      }
+    }
+
+    // Background gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, bgColor);
+    gradient.addColorStop(0.5, "#1a1a2e");
+    gradient.addColorStop(1, "#0d0d1a");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw cover image (if available)
+    if (track.cover_url) {
+      try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject();
+          img.src = track.cover_url!;
+        });
+
+        // Draw large cover with rounded corners
+        const coverSize = 700;
+        const coverX = (canvas.width - coverSize) / 2;
+        const coverY = 350;
+
+        // Create rounded rect clip
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(coverX, coverY, coverSize, coverSize, 40);
+        ctx.clip();
+        ctx.drawImage(img, coverX, coverY, coverSize, coverSize);
+        ctx.restore();
+
+        // Add shadow/glow effect
+        ctx.shadowColor = bgColor;
+        ctx.shadowBlur = 60;
+        ctx.strokeStyle = "rgba(255,255,255,0.1)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(coverX, coverY, coverSize, coverSize, 40);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      } catch {
+        // Skip cover
+      }
+    }
+
+    // Track title
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 64px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    
+    // Word wrap title
+    const maxWidth = canvas.width - 100;
+    const titleLines = wrapText(ctx, track.title, maxWidth);
+    let titleY = 1150;
+    titleLines.forEach((line, i) => {
+      ctx.fillText(line, canvas.width / 2, titleY + i * 75);
+    });
+
+    // Artist name
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.font = "48px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(track.artist || "Unknown Artist", canvas.width / 2, titleY + titleLines.length * 75 + 50);
+
+    // Duration badge
+    if (track.duration_fmt) {
+      ctx.fillStyle = "rgba(255,255,255,0.1)";
+      ctx.beginPath();
+      ctx.roundRect(canvas.width / 2 - 80, titleY + titleLines.length * 75 + 110, 160, 50, 25);
+      ctx.fill();
+      
+      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      ctx.font = "32px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillText(track.duration_fmt, canvas.width / 2, titleY + titleLines.length * 75 + 135);
+    }
+
+    // BLACK ROOM branding
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = "bold 36px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText("BLACK ROOM", canvas.width / 2, 1700);
+
+    // Swipe up hint
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "28px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText("⬆ Swipe up to listen", canvas.width / 2, 1780);
+
+    // Music note decoration
+    ctx.font = "120px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillText("♪", 100, 200);
+    ctx.fillText("♫", canvas.width - 150, 1600);
+
+    // Convert to blob URL
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        setCardUrl(url);
+      }
+      setIsGenerating(false);
+    }, "image/png");
+  }, [track, accentColor]);
+
+  const handleShare = useCallback(async () => {
+    if (!cardUrl) return;
+    
+    try {
+      // Try native share
+      if (navigator.share && navigator.canShare) {
+        const response = await fetch(cardUrl);
+        const blob = await response.blob();
+        const file = new File([blob], `${track.title}.png`, { type: "image/png" });
+        
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: `${track.artist} — ${track.title}`,
+            text: "Listen on BLACK ROOM 🎵",
+          });
+          return;
+        }
+      }
+      
+      // Fallback: download
+      const a = document.createElement("a");
+      a.href = cardUrl;
+      a.download = `${track.title}_blackroom.png`;
+      a.click();
+    } catch (e) {
+      console.error("Share error:", e);
+    }
+  }, [cardUrl, track]);
+
+  const handleDownload = useCallback(() => {
+    if (!cardUrl) return;
+    const a = document.createElement("a");
+    a.href = cardUrl;
+    a.download = `${track.title}_blackroom.png`;
+    a.click();
+  }, [cardUrl, track.title]);
+
+  // Generate on mount
+  if (!cardUrl && !isGenerating) {
+    generateCard();
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.9)",
+        zIndex: 1000,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          top: 20,
+          right: 20,
+          background: "rgba(255,255,255,0.1)",
+          border: "none",
+          borderRadius: "50%",
+          width: 44,
+          height: 44,
+          color: "#fff",
+          fontSize: 24,
+          cursor: "pointer",
+        }}
+      >
+        ✕
+      </button>
+
+      {/* Preview */}
+      <div
+        style={{
+          maxHeight: "60vh",
+          maxWidth: "90vw",
+          overflow: "hidden",
+          borderRadius: 20,
+          boxShadow: `0 0 60px ${dominantColor}40`,
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            maxHeight: "60vh",
+            maxWidth: "90vw",
+            objectFit: "contain",
+          }}
+        />
+      </div>
+
+      {/* Actions */}
+      <div style={{ marginTop: 20, display: "flex", gap: 12 }}>
+        {isGenerating ? (
+          <div style={{ color: "#fff", fontSize: 16 }}>Generating...</div>
+        ) : (
+          <>
+            <button
+              onClick={handleShare}
+              style={{
+                padding: "12px 28px",
+                borderRadius: 24,
+                border: "none",
+                background: dominantColor,
+                color: "#fff",
+                fontSize: 16,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              📤 Share
+            </button>
+            <button
+              onClick={handleDownload}
+              style={{
+                padding: "12px 28px",
+                borderRadius: 24,
+                border: "none",
+                background: "rgba(255,255,255,0.1)",
+                color: "#fff",
+                fontSize: 16,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ⬇ Download
+            </button>
+          </>
+        )}
+      </div>
+
+      <p style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
+        Share to Instagram Stories, Telegram, etc.
+      </p>
+    </div>
+  );
+}
+
+// Helper: word wrap text
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let currentLine = words[0];
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    const width = ctx.measureText(currentLine + " " + word).width;
+    if (width < maxWidth) {
+      currentLine += " " + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  lines.push(currentLine);
+  
+  // Limit to 2 lines
+  if (lines.length > 2) {
+    lines[1] = lines[1].slice(0, -3) + "...";
+    return lines.slice(0, 2);
+  }
+  
+  return lines;
+}

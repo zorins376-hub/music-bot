@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from bot.models.base import async_session
+from bot.models.daily_mix import DailyMix, DailyMixTrack
 from bot.models.favorite import FavoriteTrack
 from bot.models.track import ListeningHistory, Track
 from bot.services.cache import cache
@@ -23,7 +24,8 @@ def _track_to_result(track: Track) -> dict:
 
 async def get_or_build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
     """Return cached daily mix or build a new one for today."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today_date = datetime.now(timezone.utc).date()
+    today = today_date.isoformat()
     key = f"daily_mix:{user_id}:{today}"
 
     try:
@@ -35,7 +37,11 @@ async def get_or_build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
     except Exception:
         pass
 
-    tracks = await _build_daily_mix(user_id, limit=limit)
+    tracks = await _load_daily_mix_from_db(user_id, today_date, limit=limit)
+    if not tracks:
+        built_tracks = await _build_daily_mix_tracks(user_id, limit=limit)
+        await _save_daily_mix_to_db(user_id, today_date, built_tracks)
+        tracks = [_track_to_result(track) for track in built_tracks[:limit]]
 
     try:
         now = datetime.now(timezone.utc)
@@ -48,7 +54,7 @@ async def get_or_build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
     return tracks
 
 
-async def _build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
+async def _build_daily_mix_tracks(user_id: int, limit: int = 25) -> list[Track]:
     """Build daily mix from favorites, recent artists and popular tracks."""
     async with async_session() as session:
         fav_r = await session.execute(
@@ -104,4 +110,57 @@ async def _build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
         if len(merged) >= limit:
             break
 
-    return [_track_to_result(track) for track in merged[:limit]]
+    return merged[:limit]
+
+
+async def _load_daily_mix_from_db(user_id: int, mix_date, limit: int = 25) -> list[dict]:
+    async with async_session() as session:
+        mix_r = await session.execute(
+            select(DailyMix)
+            .where(DailyMix.user_id == user_id, DailyMix.mix_date == mix_date)
+            .limit(1)
+        )
+        mix = mix_r.scalar_one_or_none()
+        if mix is None:
+            return []
+
+        tracks_r = await session.execute(
+            select(Track)
+            .join(DailyMixTrack, DailyMixTrack.track_id == Track.id)
+            .where(DailyMixTrack.mix_id == mix.id)
+            .order_by(DailyMixTrack.position.asc())
+            .limit(limit)
+        )
+        tracks = list(tracks_r.scalars().all())
+
+    return [_track_to_result(track) for track in tracks]
+
+
+async def _save_daily_mix_to_db(user_id: int, mix_date, tracks: list[Track]) -> None:
+    if not tracks:
+        return
+
+    async with async_session() as session:
+        existing_r = await session.execute(
+            select(DailyMix)
+            .where(DailyMix.user_id == user_id, DailyMix.mix_date == mix_date)
+            .limit(1)
+        )
+        existing = existing_r.scalar_one_or_none()
+        if existing is not None:
+            return
+
+        mix = DailyMix(user_id=user_id, mix_date=mix_date, title="Daily Mix", source="daily_mix")
+        session.add(mix)
+        await session.flush()
+
+        for pos, track in enumerate(tracks):
+            session.add(
+                DailyMixTrack(
+                    mix_id=mix.id,
+                    track_id=track.id,
+                    position=pos,
+                )
+            )
+
+        await session.commit()

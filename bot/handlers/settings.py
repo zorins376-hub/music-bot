@@ -23,6 +23,9 @@ def _quality_keyboard(is_premium: bool, current: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
+                    InlineKeyboardButton(text=_label("auto", "⚡ Auto"), callback_data="quality:auto"),
+                ],
+                [
                     InlineKeyboardButton(text=_label("128", "128 kbps"), callback_data="quality:128"),
                     InlineKeyboardButton(text=_label("192", "192 kbps"), callback_data="quality:192"),
                     InlineKeyboardButton(text=_label("320", "★ 320 kbps"), callback_data="quality:320"),
@@ -31,6 +34,9 @@ def _quality_keyboard(is_premium: bool, current: str) -> InlineKeyboardMarkup:
         )
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(text=_label("auto", "⚡ Auto"), callback_data="quality:auto"),
+            ],
             [
                 InlineKeyboardButton(text=_label("128", "128 kbps"), callback_data="quality:128"),
                 InlineKeyboardButton(text=_label("192", "192 kbps"), callback_data="quality:192"),
@@ -43,24 +49,31 @@ def _quality_keyboard(is_premium: bool, current: str) -> InlineKeyboardMarkup:
 
 
 @router.message(Command("settings"))
-async def cmd_settings(message: Message) -> None:
-    user = await get_or_create_user(message.from_user)
-    lang = user.language
-    kb = _quality_keyboard(user.is_premium, user.quality)
-    await message.answer(
-        t(lang, "settings_quality", current=user.quality),
-        reply_markup=kb,
-        parse_mode="HTML",
-    )
-
-
-@router.message(Command("settings"))
 async def cmd_settings_v2(message: Message) -> None:
     """Show full settings menu with quality + TTS toggle."""
     user = await get_or_create_user(message.from_user)
     lang = user.language
+    raw_text = message.text if isinstance(message.text, str) else ""
+    text = (raw_text or "").strip()
+    args = text.split()
+    if len(args) >= 3 and args[1].lower() == "releases":
+        mode = args[2].lower()
+        if mode not in ("on", "off"):
+            await message.answer(t(lang, "settings_releases_usage"))
+            return
+        new_value = mode == "on"
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id == user.id).values(release_radar_enabled=new_value)
+            )
+            await session.commit()
+        await message.answer(
+            t(lang, "settings_releases_updated_on" if new_value else "settings_releases_updated_off")
+        )
+        return
+
     tts_on = (user.fav_vibe or "") != "tts_off"  # reuse field as TTS pref
-    kb = _settings_keyboard(user.is_premium, user.quality, tts_on, lang)
+    kb = _settings_keyboard(user.is_premium, user.quality, tts_on, bool(user.release_radar_enabled), lang)
     await message.answer(
         t(lang, "settings_quality", current=user.quality),
         reply_markup=kb,
@@ -68,12 +81,17 @@ async def cmd_settings_v2(message: Message) -> None:
     )
 
 
+cmd_settings = cmd_settings_v2
+
+
 def _settings_keyboard(
-    is_premium: bool, current: str, tts_on: bool, lang: str
+    is_premium: bool, current: str, tts_on: bool, releases_on: bool, lang: str
 ) -> InlineKeyboardMarkup:
     rows = _quality_keyboard(is_premium, current).inline_keyboard
     tts_label = t(lang, "settings_tts_on") if tts_on else t(lang, "settings_tts_off")
     rows.append([InlineKeyboardButton(text=tts_label, callback_data="settings:tts")])
+    releases_label = t(lang, "settings_releases_on") if releases_on else t(lang, "settings_releases_off")
+    rows.append([InlineKeyboardButton(text=releases_label, callback_data="settings:releases")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -93,14 +111,35 @@ async def handle_tts_toggle(callback: CallbackQuery) -> None:
         t(lang, "settings_tts_toggled_on" if tts_now else "settings_tts_toggled_off"),
         show_alert=False,
     )
-    kb = _settings_keyboard(user.is_premium, user.quality, tts_now, lang)
+    kb = _settings_keyboard(user.is_premium, user.quality, tts_now, bool(user.release_radar_enabled), lang)
+    await callback.message.edit_reply_markup(reply_markup=kb)
+
+
+@router.callback_query(lambda c: c.data == "settings:releases")
+async def handle_releases_toggle(callback: CallbackQuery) -> None:
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    new_value = not bool(user.release_radar_enabled)
+
+    async with async_session() as session:
+        await session.execute(
+            update(User).where(User.id == user.id).values(release_radar_enabled=new_value)
+        )
+        await session.commit()
+
+    await callback.answer(
+        t(lang, "settings_releases_updated_on" if new_value else "settings_releases_updated_off"),
+        show_alert=False,
+    )
+    tts_on = (user.fav_vibe or "") != "tts_off"
+    kb = _settings_keyboard(user.is_premium, user.quality, tts_on, new_value, lang)
     await callback.message.edit_reply_markup(reply_markup=kb)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("quality:"))
 async def handle_quality_change(callback: CallbackQuery) -> None:
     quality = callback.data.split(":")[1]
-    if quality not in ("128", "192", "320"):
+    if quality not in ("auto", "128", "192", "320"):
         await callback.answer()
         return
 
