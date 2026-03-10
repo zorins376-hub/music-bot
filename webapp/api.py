@@ -94,7 +94,20 @@ async def stream_audio(
     mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
     if not mp3_path.exists():
         try:
-            mp3_path = await download_track(video_id)
+            # Determine source by prefix
+            if video_id.startswith("ym_"):
+                # Yandex Music track
+                from bot.services.yandex_provider import download_yandex
+                track_id = int(video_id[3:])  # Remove "ym_" prefix
+                mp3_path = await download_yandex(track_id, mp3_path)
+            elif video_id.startswith("vk_"):
+                # VK Music — need to re-fetch URL (temporary links)
+                raise HTTPException(status_code=501, detail="VK streaming not supported in TMA yet")
+            else:
+                # YouTube
+                mp3_path = await download_track(video_id)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("Stream download failed for %s: %s", video_id, e)
             raise HTTPException(status_code=500, detail="Download failed")
