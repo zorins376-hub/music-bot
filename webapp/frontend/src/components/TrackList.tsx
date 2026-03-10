@@ -127,14 +127,17 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
   };
 
   const handleRemove = async (e: Event, track: Track, idx: number) => {
+    e.preventDefault();
     e.stopPropagation();
     haptic("medium");
+    
+    // Close swipe immediately for visual feedback
     setSwipedIndex(null);
     
     if (onRemove) {
       onRemove(track);
     } else {
-      // Default: remove via API
+      // Fallback: remove via API directly
       try {
         await sendAction("remove", track.video_id);
         // Trigger reorder without the removed track
@@ -191,13 +194,14 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
           )}
           {/* Delete button (revealed on swipe) */}
           <div
-            onClick={(e) => handleRemove(e as unknown as Event, t, i)}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(e as unknown as Event, t, i); }}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(e as unknown as Event, t, i); }}
             style={{
               position: "absolute",
               right: 0,
               top: 0,
               bottom: 0,
-              width: 60,
+              width: 70,
               background: "#ff4444",
               display: "flex",
               alignItems: "center",
@@ -205,7 +209,9 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
               borderRadius: "0 10px 10px 0",
               cursor: "pointer",
               opacity: swipedIndex === i ? 1 : 0,
+              pointerEvents: swipedIndex === i ? "auto" : "none",
               transition: "opacity 0.2s",
+              zIndex: 50,
             }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">

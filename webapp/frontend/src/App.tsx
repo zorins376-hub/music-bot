@@ -321,6 +321,9 @@ export function App() {
               onReorder={(newTracks) => {
                 reorderQueue(newTracks.map(t => t.video_id)).then(setState).catch(() => {});
               }}
+              onRemove={(t) => {
+                action("remove", t.video_id);
+              }}
               accentColor={accentColor}
             />
           )}
