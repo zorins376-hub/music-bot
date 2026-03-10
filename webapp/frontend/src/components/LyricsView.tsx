@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { fetchLyrics } from "../api";
+import { SkeletonLyrics } from "./Skeleton";
 
 interface LyricLine {
   time: number;   // seconds
@@ -86,7 +87,7 @@ export function LyricsView({ trackId, elapsed, onBack }: Props) {
       </button>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: 32 }}>⏳ Загрузка текста...</div>
+        <SkeletonLyrics />
       ) : lyrics ? (
         <div style={{
           padding: 12,
@@ -100,14 +101,21 @@ export function LyricsView({ trackId, elapsed, onBack }: Props) {
               key={i}
               ref={i === activeIdx ? activeRef : undefined}
               style={{
-                fontSize: i === activeIdx ? 16 : 14,
+                fontSize: i === activeIdx ? 18 : 14,
                 fontWeight: i === activeIdx ? 700 : 400,
                 color: i === activeIdx
-                  ? "var(--tg-theme-button-color, #7c4dff)"
+                  ? "#fff"
                   : "var(--tg-theme-text-color, #eee)",
-                opacity: hasTimestamps && activeIdx >= 0 && i !== activeIdx ? 0.5 : 1,
-                padding: "4px 0",
-                transition: "all 0.3s ease",
+                opacity: hasTimestamps && activeIdx >= 0 && i !== activeIdx ? 0.4 : 1,
+                padding: i === activeIdx ? "8px 12px" : "4px 0",
+                margin: i === activeIdx ? "4px 0" : 0,
+                borderRadius: i === activeIdx ? 8 : 0,
+                background: i === activeIdx
+                  ? "linear-gradient(90deg, var(--tg-theme-button-color, #7c4dff), #e040fb)"
+                  : "transparent",
+                transform: i === activeIdx ? "scale(1.02)" : "scale(1)",
+                boxShadow: i === activeIdx ? "0 2px 12px rgba(124, 77, 255, 0.4)" : "none",
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                 lineHeight: 1.6,
               }}
             >

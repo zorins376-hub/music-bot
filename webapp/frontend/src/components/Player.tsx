@@ -51,6 +51,55 @@ const IconHeart = ({ filled }: { filled: boolean }) => (
   </svg>
 );
 
+// --- Audio Visualizer (animated equalizer bars) ---
+function AudioVisualizer({ isPlaying }: { isPlaying: boolean }) {
+  const bars = [
+    { delay: "0s", minH: 20, maxH: 60 },
+    { delay: "0.1s", minH: 15, maxH: 80 },
+    { delay: "0.2s", minH: 25, maxH: 70 },
+    { delay: "0.15s", minH: 10, maxH: 90 },
+    { delay: "0.25s", minH: 20, maxH: 65 },
+  ];
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 12,
+        left: "50%",
+        transform: "translateX(-50%)",
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 4,
+        height: 32,
+        padding: "4px 12px",
+        background: "rgba(0,0,0,0.5)",
+        borderRadius: 16,
+        backdropFilter: "blur(8px)",
+      }}
+    >
+      {bars.map((bar, i) => (
+        <div
+          key={i}
+          style={{
+            width: 4,
+            borderRadius: 2,
+            background: "linear-gradient(to top, #7c4dff, #e040fb)",
+            animation: isPlaying ? `visualizer 0.5s ease-in-out ${bar.delay} infinite alternate` : "none",
+            height: isPlaying ? undefined : 8,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes visualizer {
+          0% { height: 8px; }
+          100% { height: 28px; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // --- Marquee Component for long text ---
 function Marquee({ text, style }: { text: string; style?: Record<string, string | number> }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -180,6 +229,7 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         style={{
+          position: "relative",
           width: 240,
           height: 240,
           margin: "0 auto 24px",
@@ -207,6 +257,8 @@ export function Player({ state, onAction, onShowLyrics }: Props) {
         ) : (
           track ? "♫" : "♪"
         )}
+        {/* Audio Visualizer overlay */}
+        {track && <AudioVisualizer isPlaying={state.is_playing} />}
       </div>
 
       {/* Track info with Marquee */}

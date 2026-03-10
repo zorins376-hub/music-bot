@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { searchTracks, type Track } from "../api";
+import { SkeletonTrack } from "./Skeleton";
 
 interface Props {
   onSelect: (track: Track) => void;
@@ -60,7 +61,15 @@ export function SearchBar({ onSelect }: Props) {
         </button>
       </div>
 
-      {results.map((t) => (
+      {loading ? (
+        <>
+          <SkeletonTrack />
+          <SkeletonTrack />
+          <SkeletonTrack />
+          <SkeletonTrack />
+          <SkeletonTrack />
+        </>
+      ) : results.map((t) => (
         <div
           key={t.video_id}
           onClick={() => onSelect(t)}
@@ -74,6 +83,13 @@ export function SearchBar({ onSelect }: Props) {
             background: "var(--tg-theme-secondary-bg-color, #2a2a3e)",
           }}
         >
+          {t.cover_url && (
+            <img
+              src={t.cover_url}
+              alt=""
+              style={{ width: 44, height: 44, borderRadius: 8, marginRight: 12, objectFit: "cover" }}
+            />
+          )}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
             <div style={{ fontSize: 12, color: "var(--tg-theme-hint-color, #aaa)" }}>{t.artist}</div>
@@ -81,6 +97,12 @@ export function SearchBar({ onSelect }: Props) {
           <div style={{ fontSize: 12, color: "var(--tg-theme-hint-color, #aaa)" }}>{t.duration_fmt}</div>
         </div>
       ))}
+      <style>{`
+        @keyframes shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      `}</style>
     </div>
   );
 }
