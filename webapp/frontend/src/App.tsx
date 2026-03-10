@@ -7,6 +7,7 @@ import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, type PlayerState, type Track } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
+import { getStreamUrl as getCachedStreamUrl } from "./offlineCache";
 
 type View = "player" | "playlists" | "search" | "lyrics";
 
@@ -103,24 +104,38 @@ export function App() {
     return () => { audio.pause(); audio.src = ""; preload.src = ""; };
   }, []);
 
-  // Sync audio with current track
+  // Track ID ref to detect changes
+  const currentTrackIdRef = useRef<string | null>(null);
+
+  // Sync audio with current track (with offline cache)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const track = state.current_track;
     if (!track) {
       audio.pause(); audio.src = "";
+      currentTrackIdRef.current = null;
       if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
       return;
     }
 
-    const newSrc = getStreamUrl(track.video_id);
-    if (!audio.src.includes(`/api/stream/${track.video_id}`)) {
-      audio.src = newSrc;
-    }
-    if (state.is_playing) {
-      audio.play().catch(() => {});
-    } else {
+    // Load audio with cache
+    const loadAudio = async () => {
+      if (currentTrackIdRef.current === track.video_id) return;
+      currentTrackIdRef.current = track.video_id;
+      
+      const apiUrl = getStreamUrl(track.video_id);
+      const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
+      audio.src = cachedUrl;
+      
+      if (state.is_playing) {
+        audio.play().catch(() => {});
+      }
+    };
+    
+    loadAudio();
+    
+    if (!state.is_playing) {
       audio.pause();
     }
 
