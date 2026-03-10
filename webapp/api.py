@@ -279,6 +279,7 @@ async def search_tracks(
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
+            cover_url=f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None,
         )
         for r in results
     ]
@@ -312,6 +313,7 @@ def _db_track_to_schema(t) -> TrackSchema:
         duration_fmt=fmt_duration(t.duration),
         source=t.source or "youtube",
         file_id=t.file_id,
+        cover_url=f"https://i.ytimg.com/vi/{t.source_id}/hqdefault.jpg" if t.source == "youtube" else None,
     )
 
 

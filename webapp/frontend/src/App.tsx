@@ -50,7 +50,11 @@ export function App() {
     const audio = audioRef.current;
     if (!audio) return;
     const track = state.current_track;
-    if (!track) { audio.pause(); audio.src = ""; return; }
+    if (!track) {
+      audio.pause(); audio.src = "";
+      if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
+      return;
+    }
 
     const newSrc = getStreamUrl(track.video_id);
     if (audio.src !== newSrc) {
@@ -60,6 +64,29 @@ export function App() {
       audio.play().catch(() => {});
     } else {
       audio.pause();
+    }
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: track.title,
+        artist: track.artist || "Black Room Radio",
+        artwork: track.cover_url ? [
+          { src: track.cover_url, sizes: "480x360", type: "image/jpeg" }
+        ] : []
+      });
+
+      navigator.mediaSession.setActionHandler("play", () => {
+        sendAction("play").then(setState).catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        sendAction("pause").then(setState).catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler("previoustrack", () => {
+        sendAction("prev").then(setState).catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler("nexttrack", () => {
+        sendAction("next").then(setState).catch(() => {});
+      });
     }
   }, [state.current_track?.video_id, state.is_playing]);
 
