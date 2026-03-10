@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Собираем TMA Player фронтенд
-RUN cd webapp/frontend && npm install && npm run build
+RUN cd webapp/frontend && npm install && npx vite build
 
 RUN mkdir -p /app/data /app/downloads /app/logs
 
