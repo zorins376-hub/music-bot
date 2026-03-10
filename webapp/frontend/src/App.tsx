@@ -527,9 +527,13 @@ export function App() {
     };
     
     loadAudio().then(async () => {
-      if (!state.is_playing) {
+      if (state.is_playing && audio.paused) {
+        await softPlay(audio);
+      } else if (!state.is_playing && !audio.paused) {
         await softPause(audio);
       }
+    }).catch((e) => {
+      console.error("Audio playback error:", e);
     });
 
     if ("mediaSession" in navigator) {
@@ -717,7 +721,21 @@ export function App() {
         if (act === "play") {
           ensureEqualizerGraph();
           audioContextRef.current?.resume().catch(() => {});
+          if (audioRef.current && audioRef.current.paused) {
+            if (trackId && trackId !== currentTrackIdRef.current) {
+              // Different track: just unlock audio context/element using the user gesture
+              audioRef.current.play().then(() => audioRef.current?.pause()).catch(() => {});
+            } else {
+              // Same track: call softPlay immediately to satisfy gesture and unpause instantly
+              softPlay(audioRef.current).catch(() => {});
+            }
+          }
+        } else if (act === "pause") {
+          if (audioRef.current && !audioRef.current.paused) {
+            softPause(audioRef.current).catch(() => {});
+          }
         }
+        
         const s = await sendAction(act, trackId, seekPos, track);
         if (act === "seek" && seekPos !== undefined && audioRef.current) {
           audioRef.current.currentTime = seekPos;
@@ -727,7 +745,7 @@ export function App() {
         console.error("Action error:", act, e);
       }
     },
-    [ensureEqualizerGraph]
+    [ensureEqualizerGraph, softPlay, softPause]
   );
 
   const updateQuality = useCallback(async (quality: string) => {
