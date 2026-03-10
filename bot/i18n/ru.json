@@ -278,5 +278,22 @@
   "similar_searching": "🔁 Ищу похожие треки...",
   "similar_not_found": "🔁 Похожие треки не найдены.",
   "similar_header": "🔁 <b>Похожее на {artist} — {title}</b>",
-  "lyrics_translate_fail": "🌐 Не удалось перевести текст. Попробуй позже."
+  "lyrics_translate_fail": "🌐 Не удалось перевести текст. Попробуй позже.",
+
+  "ai_playlist_prompt": "🤖 <b>AI Плейлист</b>\n\nОпиши какой плейлист ты хочешь:\n\n<i>Например:\n• Грустный плейлист на вечер\n• Энергичная музыка для тренировки\n• Что-то похожее на The Weeknd и Drake</i>",
+  "ai_playlist_generating": "🤖 Генерирую плейлист...",
+  "ai_playlist_header": "🤖 <b>AI Плейлист</b>\n\n<i>«{prompt}»</i>",
+  "ai_playlist_empty": "🤖 Не удалось найти треки по запросу. Попробуй описать иначе.",
+
+  "import_prompt": "📥 <b>Импорт плейлиста</b>\n\nОтправь ссылку на плейлист:\n\n• Spotify: <code>https://open.spotify.com/playlist/...</code>\n• Яндекс.Музыка: <code>https://music.yandex.ru/users/.../playlists/...</code>",
+  "import_detecting": "📥 Обнаружена ссылка на плейлист. Импортирую...",
+  "import_progress": "📥 Импорт: {found}/{total} треков найдено...",
+  "import_done": "📥 Плейлист «<b>{name}</b>» импортирован!\n\n✅ Найдено: {found}/{total} треков",
+  "import_empty": "📥 Не удалось найти треки из этого плейлиста.",
+  "import_invalid_url": "📥 Ссылка не распознана. Поддерживаются Spotify и Яндекс.Музыка.",
+  "import_error": "📥 Ошибка при импорте. Попробуй позже.",
+
+  "badge_earned": "🏅 Новый бейдж: <b>{badge}</b>!\n\n{description}",
+  "badges_header": "🏅 <b>Мои бейджи</b> ({count})",
+  "badges_empty": "🏅 У тебя пока нет бейджей. Слушай музыку и открывай их!"
 }

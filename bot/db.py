@@ -152,6 +152,13 @@ async def record_listening_event(
                 )
             )
             await session.commit()
+        # Check badges on play events (fire-and-forget)
+        if action == "play":
+            try:
+                from bot.services.achievements import check_and_award_badges
+                await check_and_award_badges(user_id, "play")
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("record_listening_event failed for user %s: %s", user_id, e)
 

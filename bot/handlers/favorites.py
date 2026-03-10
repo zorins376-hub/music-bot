@@ -57,6 +57,12 @@ async def handle_favorite_action(callback: CallbackQuery, callback_data: Favorit
     if callback_data.act == "add":
         added = await add_favorite_track(user.id, callback_data.tid)
         await callback.answer(t(lang, "fav_added" if added else "fav_exists"), show_alert=False)
+        if added:
+            try:
+                from bot.services.achievements import check_and_award_badges
+                await check_and_award_badges(user.id, "like")
+            except Exception:
+                pass
         return
 
     removed = await remove_favorite_track(user.id, callback_data.tid)

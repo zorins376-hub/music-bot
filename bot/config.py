@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     VK_LOGIN: Optional[str] = None
     VK_PASSWORD: Optional[str] = None
 
+    # ── OpenAI (Prompt-to-Playlist) ──────────────────────────────────────
+    OPENAI_API_KEY: Optional[str] = None
+
     # ── Sentry ───────────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
 

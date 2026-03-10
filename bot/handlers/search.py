@@ -407,6 +407,11 @@ async def _do_search(message: Message, query: str) -> None:
     script = detect_script(query)
     results = deduplicate_results(all_results, lang_hint=script, query=query)[:max_results] if all_results else []
 
+    # DMCA filter: remove blocked tracks
+    if results:
+        from bot.services.dmca_filter import filter_blocked
+        results = filter_blocked(results)
+
     if not results:
         # TASK-012: "Did you mean?" suggestions
         try:

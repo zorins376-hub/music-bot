@@ -668,6 +668,36 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     elif subcmd == "export":
         await _export_stats_csv(message)
 
+    # /admin block <source_id> [reason] — DMCA block
+    elif subcmd == "block":
+        if len(args) < 3:
+            await message.answer("Использование: /admin block <source_id> [причина]")
+            return
+        parts = args[2].split(maxsplit=1)
+        source_id = parts[0]
+        reason = parts[1] if len(parts) > 1 else "DMCA"
+        from bot.services.dmca_filter import block_track
+        blocked = await block_track(source_id, reason=reason, blocked_by=str(message.from_user.id))
+        if blocked:
+            await message.answer(f"🚫 Трек <code>{source_id}</code> заблокирован ({reason}).", parse_mode="HTML")
+            await log_admin_action(message.from_user.id, "dmca_block", details=source_id)
+        else:
+            await message.answer("Трек уже заблокирован или ошибка.")
+
+    # /admin unblock <source_id> — DMCA unblock
+    elif subcmd == "unblock":
+        if len(args) < 3:
+            await message.answer("Использование: /admin unblock <source_id>")
+            return
+        source_id = args[2]
+        from bot.services.dmca_filter import unblock_track
+        removed = await unblock_track(source_id)
+        if removed:
+            await message.answer(f"✅ Трек <code>{source_id}</code> разблокирован.", parse_mode="HTML")
+            await log_admin_action(message.from_user.id, "dmca_unblock", details=source_id)
+        else:
+            await message.answer("Трек не найден в списке заблокированных.")
+
     else:
         await message.answer(
             "<b>Команды админа:</b>\n"
@@ -683,7 +713,9 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin tracks &lt;tequila|fullmoon&gt; — управление треками\n"
             "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить из канала\n"
             "/admin audit — журнал действий\n"
-            "/admin export — экспорт статистики CSV",
+            "/admin export — экспорт статистики CSV\n"
+            "/admin block &lt;source_id&gt; [причина] — заблокировать трек (DMCA)\n"
+            "/admin unblock &lt;source_id&gt; — разблокировать трек",
             parse_mode="HTML",
         )
 

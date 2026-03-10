@@ -42,6 +42,9 @@ class User(Base):
     welcome_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     release_radar_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
+    # Achievements / badges
+    badges: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

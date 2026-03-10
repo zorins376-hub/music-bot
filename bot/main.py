@@ -19,6 +19,9 @@ from bot.handlers import radio, premium, recommend, playlist, recognize, queue, 
 from bot.handlers import favorites
 from bot.handlers import mix
 from bot.handlers import release_radar
+from bot.handlers import ai_playlist
+from bot.handlers import import_playlist
+from bot.handlers import badges
 from bot.handlers import settings as settings_handler
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
@@ -76,6 +79,10 @@ async def on_startup(bot: Bot) -> None:
     from bot.db import load_admin_ids_from_redis
     await load_admin_ids_from_redis()
 
+    # Load DMCA blocked tracks into memory
+    from bot.services.dmca_filter import load_blocked_ids
+    await load_blocked_ids()
+
     if app_settings.METRICS_PORT:
         from bot.services.metrics import start_metrics_server
         start_metrics_server(app_settings.METRICS_PORT)
@@ -120,6 +127,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
         BotCommand(command="faq", description="❓ FAQ"),
+        BotCommand(command="ai_playlist", description="🤖 AI Плейлист"),
     ]
     try:
         await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
@@ -316,6 +324,9 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(radio.router)      # TEQUILA/FULLMOON LIVE, AUTO MIX
     dp.include_router(premium.router)    # Premium
     dp.include_router(recommend.router)  # AI DJ
+    dp.include_router(ai_playlist.router)  # Prompt-to-Playlist
+    dp.include_router(import_playlist.router)  # Spotify/Yandex import
+    dp.include_router(badges.router)  # Achievements/badges
     dp.include_router(queue.router)      # Queue
     dp.include_router(referral.router)   # Referral system
     dp.include_router(faq.router)                # FAQ

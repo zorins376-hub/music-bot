@@ -278,5 +278,22 @@
   "similar_searching": "🔁 Searching for similar tracks...",
   "similar_not_found": "🔁 No similar tracks found.",
   "similar_header": "🔁 <b>Similar to {artist} — {title}</b>",
-  "lyrics_translate_fail": "🌐 Could not translate lyrics. Try again later."
+  "lyrics_translate_fail": "🌐 Could not translate lyrics. Try again later.",
+
+  "ai_playlist_prompt": "🤖 <b>AI Playlist</b>\n\nDescribe the playlist you want:\n\n<i>Examples:\n• Sad playlist for the evening\n• Energetic workout music\n• Something like The Weeknd and Drake</i>",
+  "ai_playlist_generating": "🤖 Generating playlist...",
+  "ai_playlist_header": "🤖 <b>AI Playlist</b>\n\n<i>\"{prompt}\"</i>",
+  "ai_playlist_empty": "🤖 Could not find tracks for this request. Try a different description.",
+
+  "import_prompt": "📥 <b>Import Playlist</b>\n\nSend a playlist link:\n\n• Spotify: <code>https://open.spotify.com/playlist/...</code>\n• Yandex Music: <code>https://music.yandex.ru/users/.../playlists/...</code>",
+  "import_detecting": "📥 Playlist link detected. Importing...",
+  "import_progress": "📥 Import: {found}/{total} tracks found...",
+  "import_done": "📥 Playlist \"<b>{name}</b>\" imported!\n\n✅ Found: {found}/{total} tracks",
+  "import_empty": "📥 Could not find tracks from this playlist.",
+  "import_invalid_url": "📥 Link not recognized. Spotify and Yandex Music are supported.",
+  "import_error": "📥 Import error. Try again later.",
+
+  "badge_earned": "🏅 New badge: <b>{badge}</b>!\n\n{description}",
+  "badges_header": "🏅 <b>My Badges</b> ({count})",
+  "badges_empty": "🏅 No badges yet. Listen to music and unlock them!"
 }

@@ -278,5 +278,22 @@
   "similar_searching": "🔁 Окшош тректерди издөөдө...",
   "similar_not_found": "🔁 Окшош тректер табылган жок.",
   "similar_header": "🔁 <b>{artist} — {title} окшоштор</b>",
-  "lyrics_translate_fail": "🌐 Текстти которууга мүмкүн болгон жок. Кийин аракет кыл."
+  "lyrics_translate_fail": "🌐 Текстти которууга мүмкүн болгон жок. Кийин аракет кыл.",
+
+  "ai_playlist_prompt": "🤖 <b>AI Плейлист</b>\n\nКандай плейлист каалайсың:\n\n<i>Мисалы:\n• Кечки кайгылуу плейлист\n• Машыгуу үчүн энергиялуу музыка\n• The Weeknd менен Drake сыяктуу</i>",
+  "ai_playlist_generating": "🤖 Плейлист түзүлүүдө...",
+  "ai_playlist_header": "🤖 <b>AI Плейлист</b>\n\n<i>«{prompt}»</i>",
+  "ai_playlist_empty": "🤖 Суроо боюнча ырлар табылган жок. Башкача сүрөттөп көр.",
+
+  "import_prompt": "📥 <b>Плейлист импорттоо</b>\n\nПлейлист шилтемесин жөнөт:\n\n• Spotify: <code>https://open.spotify.com/playlist/...</code>\n• Яндекс.Музыка: <code>https://music.yandex.ru/users/.../playlists/...</code>",
+  "import_detecting": "📥 Плейлист шилтемеси табылды. Импорттоодо...",
+  "import_progress": "📥 Импорт: {found}/{total} ырлар табылды...",
+  "import_done": "📥 «<b>{name}</b>» плейлисти импорттолду!\n\n✅ Табылды: {found}/{total} ыр",
+  "import_empty": "📥 Бул плейлисттен ырлар табылган жок.",
+  "import_invalid_url": "📥 Шилтеме таанылган жок. Spotify жана Яндекс.Музыка колдоого алынат.",
+  "import_error": "📥 Импорт катасы. Кийин аракет кыл.",
+
+  "badge_earned": "🏅 Жаңы бэйдж: <b>{badge}</b>!\n\n{description}",
+  "badges_header": "🏅 <b>Менин бэйджтерим</b> ({count})",
+  "badges_empty": "🏅 Бэйджтер жок. Музыка угуп, аларды ач!"
 }

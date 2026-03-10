@@ -196,6 +196,11 @@ async def create_playlist_name(message: Message, state: FSMContext) -> None:
         session.add(pl)
         await session.commit()
     await state.clear()
+    try:
+        from bot.services.achievements import check_and_award_badges
+        await check_and_award_badges(user.id, "playlist_create")
+    except Exception:
+        pass
     await message.answer(
         t(user.language, "pl_created", name=name),
         parse_mode="HTML",
