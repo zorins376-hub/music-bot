@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "preact/hooks";
+import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import type { Track } from "../api";
 import { sendAction } from "../api";
 
@@ -22,10 +22,26 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [swipedIndex, setSwipedIndex] = useState<number | null>(null);
+  const [dragY, setDragY] = useState(0);
   const dragStartY = useRef(0);
   const dragStartX = useRef(0);
   const longPressTimer = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // Calculate drop target based on Y position
+  const findDropTarget = useCallback((touchY: number) => {
+    let newOverIndex = dragIndex;
+    itemRefs.current.forEach((el, idx) => {
+      if (idx === dragIndex) return;
+      const rect = el.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (touchY > midY - 20 && touchY < midY + rect.height) {
+        newOverIndex = idx;
+      }
+    });
+    return newOverIndex;
+  }, [dragIndex]);
 
   const handleTouchStart = (e: TouchEvent, idx: number) => {
     dragStartY.current = e.touches[0].clientY;
@@ -34,8 +50,9 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
     longPressTimer.current = window.setTimeout(() => {
       haptic("heavy");
       setDragIndex(idx);
+      setDragY(e.touches[0].clientY);
       setSwipedIndex(null);
-    }, 500);
+    }, 400);
   };
 
   const handleTouchMove = useCallback((e: TouchEvent, idx: number) => {
@@ -44,8 +61,8 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
     const movedY = Math.abs(touchY - dragStartY.current);
     const movedX = touchX - dragStartX.current;
 
-    // Cancel long press if moved
-    if (longPressTimer.current && movedY > 10) {
+    // Cancel long press if moved too much before timer fires
+    if (longPressTimer.current && (movedY > 15 || Math.abs(movedX) > 15)) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
@@ -56,39 +73,57 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
     } else if (movedX > 20 && swipedIndex === idx) {
       setSwipedIndex(null);
     }
+  }, [dragIndex, swipedIndex]);
 
-    // Drag mode - find target position
-    if (dragIndex !== null) {
+  // Global touch move listener for drag mode
+  useEffect(() => {
+    if (dragIndex === null) return;
+
+    const onMove = (e: TouchEvent) => {
       e.preventDefault();
-      const elements = document.elementsFromPoint(touchX, touchY);
-      for (const el of elements) {
-        const dataIdx = (el as HTMLElement).dataset?.trackIdx;
-        if (dataIdx !== undefined) {
-          const newOver = parseInt(dataIdx);
-          if (newOver !== overIndex) {
-            setOverIndex(newOver);
-            haptic("light");
-          }
-          break;
-        }
+      const touchY = e.touches[0].clientY;
+      setDragY(touchY);
+      
+      const newOver = findDropTarget(touchY);
+      if (newOver !== null && newOver !== overIndex) {
+        setOverIndex(newOver);
+        haptic("light");
       }
-    }
-  }, [dragIndex, overIndex, swipedIndex]);
+    };
+
+    const onEnd = () => {
+      if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex && onReorder) {
+        const newTracks = [...tracks];
+        const [removed] = newTracks.splice(dragIndex, 1);
+        newTracks.splice(overIndex, 0, removed);
+        haptic("medium");
+        onReorder(newTracks);
+      }
+      setDragIndex(null);
+      setOverIndex(null);
+      setDragY(0);
+    };
+
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+
+    return () => {
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+    };
+  }, [dragIndex, overIndex, tracks, onReorder, findDropTarget]);
 
   const handleTouchEnd = () => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
-    if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex && onReorder) {
-      const newTracks = [...tracks];
-      const [removed] = newTracks.splice(dragIndex, 1);
-      newTracks.splice(overIndex, 0, removed);
-      haptic("medium");
-      onReorder(newTracks);
+    // Actual reorder is handled by global listener when dragIndex is set
+    if (dragIndex === null) {
+      // Not in drag mode, do nothing special
     }
-    setDragIndex(null);
-    setOverIndex(null);
   };
 
   const handleRemove = async (e: Event, track: Track, idx: number) => {
@@ -116,19 +151,44 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
   return (
     <div
       ref={containerRef}
-      style={{ marginTop: 16, overflowY: "auto", maxHeight: "40vh", WebkitOverflowScrolling: "touch" }}
+      style={{ 
+        marginTop: 16, 
+        overflowY: dragIndex !== null ? "hidden" : "auto", 
+        maxHeight: "40vh", 
+        WebkitOverflowScrolling: "touch",
+        position: "relative",
+      }}
       onTouchEnd={handleTouchEnd}
     >
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span>Очередь ({tracks.length})</span>
-        <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>← свайп для удаления</span>
+        <span style={{ fontSize: 10, color: "var(--tg-theme-hint-color, #888)" }}>
+          {dragIndex !== null ? "🎯 отпусти для перемещения" : "☰ зажми · ← свайп удалить"}
+        </span>
       </div>
       {tracks.map((t, i) => (
         <div
           key={t.video_id}
+          ref={(el) => { if (el) itemRefs.current.set(i, el); else itemRefs.current.delete(i); }}
           data-track-idx={i}
           style={{ position: "relative", overflow: "hidden", marginBottom: 6 }}
         >
+          {/* Drop indicator line */}
+          {dragIndex !== null && overIndex === i && dragIndex !== i && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: dragIndex < i ? "auto" : 0,
+                bottom: dragIndex < i ? 0 : "auto",
+                height: 3,
+                background: accentColor,
+                borderRadius: 2,
+                zIndex: 10,
+              }}
+            />
+          )}
           {/* Delete button (revealed on swipe) */}
           <div
             onClick={(e) => handleRemove(e as unknown as Event, t, i)}
@@ -167,20 +227,27 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
               background: i === currentIndex
                 ? accentColor
                 : dragIndex === i
-                ? "rgba(124, 77, 255, 0.3)"
+                ? "rgba(124, 77, 255, 0.5)"
                 : overIndex === i && dragIndex !== null
-                ? "rgba(124, 77, 255, 0.15)"
+                ? "rgba(124, 77, 255, 0.2)"
                 : "rgba(255,255,255,0.08)",
-              transform: `translateX(${swipedIndex === i ? -60 : 0}px) scale(${dragIndex === i ? 1.02 : 1})`,
-              transition: "transform 0.2s, background 0.15s",
-              boxShadow: dragIndex === i ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
+              transform: `translateX(${swipedIndex === i ? -60 : 0}px) scale(${dragIndex === i ? 1.05 : 1})`,
+              transition: dragIndex === i ? "none" : "transform 0.2s, background 0.15s",
+              boxShadow: dragIndex === i ? "0 8px 24px rgba(0,0,0,0.4)" : "none",
               touchAction: dragIndex !== null ? "none" : "pan-y",
               userSelect: "none",
+              opacity: dragIndex === i ? 0.9 : 1,
+              zIndex: dragIndex === i ? 100 : 1,
             }}
           >
           {/* Drag handle */}
           {onReorder && (
-            <div style={{ marginRight: 10, color: "var(--tg-theme-hint-color, #666)", fontSize: 16 }}>
+            <div style={{ 
+              marginRight: 10, 
+              color: dragIndex === i ? accentColor : "var(--tg-theme-hint-color, #666)", 
+              fontSize: 18,
+              padding: "4px",
+            }}>
               ☰
             </div>
           )}
