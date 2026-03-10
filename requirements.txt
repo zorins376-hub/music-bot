@@ -45,3 +45,13 @@ gTTS>=2.4.0
 # ── Import (Apple Music scraping) ─────────────────────────
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
+
+# ── TMA Player (FastAPI backend) ─────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# ── ML Recommendations ───────────────────────────────────
+numpy>=1.26.0
+implicit>=0.7.0
+scipy>=1.11.0
+gensim>=4.3.0

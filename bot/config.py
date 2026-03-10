@@ -112,6 +112,18 @@ class Settings(BaseSettings):
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)
     PREMIUM_DAYS: int = 30
 
+    # ── TMA Player (1.1) ─────────────────────────────────────────────────
+    TMA_URL: Optional[str] = None  # e.g. https://example.com/tma/
+
+    # ── ML Recommendations (3.1) ─────────────────────────────────────────
+    ML_MODEL_PATH: str = str(_BASE / "data" / "models")
+    ML_RETRAIN_HOUR: int = 3  # UTC hour for nightly retraining
+
+    # ── Bot Fleet / Sharding (5.2) ────────────────────────────────────────
+    NODE_ID: Optional[str] = None  # e.g. "node-1"
+    DISPATCHER_TOKEN: Optional[str] = None
+    NODE_TOKENS: Optional[str] = None  # comma-separated bot tokens for nodes
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

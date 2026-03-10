@@ -52,11 +52,22 @@ async def get_recommendations(user_id: int, limit: int = 10) -> list[dict]:
 
 
 async def _build_recommendations(user_id: int, limit: int) -> list[dict]:
-    """Build hybrid recommendations from DB."""
+    """Build hybrid recommendations: ML scorer first, SQL fallback."""
     from bot.models.base import async_session
     from bot.models.track import ListeningHistory, Track
     from bot.models.user import User
 
+    # ── Try ML-based scoring first ───────────────────────────────────────
+    try:
+        from recommender.model_store import model_exists
+        if model_exists():
+            ml_results = await _ml_recommendations(user_id, limit)
+            if ml_results:
+                return ml_results
+    except Exception as e:
+        logger.warning("ML reco failed, falling back to SQL: %s", e)
+
+    # ── SQL fallback ─────────────────────────────────────────────────────
     async with async_session() as session:
         # Count user plays
         play_count_r = await session.execute(
@@ -324,3 +335,45 @@ async def update_user_profile(user_id: int) -> None:
                 )
             )
             await session.commit()
+
+
+async def _ml_recommendations(user_id: int, limit: int) -> list[dict]:
+    """Score tracks using ML scorer (ALS + embeddings + popularity)."""
+    from bot.models.base import async_session
+    from bot.models.track import ListeningHistory, Track
+    from recommender.scorer import score_tracks
+
+    async with async_session() as session:
+        # Get user's listened IDs
+        listened_r = await session.execute(
+            select(ListeningHistory.track_id).where(
+                ListeningHistory.user_id == user_id,
+                ListeningHistory.action == "play",
+                ListeningHistory.track_id.is_not(None),
+            )
+        )
+        listened_ids = {row[0] for row in listened_r.all()}
+
+        if len(listened_ids) < _MIN_PLAYS_FOR_COLLAB:
+            return []
+
+        # Get candidate pool: all tracks with file_id
+        candidates_r = await session.execute(
+            select(Track.id, Track.artist).where(Track.file_id.is_not(None)).limit(10000)
+        )
+        candidates = candidates_r.all()
+        candidate_ids = [r[0] for r in candidates]
+        track_artists = {r[0]: (r[1] or "unknown") for r in candidates}
+
+        # Score
+        ranked_ids = score_tracks(user_id, candidate_ids, listened_ids, track_artists, limit=limit * 2)
+        if not ranked_ids:
+            return []
+
+        # Load track details
+        tracks_r = await session.execute(
+            select(Track).where(Track.id.in_(ranked_ids))
+        )
+        track_map = {t.id: t for t in tracks_r.scalars().all()}
+
+        return [_track_to_dict(track_map[tid]) for tid in ranked_ids if tid in track_map][:limit]

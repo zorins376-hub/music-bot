@@ -112,6 +112,16 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.weekly_recap import start_weekly_recap_scheduler
     await start_weekly_recap_scheduler(bot)
 
+    # ML training scheduler (nightly at ML_RETRAIN_HOUR)
+    from recommender.train import start_ml_training_scheduler
+    await start_ml_training_scheduler()
+
+    # Node heartbeat (Bot Fleet 5.2)
+    if app_settings.NODE_ID:
+        from bot.services.node_manager import register_node, start_heartbeat_loop
+        await register_node(app_settings.NODE_ID)
+        await start_heartbeat_loop(app_settings.NODE_ID)
+
     # One-time welcome broadcast for existing users
     asyncio.create_task(_broadcast_welcome(bot))
 

@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from sqlalchemy import select, update
 from sqlalchemy.sql import func
 
@@ -20,11 +20,19 @@ router = Router()
 
 
 def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
+    from bot.config import settings
     rows = [
         [
             InlineKeyboardButton(text="▸ TEQUILA LIVE", callback_data="radio:tequila"),
             InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
         ],
+    ]
+    # TMA Player WebApp button (1.1)
+    if settings.TMA_URL:
+        rows.append([
+            InlineKeyboardButton(text="🎵 Открыть плеер", web_app=WebAppInfo(url=settings.TMA_URL)),
+        ])
+    rows += [
         [
             InlineKeyboardButton(text="✦ DAILY MIX", callback_data="action:mix"),
             InlineKeyboardButton(text="🎙 AI DJ", callback_data="action:dj"),

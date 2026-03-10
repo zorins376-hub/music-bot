@@ -56,6 +56,51 @@ services:
   #     postgres:
   #       condition: service_healthy
 
+  # ── TMA Player WebApp (1.1) ────────────────────────────────────────────
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ── Dispatcher Bot (5.2) ─────────────────────────────────────────────
+  # dispatcher:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.dispatcher
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+
+  # ── Node Bot 2 (5.2 — scale horizontally) ────────────────────────────
+  # bot-node2:
+  #   build: .
+  #   restart: unless-stopped
+  #   env_file: .env.node2
+  #   environment:
+  #     NODE_ID: node-2
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./downloads:/app/downloads
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+
   # ── Redis ────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
