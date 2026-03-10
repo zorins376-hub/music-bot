@@ -28,6 +28,11 @@ class PlayerAction(BaseModel):
     action: str  # play / pause / next / prev / seek / shuffle / repeat
     track_id: Optional[str] = None
     position: Optional[int] = None  # seek position in seconds
+    track_title: Optional[str] = None
+    track_artist: Optional[str] = None
+    track_duration: Optional[int] = None
+    track_source: Optional[str] = None
+    track_cover_url: Optional[str] = None
 
 
 class PlaylistSchema(BaseModel):

@@ -42,10 +42,17 @@ export async function fetchPlayerState(userId: number): Promise<PlayerState> {
   return r.json();
 }
 
-export async function sendAction(action: string, trackId?: string, seekPos?: number): Promise<PlayerState> {
+export async function sendAction(action: string, trackId?: string, seekPos?: number, track?: Track): Promise<PlayerState> {
   const body: Record<string, unknown> = { action };
   if (trackId) body.track_id = trackId;
   if (seekPos !== undefined) body.position = seekPos;
+  if (track) {
+    body.track_title = track.title;
+    body.track_artist = track.artist;
+    body.track_duration = track.duration;
+    body.track_source = track.source;
+    body.track_cover_url = track.cover_url;
+  }
   const r = await fetch(`${API_BASE}/player/action`, {
     method: "POST",
     headers: getHeaders(),

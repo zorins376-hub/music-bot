@@ -340,8 +340,23 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
                     found = True
                     break
             if not found and body.track_id:
-                # Load track info from DB
+                # Load track info from DB, fallback to metadata from request
                 track = await _get_track_by_source_id(body.track_id)
+                if not track and body.track_title:
+                    from bot.utils import fmt_duration
+                    dur = body.track_duration or 0
+                    cover = body.track_cover_url
+                    if not cover and (body.track_source or "youtube") == "youtube":
+                        cover = f"https://i.ytimg.com/vi/{body.track_id}/hqdefault.jpg"
+                    track = TrackSchema(
+                        video_id=body.track_id,
+                        title=body.track_title,
+                        artist=body.track_artist or "Unknown",
+                        duration=dur,
+                        duration_fmt=fmt_duration(dur),
+                        source=body.track_source or "youtube",
+                        cover_url=cover,
+                    )
                 if track:
                     state.queue.append(track)
                     state.position = len(state.queue) - 1
@@ -395,9 +410,25 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
     elif body.action == "add":
         # Add track to queue without playing
         if body.track_id:
-            track = await _get_track_by_source_id(body.track_id)
-            if track and not any(t.video_id == body.track_id for t in state.queue):
-                state.queue.append(track)
+            if not any(t.video_id == body.track_id for t in state.queue):
+                track = await _get_track_by_source_id(body.track_id)
+                if not track and body.track_title:
+                    from bot.utils import fmt_duration
+                    dur = body.track_duration or 0
+                    cover = body.track_cover_url
+                    if not cover and (body.track_source or "youtube") == "youtube":
+                        cover = f"https://i.ytimg.com/vi/{body.track_id}/hqdefault.jpg"
+                    track = TrackSchema(
+                        video_id=body.track_id,
+                        title=body.track_title,
+                        artist=body.track_artist or "Unknown",
+                        duration=dur,
+                        duration_fmt=fmt_duration(dur),
+                        source=body.track_source or "youtube",
+                        cover_url=cover,
+                    )
+                if track:
+                    state.queue.append(track)
 
     # Update current track
     if state.queue and 0 <= state.position < len(state.queue):

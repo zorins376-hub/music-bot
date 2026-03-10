@@ -368,9 +368,9 @@ export function App() {
   }, [isWaveLoading, state.is_playing]);
 
   const action = useCallback(
-    async (act: string, trackId?: string, seekPos?: number) => {
+    async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
       try {
-        const s = await sendAction(act, trackId, seekPos);
+        const s = await sendAction(act, trackId, seekPos, track);
         if (act === "seek" && seekPos !== undefined && audioRef.current) {
           audioRef.current.currentTime = seekPos;
         }
@@ -453,7 +453,7 @@ export function App() {
 
       {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id); setView("player"); }} />}
 
-      {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id); setView("player"); }} />}
+      {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} />}
 
       {view === "lyrics" && lyricsTrackId && (
         <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} />
