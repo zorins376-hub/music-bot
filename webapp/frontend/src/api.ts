@@ -3,7 +3,7 @@ const API_BASE = "/api";
 function getHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    "X-Telegram-Init-Data": window.Telegram.WebApp.initData,
+    "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
   };
 }
 
@@ -80,7 +80,7 @@ export async function searchTracks(query: string, limit = 10): Promise<Track[]> 
 }
 
 export function getStreamUrl(videoId: string): string {
-  const initData = encodeURIComponent(window.Telegram.WebApp.initData);
+  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
   return `${API_BASE}/stream/${videoId}?token=${initData}`;
 }
 

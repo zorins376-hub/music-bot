@@ -11,7 +11,7 @@ import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 type View = "player" | "playlists" | "search" | "lyrics";
 
 export function App() {
-  const user = window.Telegram.WebApp.initDataUnsafe.user;
+  const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = user?.id ?? 0;
 
   const [view, setView] = useState<View>("player");

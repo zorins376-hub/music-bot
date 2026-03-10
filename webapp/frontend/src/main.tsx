@@ -23,7 +23,7 @@ declare global {
   }
 }
 
-window.Telegram.WebApp.ready();
-window.Telegram.WebApp.expand();
+window.Telegram?.WebApp?.ready();
+window.Telegram?.WebApp?.expand();
 
 render(<App />, document.getElementById("app")!);
