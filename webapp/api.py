@@ -11,13 +11,15 @@ Endpoints:
 """
 import json
 import logging
+import traceback
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from bot.config import settings
@@ -32,6 +34,19 @@ from webapp.schemas import (
     SearchResult,
     TrackSchema,
 )
+
+# ── Error file logger ────────────────────────────────────────────────────
+_LOG_DIR = Path("/app/logs") if Path("/app").exists() else Path("logs")
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_error_handler = RotatingFileHandler(
+    _LOG_DIR / "errors.log", maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8"
+)
+_error_handler.setLevel(logging.ERROR)
+_error_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+logging.getLogger().addHandler(_error_handler)
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +81,40 @@ app.add_middleware(
 )
 
 
+# ── Global exception handler ────────────────────────────────────────────
+
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.error(
+            "Unhandled %s %s → %s\n%s",
+            request.method,
+            request.url.path,
+            exc,
+            traceback.format_exc(),
+        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/errors")
+async def view_errors(
+    lines: int = Query(200, ge=1, le=5000),
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Return last N lines from errors.log (admin only)."""
+    err_file = _LOG_DIR / "errors.log"
+    if not err_file.exists():
+        return {"errors": []}
+    text = err_file.read_text(encoding="utf-8", errors="replace")
+    all_lines = text.strip().splitlines()
+    return {"errors": all_lines[-lines:]}
 
 
 # ── Audio streaming ─────────────────────────────────────────────────────
