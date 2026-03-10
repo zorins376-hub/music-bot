@@ -595,6 +595,8 @@ export function App() {
                 action("remove", t.video_id);
               }}
               accentColor={accentColor}
+              accentColorAlpha={accentColorAlpha}
+              themeId={theme.id}
             />
           )}
         </>
@@ -602,10 +604,10 @@ export function App() {
 
       {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id); setView("player"); }} />}
 
-      {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} />}
+      {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "lyrics" && lyricsTrackId && (
-        <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} />
+        <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} />
       )}
       </div>
 
@@ -614,6 +616,7 @@ export function App() {
         <MiniPlayer
           state={state}
           accentColor={accentColor}
+          themeId={theme.id}
           onAction={(act) => action(act)}
           onExpand={() => setView("player")}
         />

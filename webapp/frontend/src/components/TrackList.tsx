@@ -10,6 +10,8 @@ interface Props {
   onReorder?: (newOrder: Track[]) => void;
   onRemove?: (track: Track) => void;
   accentColor?: string;
+  accentColorAlpha?: string;
+  themeId?: string;
 }
 
 // Haptic helper
@@ -19,7 +21,8 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   } catch {}
 };
 
-export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, accentColor = "var(--tg-theme-button-color, #7c4dff)" }: Props) {
+export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, accentColor = "var(--tg-theme-button-color, #7c4dff)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", themeId = "blackroom" }: Props) {
+  const isTequila = themeId === "tequila";
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [swipedIndex, setSwipedIndex] = useState<number | null>(null);
@@ -162,11 +165,15 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
         display: "flex", 
         alignItems: "center", 
         justifyContent: "space-between",
-        padding: "4px 0",
-        background: "var(--tg-theme-bg-color, #1a1a2e)",
+        padding: isTequila ? "10px 12px" : "4px 0",
+        background: isTequila ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-bg-color, #1a1a2e)",
+        border: isTequila ? "1px solid rgba(255, 213, 79, 0.12)" : "none",
+        borderRadius: isTequila ? 16 : 0,
+        backdropFilter: isTequila ? "blur(14px)" : undefined,
+        color: isTequila ? "#fef0e0" : undefined,
       }}>
         <span>Очередь ({tracks.length})</span>
-        <span style={{ fontSize: 10, color: "var(--tg-theme-hint-color, #888)" }}>
+        <span style={{ fontSize: 10, color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #888)" }}>
           {dragIndex !== null ? (
             <><IconTarget size={12} /> отпусти для перемещения</>
           ) : (
@@ -218,7 +225,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
               top: 0,
               bottom: 0,
               width: 70,
-              background: "#ff4444",
+              background: isTequila ? "linear-gradient(135deg, #b23a1e, #ff6d00)" : "#ff4444",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -244,15 +251,17 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
               borderRadius: 10,
               cursor: "pointer",
               background: i === currentIndex
-                ? accentColor
+                ? (isTequila ? `linear-gradient(135deg, ${accentColor}, #ffcc66)` : accentColor)
                 : dragIndex === i
-                ? "rgba(124, 77, 255, 0.5)"
+                ? accentColorAlpha
                 : overIndex === i && dragIndex !== null
-                ? "rgba(124, 77, 255, 0.2)"
-                : "rgba(255,255,255,0.08)",
+                ? (isTequila ? "rgba(255, 213, 79, 0.14)" : "rgba(124, 77, 255, 0.2)")
+                : (isTequila ? "rgba(40, 25, 15, 0.45)" : "rgba(255,255,255,0.08)"),
               transform: `translateX(${swipedIndex === i ? -60 : 0}px) scale(${dragIndex === i ? 1.05 : 1})`,
               transition: dragIndex === i ? "none" : "transform 0.2s, background 0.15s",
-              boxShadow: dragIndex === i ? "0 8px 24px rgba(0,0,0,0.4)" : "none",
+              boxShadow: dragIndex === i ? "0 8px 24px rgba(0,0,0,0.4)" : (isTequila ? "0 4px 14px rgba(0,0,0,0.18)" : "none"),
+              border: isTequila ? `1px solid ${i === currentIndex ? "rgba(255, 245, 210, 0.18)" : "rgba(255, 213, 79, 0.08)"}` : "none",
+              backdropFilter: isTequila ? "blur(10px)" : undefined,
               touchAction: dragIndex !== null ? "none" : "pan-y",
               userSelect: "none",
               opacity: dragIndex === i ? 0.9 : 1,
@@ -280,14 +289,14 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
             </div>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: i === currentIndex ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: 14, fontWeight: i === currentIndex ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: isTequila && i !== currentIndex ? "#fef0e0" : undefined }}>
               {t.title}
             </div>
-            <div style={{ fontSize: 12, color: i === currentIndex ? "rgba(255,255,255,0.8)" : "var(--tg-theme-hint-color, #aaa)" }}>
+            <div style={{ fontSize: 12, color: i === currentIndex ? "rgba(255,255,255,0.8)" : (isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)") }}>
               {t.artist}
             </div>
           </div>
-          <div style={{ fontSize: 12, color: i === currentIndex ? "rgba(255,255,255,0.8)" : "var(--tg-theme-hint-color, #aaa)", marginLeft: 8 }}>
+          <div style={{ fontSize: 12, color: i === currentIndex ? "rgba(255,255,255,0.8)" : (isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)"), marginLeft: 8 }}>
             {t.duration_fmt}
           </div>
           </div>

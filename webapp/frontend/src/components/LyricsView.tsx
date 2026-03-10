@@ -13,6 +13,7 @@ interface Props {
   elapsed: number;  // current playback position in seconds
   onBack: () => void;
   accentColor?: string;
+  themeId?: string;
 }
 
 /**
@@ -45,7 +46,8 @@ function parseLines(raw: string): LyricLine[] {
   return result;
 }
 
-export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)" }: Props) {
+export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
+  const isTequila = themeId === "tequila";
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lines, setLines] = useState<LyricLine[]>([]);
@@ -83,7 +85,7 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
     <div>
       <button
         onClick={onBack}
-        style={{ background: "none", border: "none", color: "var(--tg-theme-link-color, #7c4dff)", cursor: "pointer", marginBottom: 12, fontSize: 14, display: "flex", alignItems: "center", gap: 4 }}
+        style={{ background: "none", border: "none", color: isTequila ? "#ffd54f" : "var(--tg-theme-link-color, #7c4dff)", cursor: "pointer", marginBottom: 12, fontSize: 14, display: "flex", alignItems: "center", gap: 4 }}
       >
         <IconArrowLeft size={16} /> Назад к плееру
       </button>
@@ -93,8 +95,10 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
       ) : lyrics ? (
         <div style={{
           padding: 12,
-          borderRadius: 12,
-          background: "var(--tg-theme-secondary-bg-color, #2a2a3e)",
+          borderRadius: 16,
+          background: isTequila ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
+          border: isTequila ? "1px solid rgba(255, 213, 79, 0.12)" : "none",
+          backdropFilter: isTequila ? "blur(16px)" : undefined,
           maxHeight: "60vh",
           overflowY: "auto",
         }}>
@@ -107,16 +111,16 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
                 fontWeight: i === activeIdx ? 700 : 400,
                 color: i === activeIdx
                   ? "#fff"
-                  : "var(--tg-theme-text-color, #eee)",
+                  : (isTequila ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
                 opacity: hasTimestamps && activeIdx >= 0 && i !== activeIdx ? 0.4 : 1,
                 padding: i === activeIdx ? "8px 12px" : "4px 0",
                 margin: i === activeIdx ? "4px 0" : 0,
                 borderRadius: i === activeIdx ? 8 : 0,
                 background: i === activeIdx
-                  ? `linear-gradient(90deg, ${accentColor || 'var(--tg-theme-button-color, #7c4dff)'}, #e040fb)`
+                  ? (isTequila ? `linear-gradient(90deg, ${accentColor}, #ffcc66)` : `linear-gradient(90deg, ${accentColor || 'var(--tg-theme-button-color, #7c4dff)'}, #e040fb)`)
                   : "transparent",
                 transform: i === activeIdx ? "scale(1.02)" : "scale(1)",
-                boxShadow: i === activeIdx ? "0 2px 12px rgba(124, 77, 255, 0.4)" : "none",
+                boxShadow: i === activeIdx ? (isTequila ? "0 2px 16px rgba(255, 109, 0, 0.35)" : "0 2px 12px rgba(124, 77, 255, 0.4)") : "none",
                 transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                 lineHeight: 1.6,
               }}
@@ -126,7 +130,7 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
           ))}
         </div>
       ) : (
-        <div style={{ textAlign: "center", padding: 32, color: "var(--tg-theme-hint-color, #aaa)" }}>
+        <div style={{ textAlign: "center", padding: 32, color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)" }}>
           Текст не найден 😔
         </div>
       )}

@@ -5,6 +5,7 @@ import { IconMusic } from "./Icons";
 interface Props {
   state: PlayerState;
   accentColor: string;
+  themeId?: string;
   onAction: (action: string) => void;
   onExpand: () => void;
 }
@@ -13,9 +14,10 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(type); } catch {}
 };
 
-export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
+export function MiniPlayer({ state, accentColor, themeId = "blackroom", onAction, onExpand }: Props) {
   const track = state.current_track;
   if (!track) return null;
+  const isTequila = themeId === "tequila";
 
   // Swipe tracking
   const touchStartX = useRef(0);
@@ -40,10 +42,11 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
         left: 0,
         right: 0,
         zIndex: 100,
-        background: "rgba(20, 20, 30, 0.92)",
+        background: isTequila ? "rgba(40, 25, 15, 0.88)" : "rgba(20, 20, 30, 0.92)",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
         borderTop: `2px solid ${accentColor}`,
+        boxShadow: isTequila ? "0 -10px 30px rgba(255, 109, 0, 0.18)" : "none",
         padding: "8px 12px",
         display: "flex",
         alignItems: "center",
@@ -60,7 +63,8 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
         borderRadius: 8,
         overflow: "hidden",
         flexShrink: 0,
-        background: "var(--tg-theme-secondary-bg-color, #2a2a3e)",
+        background: isTequila ? "rgba(255, 213, 79, 0.08)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
+        border: isTequila ? "1px solid rgba(255, 213, 79, 0.18)" : "none",
       }}>
         {track.cover_url ? (
           <img src={track.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -79,13 +83,13 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
-          color: "var(--tg-theme-text-color, #eee)",
+          color: isTequila ? "#fef0e0" : "var(--tg-theme-text-color, #eee)",
         }}>
           {track.title}
         </div>
         <div style={{
           fontSize: 11,
-          color: "var(--tg-theme-hint-color, #aaa)",
+          color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)",
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -102,7 +106,7 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
           onAction(state.is_playing ? "pause" : "play");
         }}
         style={{
-          background: accentColor,
+          background: isTequila ? "linear-gradient(135deg, #ff6d00, #ffa726)" : accentColor,
           border: "none",
           borderRadius: "50%",
           width: 36,
@@ -111,8 +115,9 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
           alignItems: "center",
           justifyContent: "center",
           cursor: "pointer",
-          color: "#fff",
+          color: isTequila ? "#1a120b" : "#fff",
           flexShrink: 0,
+          boxShadow: isTequila ? "0 4px 14px rgba(255, 109, 0, 0.35)" : "none",
         }}
       >
         {state.is_playing ? (
@@ -132,7 +137,7 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
         style={{
           background: "none",
           border: "none",
-          color: "var(--tg-theme-text-color, #eee)",
+          color: isTequila ? "#fef0e0" : "var(--tg-theme-text-color, #eee)",
           cursor: "pointer",
           padding: 4,
           display: "flex",
