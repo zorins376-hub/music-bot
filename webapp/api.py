@@ -404,13 +404,62 @@ async def _load_state(user_id: int) -> PlayerState:
     r = await _get_redis()
     raw = await r.get(_state_key(user_id))
     if raw:
-        return PlayerState.model_validate_json(raw)
+        state = PlayerState.model_validate_json(raw)
+        return await _hydrate_state_covers(user_id, state)
     return PlayerState()
 
 
 async def _save_state(user_id: int, state: PlayerState) -> None:
     r = await _get_redis()
     await r.setex(_state_key(user_id), 86400, state.model_dump_json())
+
+
+async def _resolve_cover_url(source_id: str, source: str | None, current_cover: str | None = None) -> str | None:
+    if current_cover:
+        return current_cover
+
+    normalized_source = (source or "youtube").lower()
+    if normalized_source == "youtube" and source_id:
+        return f"https://i.ytimg.com/vi/{source_id}/hqdefault.jpg"
+
+    if normalized_source == "yandex" and source_id.startswith("ym_"):
+        try:
+            from bot.services.yandex_provider import fetch_yandex_track
+
+            track_meta = await fetch_yandex_track(int(source_id[3:]))
+            return track_meta.get("cover_url") if track_meta else None
+        except Exception:
+            return None
+
+    return None
+
+
+async def _hydrate_track_cover(track: TrackSchema) -> tuple[TrackSchema, bool]:
+    cover_url = await _resolve_cover_url(track.video_id, track.source, track.cover_url)
+    if cover_url and cover_url != track.cover_url:
+        track.cover_url = cover_url
+        return track, True
+    return track, False
+
+
+async def _hydrate_state_covers(user_id: int, state: PlayerState) -> PlayerState:
+    changed = False
+
+    if state.queue:
+        hydrated_queue = await asyncio.gather(*(_hydrate_track_cover(track) for track in state.queue))
+        state.queue = [track for track, _ in hydrated_queue]
+        changed = changed or any(updated for _, updated in hydrated_queue)
+
+    if state.current_track:
+        state.current_track, updated = await _hydrate_track_cover(state.current_track)
+        changed = changed or updated
+    elif state.queue and 0 <= state.position < len(state.queue):
+        state.current_track = state.queue[state.position]
+
+    if changed:
+        await _save_state(user_id, state)
+
+    return state
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -580,7 +629,7 @@ async def get_playlist_tracks(playlist_id: int, user: dict = Depends(get_current
             .order_by(PlaylistTrack.position)
         )
         tracks = (await session.execute(q)).scalars().all()
-        return [_db_track_to_schema(t) for t in tracks]
+        return await asyncio.gather(*(_db_track_to_schema(t) for t in tracks))
 
 
 @app.get("/api/lyrics/{track_id}", response_model=LyricsResponse)
@@ -668,19 +717,13 @@ async def _get_track_by_source_id(source_id: str) -> TrackSchema | None:
             select(Track).where(Track.source_id == source_id)
         )).scalar_one_or_none()
         if t:
-            return _db_track_to_schema(t)
+            return await _db_track_to_schema(t)
     return None
 
 
-def _db_track_to_schema(t) -> TrackSchema:
+async def _db_track_to_schema(t) -> TrackSchema:
     from bot.utils import fmt_duration
-    # Generate cover URL based on source
-    cover_url = None
-    if t.source == "youtube":
-        cover_url = f"https://i.ytimg.com/vi/{t.source_id}/hqdefault.jpg"
-    elif t.source == "yandex" and t.source_id.startswith("ym_"):
-        # Yandex Music doesn't have simple cover URL, leave None for now
-        pass
+    cover_url = await _resolve_cover_url(t.source_id, t.source)
     return TrackSchema(
         video_id=t.source_id,
         title=t.title or "Unknown",

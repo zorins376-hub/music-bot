@@ -1,6 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import { fetchPlaylists, fetchPlaylistTracks, type Playlist, type Track } from "../api";
-import { IconArrowLeft, IconSpinner } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner } from "./Icons";
 
 interface Props {
   userId: number;
@@ -64,6 +64,25 @@ export function PlaylistView({ userId, onPlayTrack, accentColor = "var(--tg-them
                 boxShadow: isTequila ? "0 4px 14px rgba(0,0,0,0.18)" : "none",
               }}
             >
+              <div style={{
+                width: 44,
+                height: 44,
+                borderRadius: 10,
+                overflow: "hidden",
+                flexShrink: 0,
+                marginRight: 12,
+                background: isTequila ? "rgba(255, 213, 79, 0.08)" : "var(--tg-theme-bg-color, #1a1a2e)",
+                border: isTequila ? "1px solid rgba(255, 213, 79, 0.14)" : "1px solid rgba(255,255,255,0.06)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                {t.cover_url ? (
+                  <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <IconMusic size={22} color={isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #888)"} />
+                )}
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: isTequila ? "#fef0e0" : undefined }}>{t.title}</div>
                 <div style={{ fontSize: 12, color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)" }}>{t.artist}</div>

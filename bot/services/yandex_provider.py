@@ -389,3 +389,27 @@ async def resolve_yandex_url(url: str) -> dict | None:
         logger.error("resolve_yandex_url error for track %s: %s", track_id, e)
         _clients.pop(token, None)
         return None
+
+
+async def fetch_yandex_track(track_id: int) -> dict | None:
+    """Fetch Yandex Music track metadata by numeric track ID."""
+    token = _next_token()
+    if not token:
+        logger.warning("fetch_yandex_track: no Yandex token configured")
+        return None
+    token = await _refresh_token_if_needed(token)
+    if not token:
+        return None
+
+    try:
+        client = await _get_client(token)
+        if client is None:
+            return None
+        tracks = await client.tracks([track_id])
+        if not tracks:
+            return None
+        return _track_to_dict(tracks[0], source_id=f"ym_{track_id}")
+    except Exception as e:
+        logger.error("fetch_yandex_track error for track %s: %s", track_id, e)
+        _clients.pop(token, None)
+        return None

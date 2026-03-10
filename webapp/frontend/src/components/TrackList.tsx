@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import type { Track } from "../api";
 import { sendAction } from "../api";
-import { IconDragHandle, IconTarget, IconSwipeLeft, IconTrash } from "./Icons";
+import { IconDragHandle, IconMusic, IconTarget, IconSwipeLeft, IconTrash } from "./Icons";
 
 interface Props {
   tracks: Track[];
@@ -288,6 +288,25 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
               <span style={{ width: 3, height: 14, background: "#fff", borderRadius: 1, animation: "eq 0.4s ease 0.2s infinite alternate" }} />
             </div>
           )}
+          <div style={{
+            width: 42,
+            height: 42,
+            borderRadius: 10,
+            overflow: "hidden",
+            flexShrink: 0,
+            marginRight: 10,
+            background: isTequila ? "rgba(255, 213, 79, 0.08)" : "rgba(255,255,255,0.08)",
+            border: isTequila ? "1px solid rgba(255, 213, 79, 0.14)" : "1px solid rgba(255,255,255,0.06)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            {t.cover_url ? (
+              <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              <IconMusic size={20} color={isTequila ? "#c8a882" : "rgba(255,255,255,0.55)"} />
+            )}
+          </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: i === currentIndex ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: isTequila && i !== currentIndex ? "#fef0e0" : undefined }}>
               {t.title}
