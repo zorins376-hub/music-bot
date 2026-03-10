@@ -32,6 +32,7 @@ export function App() {
   const [accentColorAlpha, setAccentColorAlpha] = useState("rgba(124, 77, 255, 0.4)");
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null);
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
+  const [audioDuration, setAudioDuration] = useState(0);
 
   // Create persistent audio element
   useEffect(() => {
@@ -79,6 +80,7 @@ export function App() {
     audio.addEventListener("loadedmetadata", () => {
       if (audio.duration && isFinite(audio.duration)) {
         const realDuration = Math.floor(audio.duration);
+        setAudioDuration(realDuration);
         setState((prev) => {
           if (prev.current_track && (!prev.current_track.duration || prev.current_track.duration === 0)) {
             const mins = Math.floor(realDuration / 60);
@@ -173,6 +175,7 @@ export function App() {
   useEffect(() => {
     elapsedRef.current = 0;
     setElapsed(0);
+    setAudioDuration(state.current_track?.duration ?? 0);
   }, [state.current_track?.video_id]);
 
   // Sleep Timer countdown
@@ -269,7 +272,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}

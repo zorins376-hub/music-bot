@@ -10,6 +10,7 @@ interface Props {
   accentColorAlpha?: string;
   onSleepTimer?: (minutes: number | null) => void;
   sleepTimerRemaining?: number | null;
+  audioDuration?: number;
 }
 
 // --- Haptic Feedback Helper ---
@@ -151,9 +152,9 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0 }: Props) {
   const track = state.current_track;
-  const duration = track?.duration ?? 0;
+  const duration = audioDuration || track?.duration || 0;
   const [elapsed, setElapsed] = useState(0);
   const [seeking, setSeeking] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
@@ -297,7 +298,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       </div>
 
       {/* Seek slider - improved touch area */}
-      {track && duration > 0 && (
+      {track && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 24px", marginBottom: 8 }}>
           <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", minWidth: 36, textAlign: "right" }}>
             {fmtTime(elapsed)}
@@ -306,29 +307,35 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             <input
               type="range"
               min={0}
-              max={duration}
+              max={duration || 1}
               value={elapsed}
+              disabled={duration === 0}
               onInput={(e) => {
-                setSeeking(true);
-                setElapsed(Number((e.target as HTMLInputElement).value));
+                if (duration > 0) {
+                  setSeeking(true);
+                  setElapsed(Number((e.target as HTMLInputElement).value));
+                }
               }}
               onChange={(e) => {
-                const pos = Number((e.target as HTMLInputElement).value);
-                setElapsed(pos);
-                setSeeking(false);
-                haptic("light");
-                onAction("seek", track.video_id, pos);
+                if (duration > 0) {
+                  const pos = Number((e.target as HTMLInputElement).value);
+                  setElapsed(pos);
+                  setSeeking(false);
+                  haptic("light");
+                  onAction("seek", track.video_id, pos);
+                }
               }}
               style={{
                 width: "100%",
                 height: 6,
                 accentColor: "var(--tg-theme-button-color, #7c4dff)",
-                cursor: "pointer",
+                cursor: duration > 0 ? "pointer" : "default",
+                opacity: duration > 0 ? 1 : 0.5,
               }}
             />
           </div>
           <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", minWidth: 36 }}>
-            {fmtTime(duration)}
+            {duration > 0 ? fmtTime(duration) : "-:--"}
           </span>
         </div>
       )}
