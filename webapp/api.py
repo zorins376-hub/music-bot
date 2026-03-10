@@ -63,6 +63,11 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 # ── Helper: Redis player state ──────────────────────────────────────────
 
 async def _get_redis():

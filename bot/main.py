@@ -396,7 +396,35 @@ async def main() -> None:
     if app_settings.USE_WEBHOOK:
         await _run_webhook(bot, dp)
     else:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # Start TMA webapp alongside polling if TMA_URL is configured
+        tma_task = None
+        if app_settings.TMA_URL:
+            tma_task = asyncio.create_task(_run_tma_server())
+        try:
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        finally:
+            if tma_task:
+                tma_task.cancel()
+
+
+async def _run_tma_server() -> None:
+    """Run TMA Player FastAPI server alongside the bot."""
+    try:
+        import uvicorn
+        from webapp.api import app as tma_app
+
+        port = int(__import__("os").environ.get("PORT", "8080"))
+        config = uvicorn.Config(
+            tma_app,
+            host="0.0.0.0",
+            port=port,
+            log_level="info",
+        )
+        server = uvicorn.Server(config)
+        logger.info("TMA webapp starting on port %d", port)
+        await server.serve()
+    except Exception as e:
+        logger.error("TMA webapp failed to start: %s", e)
 
 
 if __name__ == "__main__":
