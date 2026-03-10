@@ -32,6 +32,7 @@ export function App() {
   const [accentColorAlpha, setAccentColorAlpha] = useState("rgba(124, 77, 255, 0.4)");
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null);
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -183,13 +184,18 @@ export function App() {
 
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number) => {
+      setLastError(null);
       try {
         const s = await sendAction(act, trackId, seekPos);
         if (act === "seek" && seekPos !== undefined && audioRef.current) {
           audioRef.current.currentTime = seekPos;
         }
         setState(s);
-      } catch {}
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("Action error:", act, msg);
+        setLastError(`${act}: ${msg}`);
+      }
     },
     []
   );
@@ -220,6 +226,17 @@ export function App() {
         />
       )}
       <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
+      {/* Debug Banner */}
+      {lastError && (
+        <div style={{ background: "#ff4444", color: "#fff", padding: "8px 12px", borderRadius: 8, marginBottom: 8, fontSize: 12 }}>
+          ⚠️ Error: {lastError}
+        </div>
+      )}
+      {!userId && (
+        <div style={{ background: "#ff8800", color: "#fff", padding: "8px 12px", borderRadius: 8, marginBottom: 8, fontSize: 12 }}>
+          ⚠️ User ID: {userId} | initData: {window.Telegram?.WebApp?.initData ? "✓" : "✗"}
+        </div>
+      )}
       {/* Nav */}
       <nav style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "center" }}>
         {(["player", "playlists", "search"] as View[]).map((v) => (

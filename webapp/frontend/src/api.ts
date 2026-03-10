@@ -35,7 +35,10 @@ export interface Playlist {
 
 export async function fetchPlayerState(userId: number): Promise<PlayerState> {
   const r = await fetch(`${API_BASE}/player/state/${userId}`, { headers: getHeaders() });
-  if (!r.ok) throw new Error("Failed to fetch state");
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`State ${r.status}: ${text || r.statusText}`);
+  }
   return r.json();
 }
 
@@ -48,7 +51,10 @@ export async function sendAction(action: string, trackId?: string, seekPos?: num
     headers: getHeaders(),
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error("Action failed");
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`${r.status}: ${text || r.statusText}`);
+  }
   return r.json();
 }
 
