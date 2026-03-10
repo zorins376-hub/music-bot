@@ -39,6 +39,8 @@ interface Props {
   onSpectrumStyleChange?: (style: "bars" | "wave" | "circle") => void;
   moodFilter?: string | null;
   onMoodChange?: (mood: string | null) => void;
+  bypassProcessing?: boolean;
+  onBypassToggle?: (on: boolean) => void;
 }
 
 const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
@@ -218,7 +220,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -327,9 +329,53 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <AudioBadge label={qualityLabel} active warm={warm} />
-          <AudioBadge label={eqPresetLabel} active warm={warm} />
+          <AudioBadge label={bypassProcessing ? "RAW" : eqPresetLabel} active warm={warm} />
         </div>
       </div>
+
+      {/* Bypass / RAW mode toggle */}
+      <button
+        onClick={() => { haptic("medium"); onBypassToggle?.(!bypassProcessing); }}
+        style={{
+          padding: "10px 16px",
+          borderRadius: 16,
+          border: bypassProcessing
+            ? (warm ? "1px solid #ffd54f" : `1px solid ${accentColor}`)
+            : (warm ? "1px solid rgba(255, 213, 79, 0.18)" : "1px solid rgba(179, 136, 255, 0.16)"),
+          background: bypassProcessing
+            ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,213,79,0.24))" : `linear-gradient(135deg, ${accentColor}, #e040fb)`)
+            : (warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)"),
+          color: bypassProcessing ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          letterSpacing: 0.8,
+          textTransform: "uppercase",
+          transition: "all 0.3s ease",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {bypassProcessing ? (
+            <>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/>
+              <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+            </>
+          ) : (
+            <>
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+            </>
+          )}
+        </svg>
+        {bypassProcessing ? "RAW · Без обработки" : "Включить RAW (без обработки)"}
+      </button>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: warm ? "#c8a882" : "#bca8ff" }}>

@@ -132,6 +132,9 @@ export function App() {
   const [bassBoost, setBassBoost] = useState(false);
   const [partyMode, setPartyMode] = useState(false);
   const [moodFilter, setMoodFilter] = useState<string | null>(null);
+  const [bypassProcessing, setBypassProcessing] = useState(false);
+  const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -240,6 +243,7 @@ export function App() {
       subsonicFilter.type = "highpass";
       subsonicFilter.frequency.value = 20;
       subsonicFilter.Q.value = 0.7;
+      subsonicFilterRef.current = subsonicFilter;
 
       // ── 10-band parametric EQ with studio Q values ──
       const filters = EQ_BANDS.map((freq, idx) => {
@@ -257,6 +261,7 @@ export function App() {
       compressor.ratio.value = 2;
       compressor.attack.value = 0.05;
       compressor.release.value = 0.3;
+      compressorRef.current = compressor;
 
       // ── Stereo panner for 3D spatial audio ──
       const panner = ctx.createStereoPanner();
@@ -320,6 +325,35 @@ export function App() {
       g.setTargetAtTime(dbToGain(profile.makeup), now, 0.2);
     }
   }, [ensureEqualizerGraph]);
+
+  // Bypass all processing (raw audio signal)
+  const handleBypass = useCallback((on: boolean) => {
+    setBypassProcessing(on);
+    ensureEqualizerGraph();
+    const ctx = audioContextRef.current;
+    const cfGain = crossfadeGainRef.current;
+    const inputGain = eqInputGainRef.current;
+    const analyser = analyserRef.current;
+    const outputGain = eqOutputGainRef.current;
+    if (!ctx || !cfGain || !inputGain || !analyser || !outputGain) return;
+
+    const now = ctx.currentTime;
+    if (on) {
+      // Disconnect processing chain, connect crossfade → analyser → output directly
+      cfGain.disconnect();
+      cfGain.connect(analyser);
+    } else {
+      // Reconnect full processing chain
+      cfGain.disconnect();
+      cfGain.connect(inputGain);
+      // Re-apply current EQ preset
+      applyEqPreset(eqPreset);
+      // Re-apply pan
+      if (pannerRef.current) {
+        pannerRef.current.pan.setValueAtTime(panValue, now);
+      }
+    }
+  }, [ensureEqualizerGraph, applyEqPreset, eqPreset, panValue]);
 
   useEffect(() => {
     try {
@@ -969,7 +1003,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
