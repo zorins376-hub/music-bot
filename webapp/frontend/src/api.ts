@@ -154,8 +154,11 @@ export async function reorderQueue(fromIndex: number, toIndex: number): Promise<
   return r.json();
 }
 
-export async function fetchWave(userId: number, limit = 10): Promise<Track[]> {
+export async function fetchWave(userId: number, limit = 10, mood: string | null = null): Promise<Track[]> {
   const params = new URLSearchParams({ limit: String(limit) });
+  if (mood) {
+    params.set("mood", mood);
+  }
   const r = await fetch(`${API_BASE}/wave/${userId}?${params}`, { headers: getHeaders() });
   if (!r.ok) return [];
   const data = await r.json();

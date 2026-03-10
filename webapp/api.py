@@ -820,6 +820,7 @@ async def search_tracks(
 async def get_wave(
     user_id: int,
     limit: int = Query(default=10, ge=1, le=30),
+    mood: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
     """AI DJ: generate infinite track recommendations based on user taste."""

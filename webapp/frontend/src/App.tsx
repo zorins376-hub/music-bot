@@ -688,10 +688,10 @@ export function App() {
   }, []);
 
   const handleWave = useCallback(async () => {
-    if (isWaveLoading) return;
+    if (isWaveLoading || !userId) return;
     setIsWaveLoading(true);
     try {
-      const recs = await fetchWave(1, 10); // user_id=1 for now
+      const recs = await fetchWave(userId, 10, moodFilter);
       if (recs.length > 0) {
         // Add all recommendations to queue
         for (const track of recs) {
@@ -709,7 +709,7 @@ export function App() {
     } finally {
       setIsWaveLoading(false);
     }
-  }, [isWaveLoading, state.is_playing]);
+  }, [isWaveLoading, state.is_playing, userId, moodFilter]);
 
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
