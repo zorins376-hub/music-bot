@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from bot.config import settings
@@ -75,11 +75,12 @@ async def health():
 
 @app.get("/api/stream/{video_id}")
 async def stream_audio(
+    request: Request,
     video_id: str,
     x_telegram_init_data: str | None = Header(None),
     token: str | None = Query(None),
 ):
-    """Download (if needed) and stream MP3 for a given video_id."""
+    """Download (if needed) and stream MP3 for a given video_id with Range support."""
     # Auth: accept header or query param (audio elements can't send headers)
     init_data = x_telegram_init_data or token
     if not init_data or verify_init_data(init_data) is None:
@@ -116,10 +117,57 @@ async def stream_audio(
             logger.error("Stream download failed for %s: %s", video_id, e)
             raise HTTPException(status_code=500, detail="Download failed")
 
+    # Get file size for Range support
+    file_size = mp3_path.stat().st_size
+    range_header = request.headers.get("range")
+    
+    # Handle Range request for partial content
+    if range_header:
+        # Parse Range: bytes=start-end
+        range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            end = min(end, file_size - 1)
+            
+            if start >= file_size:
+                raise HTTPException(status_code=416, detail="Range not satisfiable")
+            
+            chunk_size = end - start + 1
+            
+            def iter_file():
+                with open(mp3_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "public, max-age=86400",
+                },
+            )
+    
+    # Full file response
     return FileResponse(
         mp3_path,
         media_type="audio/mpeg",
-        headers={"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400"},
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Cache-Control": "public, max-age=86400",
+        },
     )
 
 
@@ -320,7 +368,7 @@ async def search_tracks(
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
-            cover_url=f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None,
+            cover_url=r.get("cover_url") or (f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None),
         )
         for r in results
     ]
@@ -350,7 +398,7 @@ async def get_wave(
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
-            cover_url=f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None,
+            cover_url=r.get("cover_url") or (f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None),
         )
         for r in recs
         if r.get("video_id")

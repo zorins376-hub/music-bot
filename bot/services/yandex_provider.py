@@ -224,6 +224,21 @@ def _track_to_dict(track, source_id: str | None = None) -> dict | None:
             return None
         s = dur_ms // 1000
         m, sec = divmod(s, 60)
+        
+        # Extract cover URL from track's og_image or album cover
+        cover_url = None
+        try:
+            if hasattr(track, "og_image") and track.og_image:
+                cover_url = "https://" + track.og_image.replace("%%", "400x400")
+            elif hasattr(track, "cover_uri") and track.cover_uri:
+                cover_url = "https://" + track.cover_uri.replace("%%", "400x400")
+            elif hasattr(track, "albums") and track.albums:
+                album = track.albums[0]
+                if hasattr(album, "cover_uri") and album.cover_uri:
+                    cover_url = "https://" + album.cover_uri.replace("%%", "400x400")
+        except Exception:
+            pass
+        
         return {
             "video_id": track_id,
             "ym_track_id": int(track.id),
@@ -232,6 +247,7 @@ def _track_to_dict(track, source_id: str | None = None) -> dict | None:
             "duration": s,
             "duration_fmt": f"{m}:{sec:02d}",
             "source": "yandex",
+            "cover_url": cover_url,
         }
     except Exception:
         return None
