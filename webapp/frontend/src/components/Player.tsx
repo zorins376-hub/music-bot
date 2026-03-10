@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite } from "../api";
 import { ShareCard } from "./ShareCard";
-import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes } from "./Icons";
+import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -449,12 +449,12 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
 
   const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
   const MOOD_OPTIONS = [
-    { id: "chill", label: "Chill", emoji: "🌊" },
-    { id: "energy", label: "Energy", emoji: "⚡" },
-    { id: "focus", label: "Focus", emoji: "🎯" },
-    { id: "romance", label: "Romance", emoji: "💜" },
-    { id: "melancholy", label: "Melancholy", emoji: "🌧" },
-    { id: "party", label: "Party", emoji: "🎉" },
+    { id: "chill", label: "Chill", icon: (c: string) => <IconMoodChill size={18} color={c} /> },
+    { id: "energy", label: "Energy", icon: (c: string) => <IconMoodEnergy size={18} color={c} /> },
+    { id: "focus", label: "Focus", icon: (c: string) => <IconMoodFocus size={18} color={c} /> },
+    { id: "romance", label: "Romance", icon: (c: string) => <IconMoodRomance size={18} color={c} /> },
+    { id: "melancholy", label: "Melancholy", icon: (c: string) => <IconMoodMelancholy size={18} color={c} /> },
+    { id: "party", label: "Party", icon: (c: string) => <IconMoodParty size={18} color={c} /> },
   ];
 
   // ─── LUXURY FEATURES PANEL ─────────────────────────────
@@ -600,7 +600,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
                     alignItems: "center", gap: 2,
                   }}
                 >
-                  <span style={{ fontSize: 16 }}>{m.emoji}</span>
+                  {m.icon(active ? "#fff" : textColor)}
                   <span style={{ fontSize: 10 }}>{m.label}</span>
                 </button>
               );
