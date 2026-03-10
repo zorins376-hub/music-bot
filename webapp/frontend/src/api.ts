@@ -84,13 +84,14 @@ export function getStreamUrl(videoId: string): string {
   return `${API_BASE}/stream/${videoId}?token=${initData}`;
 }
 
-export async function toggleFavorite(videoId: string): Promise<{ liked: boolean }> {
+export async function toggleFavorite(videoId: string): Promise<boolean> {
   const r = await fetch(`${API_BASE}/favorites/${videoId}`, {
     method: "POST",
     headers: getHeaders(),
   });
   if (!r.ok) throw new Error("Failed to toggle favorite");
-  return r.json();
+  const data = await r.json();
+  return data.liked;
 }
 
 export async function checkFavorite(videoId: string): Promise<boolean> {
@@ -108,4 +109,12 @@ export async function reorderQueue(queue: string[]): Promise<PlayerState> {
   });
   if (!r.ok) throw new Error("Failed to reorder");
   return r.json();
+}
+
+export async function fetchWave(userId: number, limit = 10): Promise<Track[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const r = await fetch(`${API_BASE}/wave/${userId}?${params}`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
 }

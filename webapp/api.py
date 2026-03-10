@@ -287,6 +287,37 @@ async def search_tracks(
     return SearchResult(tracks=tracks, total=len(tracks))
 
 
+# ── AI DJ "Моя Волна" (Infinite recommendations) ────────────────────────
+
+@app.get("/api/wave/{user_id}", response_model=SearchResult)
+async def get_wave(
+    user_id: int,
+    limit: int = Query(default=10, ge=1, le=30),
+    user: dict = Depends(get_current_user),
+):
+    """AI DJ: generate infinite track recommendations based on user taste."""
+    if user.get("id") != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    from recommender.ai_dj import get_recommendations
+
+    recs = await get_recommendations(user_id, limit=limit)
+    tracks = [
+        TrackSchema(
+            video_id=r.get("video_id", ""),
+            title=r.get("title", "Unknown"),
+            artist=r.get("artist", r.get("uploader", "Unknown")),
+            duration=r.get("duration", 0),
+            duration_fmt=r.get("duration_fmt", "0:00"),
+            source=r.get("source", "youtube"),
+            cover_url=f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None,
+        )
+        for r in recs
+        if r.get("video_id")
+    ]
+    return SearchResult(tracks=tracks, total=len(tracks))
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 async def _get_track_by_source_id(source_id: str) -> TrackSchema | None:

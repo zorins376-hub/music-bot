@@ -5,7 +5,7 @@ import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, type PlayerState, type Track } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, type PlayerState, type Track } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 
 type View = "player" | "playlists" | "search" | "lyrics";
@@ -90,7 +90,7 @@ export function App() {
     }
 
     const newSrc = getStreamUrl(track.video_id);
-    if (audio.src !== newSrc) {
+    if (!audio.src.includes(`/api/stream/${track.video_id}`)) {
       audio.src = newSrc;
     }
     if (state.is_playing) {
