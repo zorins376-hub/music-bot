@@ -56,7 +56,7 @@ const IconHeart = ({ filled }: { filled: boolean }) => (
 );
 
 // --- Audio Visualizer (animated equalizer bars) ---
-function AudioVisualizer({ isPlaying }: { isPlaying: boolean }) {
+function AudioVisualizer({ isPlaying, accentColor = "#7c4dff" }: { isPlaying: boolean; accentColor?: string }) {
   const bars = [
     { delay: "0s", minH: 20, maxH: 60 },
     { delay: "0.1s", minH: 15, maxH: 80 },
@@ -88,7 +88,7 @@ function AudioVisualizer({ isPlaying }: { isPlaying: boolean }) {
           style={{
             width: 4,
             borderRadius: 2,
-            background: `linear-gradient(to top, ${accentColor || '#7c4dff'}, #e040fb)`,
+            background: `linear-gradient(to top, ${accentColor}, #e040fb)`,
             animation: isPlaying ? `visualizer 0.5s ease-in-out ${bar.delay} infinite alternate` : "none",
             height: isPlaying ? undefined : 8,
           }}
@@ -278,7 +278,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           track ? "♫" : "♪"
         )}
         {/* Audio Visualizer overlay */}
-        {track && <AudioVisualizer isPlaying={state.is_playing} />}
+        {track && <AudioVisualizer isPlaying={state.is_playing} accentColor={accentColor} />}
       </div>
 
       {/* Track info with Marquee */}
