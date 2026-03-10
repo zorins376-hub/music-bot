@@ -136,6 +136,33 @@ export function App() {
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
 
+  // ─── Soft play/pause: ramp outputGain to avoid clicks through EQ/compressor chain ──
+  const softPause = useCallback(async (audio: HTMLAudioElement) => {
+    const ctx = audioContextRef.current;
+    const outGain = eqOutputGainRef.current;
+    if (ctx && outGain && !audio.paused) {
+      const t = ctx.currentTime;
+      outGain.gain.setValueAtTime(outGain.gain.value, t);
+      outGain.gain.linearRampToValueAtTime(0, t + 0.06);
+      await new Promise(r => setTimeout(r, 70));
+    }
+    audio.pause();
+  }, []);
+
+  const softPlay = useCallback(async (audio: HTMLAudioElement) => {
+    const ctx = audioContextRef.current;
+    const outGain = eqOutputGainRef.current;
+    if (ctx && outGain) {
+      outGain.gain.setValueAtTime(0, ctx.currentTime);
+    }
+    await audio.play().catch(() => {});
+    if (ctx && outGain) {
+      const t = ctx.currentTime;
+      outGain.gain.setValueAtTime(0, t);
+      outGain.gain.linearRampToValueAtTime(1, t + 0.08);
+    }
+  }, []);
+
   // Create persistent audio element
   useEffect(() => {
     const audio = new Audio();
@@ -254,13 +281,13 @@ export function App() {
         return filter;
       });
 
-      // ── Gentle glue compressor (no limiter — it fights compressor causing pumping) ──
+      // ── Gentle glue compressor — soft knee + slow attack to avoid transient clicks ──
       const compressor = ctx.createDynamicsCompressor();
       compressor.threshold.value = -18;
-      compressor.knee.value = 20;
+      compressor.knee.value = 30;
       compressor.ratio.value = 2;
-      compressor.attack.value = 0.05;
-      compressor.release.value = 0.3;
+      compressor.attack.value = 0.08;
+      compressor.release.value = 0.25;
       compressorRef.current = compressor;
 
       // ── Stereo panner for 3D spatial audio ──
@@ -338,21 +365,26 @@ export function App() {
     if (!ctx || !cfGain || !inputGain || !analyser || !outputGain) return;
 
     const now = ctx.currentTime;
-    if (on) {
-      // Disconnect processing chain, connect crossfade → analyser → output directly
-      cfGain.disconnect();
-      cfGain.connect(analyser);
-    } else {
-      // Reconnect full processing chain
-      cfGain.disconnect();
-      cfGain.connect(inputGain);
-      // Re-apply current EQ preset
-      applyEqPreset(eqPreset);
-      // Re-apply pan
-      if (pannerRef.current) {
-        pannerRef.current.pan.setValueAtTime(panValue, now);
+    // Fade out → switch nodes → fade in (no click)
+    outputGain.gain.setValueAtTime(outputGain.gain.value, now);
+    outputGain.gain.linearRampToValueAtTime(0, now + 0.06);
+    setTimeout(() => {
+      if (on) {
+        cfGain.disconnect();
+        cfGain.connect(analyser);
+      } else {
+        cfGain.disconnect();
+        cfGain.connect(inputGain);
+        applyEqPreset(eqPreset);
+        if (pannerRef.current) {
+          const t2 = ctx.currentTime;
+          pannerRef.current.pan.setValueAtTime(panValue, t2);
+        }
       }
-    }
+      const t2 = ctx.currentTime;
+      outputGain.gain.setValueAtTime(0, t2);
+      outputGain.gain.linearRampToValueAtTime(1, t2 + 0.08);
+    }, 70);
   }, [ensureEqualizerGraph, applyEqPreset, eqPreset, panValue]);
 
   useEffect(() => {
@@ -455,6 +487,11 @@ export function App() {
       }
 
       audio.pause();
+      // Ensure outputGain is at 0 during source swap to prevent any click
+      const outGain = eqOutputGainRef.current;
+      if (ctx && outGain) {
+        outGain.gain.setValueAtTime(0, ctx.currentTime);
+      }
       const apiUrl = getStreamUrl(track.video_id);
       const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
       audio.src = cachedUrl;
@@ -464,11 +501,16 @@ export function App() {
         await audio.play().catch(() => {});
       }
 
-      // Crossfade in (250ms) — exponential ramp from near-zero
+      // Crossfade in (300ms) — smooth ramp from zero through both gains
       if (ctx && cfGain) {
         const t = ctx.currentTime;
         cfGain.gain.setValueAtTime(0.001, t);
-        cfGain.gain.exponentialRampToValueAtTime(1, t + 0.25);
+        cfGain.gain.exponentialRampToValueAtTime(1, t + 0.3);
+      }
+      if (ctx && outGain) {
+        const t = ctx.currentTime;
+        outGain.gain.setValueAtTime(0, t);
+        outGain.gain.linearRampToValueAtTime(1, t + 0.15);
       }
 
       // Prefetch next 2 tracks in queue so they start instantly
@@ -484,9 +526,9 @@ export function App() {
       }
     };
     
-    loadAudio().then(() => {
+    loadAudio().then(async () => {
       if (!state.is_playing) {
-        audio.pause();
+        await softPause(audio);
       }
     });
 
@@ -626,8 +668,8 @@ export function App() {
       if (left <= 0) {
         setSleepTimerEnd(null);
         setSleepRemaining(null);
-        // Pause playback
-        if (audioRef.current) audioRef.current.pause();
+        // Pause playback (with fade)
+        if (audioRef.current) softPause(audioRef.current);
         sendAction("pause").then(setState).catch(() => {});
       }
     };
