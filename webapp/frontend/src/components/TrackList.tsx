@@ -152,23 +152,34 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
   };
 
   return (
-    <div
-      ref={containerRef}
-      style={{ 
-        marginTop: 16, 
-        overflowY: dragIndex !== null ? "hidden" : "auto", 
-        maxHeight: "40vh", 
-        WebkitOverflowScrolling: "touch",
-        position: "relative",
-      }}
-      onTouchEnd={handleTouchEnd}
-    >
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div style={{ marginTop: 16 }}>
+      {/* Sticky header outside scroll container */}
+      <div style={{ 
+        fontSize: 14, 
+        fontWeight: 600, 
+        marginBottom: 8, 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: "space-between",
+        padding: "4px 0",
+        background: "var(--tg-theme-bg-color, #1a1a2e)",
+      }}>
         <span>Очередь ({tracks.length})</span>
         <span style={{ fontSize: 10, color: "var(--tg-theme-hint-color, #888)" }}>
           {dragIndex !== null ? "🎯 отпусти для перемещения" : "☰ зажми · ← свайп удалить"}
         </span>
       </div>
+      {/* Scrollable track list */}
+      <div
+        ref={containerRef}
+        style={{ 
+          overflowY: dragIndex !== null ? "hidden" : "auto", 
+          maxHeight: "35vh", 
+          WebkitOverflowScrolling: "touch",
+          position: "relative",
+        }}
+        onTouchEnd={handleTouchEnd}
+      >
       {tracks.map((t, i) => (
         <div
           key={t.video_id}
@@ -279,6 +290,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
           </div>
         </div>
       ))}
+      </div>
       <style>{`
         @keyframes eq {
           from { height: 4px; }
