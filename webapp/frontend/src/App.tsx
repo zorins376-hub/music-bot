@@ -5,7 +5,8 @@ import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch } from "./components/Icons";
+import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum } from "./components/Icons";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, type EqPreset, type PlayerState, type Track, type UserProfile } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
@@ -122,6 +123,15 @@ export function App() {
   const eqInputGainRef = useRef<GainNode | null>(null);
   const eqOutputGainRef = useRef<GainNode | null>(null);
   const crossfadeGainRef = useRef<GainNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const pannerRef = useRef<StereoPannerNode | null>(null);
+  const [showSpectrum, setShowSpectrum] = useState(false);
+  const [spectrumStyle, setSpectrumStyle] = useState<"bars" | "wave" | "circle">("bars");
+  const [panValue, setPanValue] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [bassBoost, setBassBoost] = useState(false);
+  const [partyMode, setPartyMode] = useState(false);
+  const [moodFilter, setMoodFilter] = useState<string | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -248,7 +258,16 @@ export function App() {
       compressor.attack.value = 0.05;
       compressor.release.value = 0.3;
 
-      // ── Signal chain: source → crossfade → preamp → HPF → EQ → compressor → output ──
+      // ── Stereo panner for 3D spatial audio ──
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = 0;
+
+      // ── Real-time analyser for spectrum visualizer ──
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+
+      // ── Signal chain: source → crossfade → preamp → HPF → EQ → compressor → panner → analyser → output ──
       source.connect(crossfadeGain);
       crossfadeGain.connect(inputGain);
       inputGain.connect(subsonicFilter);
@@ -259,7 +278,9 @@ export function App() {
         node = filter;
       });
       node.connect(compressor);
-      compressor.connect(outputGain);
+      compressor.connect(panner);
+      panner.connect(analyser);
+      analyser.connect(outputGain);
       outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
@@ -267,6 +288,8 @@ export function App() {
       eqInputGainRef.current = inputGain;
       eqOutputGainRef.current = outputGain;
       crossfadeGainRef.current = crossfadeGain;
+      analyserRef.current = analyser;
+      pannerRef.current = panner;
     }
   }, []);
 
@@ -640,6 +663,56 @@ export function App() {
     }
   }, []);
 
+  // 3D Spatial Panner
+  const handlePanChange = useCallback((value: number) => {
+    setPanValue(value);
+    const panner = pannerRef.current;
+    const ctx = audioContextRef.current;
+    if (panner && ctx) {
+      panner.pan.setValueAtTime(panner.pan.value, ctx.currentTime);
+      panner.pan.linearRampToValueAtTime(value, ctx.currentTime + 0.05);
+    }
+  }, []);
+
+  // Playback Speed
+  const handleSpeedChange = useCallback((speed: number) => {
+    setPlaybackSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
+    }
+  }, []);
+
+  // Bass Boost toggle
+  const handleBassBoost = useCallback((on: boolean) => {
+    setBassBoost(on);
+    ensureEqualizerGraph();
+    const ctx = audioContextRef.current;
+    const filters = eqFiltersRef.current;
+    if (!ctx || filters.length < 4) return;
+    const now = ctx.currentTime;
+    const profile = EQ_PRESETS[eqPreset] || EQ_PRESETS.flat;
+    // Boost first 4 bands (sub-bass to low-mids) by +6dB
+    for (let i = 0; i < 4; i++) {
+      const base = profile.gains[i] ?? 0;
+      const target = on ? base + 6 : base;
+      filters[i].gain.setValueAtTime(filters[i].gain.value, now);
+      filters[i].gain.setTargetAtTime(target, now, 0.15);
+    }
+  }, [ensureEqualizerGraph, eqPreset]);
+
+  // Party Mode — bass boost + club EQ + slight speed up
+  const handlePartyMode = useCallback((on: boolean) => {
+    setPartyMode(on);
+    if (on) {
+      setEqPreset("club");
+      handleBassBoost(true);
+      handleSpeedChange(1.02);
+    } else {
+      handleBassBoost(false);
+      handleSpeedChange(1);
+    }
+  }, [handleBassBoost, handleSpeedChange]);
+
   const showLyrics = (trackId: string) => {
     setLyricsTrackId(trackId);
     setView("lyrics");
@@ -776,24 +849,28 @@ export function App() {
         {/* Theme switcher */}
         <button
           onClick={switchTheme}
-          title={theme.id === "tequila" ? "BLACK ROOM" : "𝐓𝐄𝐐𝐔𝐈𝐋𝐀"}
+          title={`Switch theme (${theme.name})`}
           style={{
             padding: "6px 10px",
             borderRadius: 16,
-            border: theme.id === "tequila" ? "1px solid rgba(255,167,38,0.5)" : "1px solid rgba(124,77,255,0.3)",
-            background: theme.id === "tequila"
-              ? "linear-gradient(135deg, rgba(255,109,0,0.25), rgba(255,213,79,0.15))"
-              : "rgba(124,77,255,0.12)",
-            color: theme.id === "tequila" ? "#ffd54f" : "#b388ff",
-            fontSize: 14,
+            border: `1px solid ${theme.accentAlpha}`,
+            background: `linear-gradient(135deg, ${theme.accentAlpha}, transparent)`,
+            color: theme.accent,
+            fontSize: 11,
+            fontWeight: 600,
             cursor: "pointer",
             transition: "all 0.4s ease",
             display: "flex",
             alignItems: "center",
             gap: 4,
+            letterSpacing: 0.3,
           }}
         >
-          {theme.id === "tequila" ? <IconMoon size={16} /> : <IconLime size={16} />}
+          {theme.id === "tequila" ? <IconLime size={14} /> :
+           theme.id === "neon" ? <IconDiamond size={14} /> :
+           theme.id === "midnight" ? <IconMoon size={14} /> :
+           theme.id === "emerald" ? <IconPlaySmall size={14} /> :
+           <IconMoon size={14} />}
         </button>
       </nav>
       {(userProfile?.is_premium || userProfile?.is_admin) && (
@@ -892,7 +969,59 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} />
+
+          {/* Spectrum Visualizer */}
+          {showSpectrum && state.current_track && (
+            <div style={{
+              margin: "12px auto",
+              maxWidth: 360,
+              padding: "12px",
+              borderRadius: 22,
+              background: isTequila ? "rgba(40, 25, 15, 0.55)" : "rgba(20, 20, 30, 0.6)",
+              backdropFilter: "blur(16px)",
+              border: isTequila ? "1px solid rgba(255, 213, 79, 0.15)" : "1px solid rgba(124, 77, 255, 0.15)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+            }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                {(["bars", "wave", "circle"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setSpectrumStyle(s)}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: 12,
+                      border: "none",
+                      background: spectrumStyle === s
+                        ? (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.4), rgba(255,213,79,0.25))" : accentColor)
+                        : "rgba(255,255,255,0.08)",
+                      color: spectrumStyle === s ? "#fff" : theme.hintColor,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+              <SpectrumVisualizer
+                analyser={analyserRef.current}
+                isPlaying={state.is_playing}
+                accentColor={accentColor}
+                themeId={theme.id}
+                width={336}
+                height={100}
+                style={spectrumStyle}
+              />
+            </div>
+          )}
+
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}

@@ -248,3 +248,78 @@ export const IconDiamond = ({ size = 12, color = "currentColor" }: IconProps) =>
     <polygon points="12,2 22,12 12,22 2,12"/>
   </svg>
 );
+
+// Spectrum/Visualizer icon
+export const IconSpectrum = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+    <line x1="3" y1="20" x2="3" y2="14"/><line x1="6" y1="20" x2="6" y2="8"/>
+    <line x1="9" y1="20" x2="9" y2="12"/><line x1="12" y1="20" x2="12" y2="4"/>
+    <line x1="15" y1="20" x2="15" y2="10"/><line x1="18" y1="20" x2="18" y2="6"/>
+    <line x1="21" y1="20" x2="21" y2="16"/>
+  </svg>
+);
+
+// 3D/Spatial Audio icon
+export const IconSpatial = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12a5 5 0 0 1 5-5"/>
+    <path d="M2 12a5 5 0 0 0 5 5"/>
+    <path d="M22 12a5 5 0 0 0-5-5"/>
+    <path d="M22 12a5 5 0 0 1-5 5"/>
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M9 12h-3" opacity="0.5"/><path d="M18 12h-3" opacity="0.5"/>
+  </svg>
+);
+
+// Speed/Playback rate icon
+export const IconSpeed = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </svg>
+);
+
+// Bass Boost icon
+export const IconBassBoost = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18V5l12-2v13"/>
+    <circle cx="6" cy="18" r="3"/>
+    <circle cx="18" cy="16" r="3"/>
+    <path d="M2 8l3 3 3-3" strokeWidth="2.5"/>
+  </svg>
+);
+
+// Mood/Emotion icon
+export const IconMood = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+    <line x1="9" y1="9" x2="9.01" y2="9"/>
+    <line x1="15" y1="9" x2="15.01" y2="9"/>
+  </svg>
+);
+
+// Party/Celebration icon
+export const IconParty = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  </svg>
+);
+
+// Microphone/Karaoke icon
+export const IconMic = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" y1="19" x2="12" y2="23"/>
+    <line x1="8" y1="23" x2="16" y2="23"/>
+  </svg>
+);
+
+// Hi-Res Audio badge icon
+export const IconHiRes = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="6" width="20" height="12" rx="3"/>
+    <text x="12" y="14.5" fontSize="7" fill={color} stroke="none" fontWeight="bold" textAnchor="middle">HR</text>
+  </svg>
+);

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite } from "../api";
 import { ShareCard } from "./ShareCard";
-import { IconEqualizer, IconMusic, IconMusicNote } from "./Icons";
+import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -25,6 +25,20 @@ interface Props {
   eqPreset?: EqPreset;
   onQualityChange?: (quality: string) => void;
   onEqPresetChange?: (preset: EqPreset) => void;
+  bassBoost?: boolean;
+  onBassBoost?: (on: boolean) => void;
+  partyMode?: boolean;
+  onPartyMode?: (on: boolean) => void;
+  playbackSpeed?: number;
+  onSpeedChange?: (speed: number) => void;
+  panValue?: number;
+  onPanChange?: (value: number) => void;
+  showSpectrum?: boolean;
+  onToggleSpectrum?: () => void;
+  spectrumStyle?: "bars" | "wave" | "circle";
+  onSpectrumStyleChange?: (style: "bars" | "wave" | "circle") => void;
+  moodFilter?: string | null;
+  onMoodChange?: (mood: string | null) => void;
 }
 
 const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
@@ -204,7 +218,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -386,6 +400,190 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       </div>
     </div>
   ) : null;
+
+  const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+  const MOOD_OPTIONS = [
+    { id: "chill", label: "Chill", emoji: "🌊" },
+    { id: "energy", label: "Energy", emoji: "⚡" },
+    { id: "focus", label: "Focus", emoji: "🎯" },
+    { id: "romance", label: "Romance", emoji: "💜" },
+    { id: "melancholy", label: "Melancholy", emoji: "🌧" },
+    { id: "party", label: "Party", emoji: "🎉" },
+  ];
+
+  // ─── LUXURY FEATURES PANEL ─────────────────────────────
+  const luxuryPanel = (warm: boolean) => {
+    const panelBg = warm
+      ? "linear-gradient(180deg, rgba(40, 25, 15, 0.78), rgba(28, 18, 12, 0.72))"
+      : "linear-gradient(180deg, rgba(124, 77, 255, 0.08), rgba(32, 24, 50, 0.28))";
+    const panelBorder = warm
+      ? "1px solid rgba(255, 213, 79, 0.18)"
+      : "1px solid rgba(179, 136, 255, 0.12)";
+    const labelColor = warm ? "#c8a882" : "#bca8ff";
+    const activeGrad = warm
+      ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,213,79,0.24))"
+      : `linear-gradient(135deg, ${accentColor}, #e040fb)`;
+    const inactiveBg = warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)";
+    const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
+    const hlColor = warm ? "#ffd54f" : accentColor;
+
+    return (
+      <div style={{
+        marginTop: 14,
+        padding: warm ? "14px 14px 12px" : "14px",
+        borderRadius: 22,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        background: panelBg,
+        border: panelBorder,
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
+      }}>
+        {/* Quick Toggles Row */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          {/* Spectrum Visualizer toggle */}
+          <button onClick={onToggleSpectrum} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: showSpectrum ? `1px solid ${hlColor}` : panelBorder,
+            background: showSpectrum ? activeGrad : inactiveBg,
+            color: showSpectrum ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconSpectrum size={14} color={showSpectrum ? "#fff" : hlColor} /> Спектр
+          </button>
+
+          {/* Bass Boost toggle */}
+          <button onClick={() => onBassBoost?.(!bassBoost)} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: bassBoost ? `1px solid ${hlColor}` : panelBorder,
+            background: bassBoost ? activeGrad : inactiveBg,
+            color: bassBoost ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconBassBoost size={14} color={bassBoost ? "#fff" : hlColor} /> Bass+
+          </button>
+
+          {/* Party Mode */}
+          <button onClick={() => onPartyMode?.(!partyMode)} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: partyMode ? `1px solid ${hlColor}` : panelBorder,
+            background: partyMode
+              ? "linear-gradient(135deg, #ff6d00, #e040fb)"
+              : inactiveBg,
+            color: partyMode ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+            animation: partyMode ? "partyPulse 1.5s ease-in-out infinite" : "none",
+          }}>
+            <IconParty size={14} color={partyMode ? "#fff" : hlColor} /> Party
+          </button>
+        </div>
+
+        {/* 3D Spatial Panner */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
+              <IconSpatial size={14} color={labelColor} /> 3D Spatial
+            </div>
+            <span style={{ fontSize: 10, color: labelColor, fontVariantNumeric: "tabular-nums" }}>
+              {panValue === 0 ? "Center" : panValue < 0 ? `L ${Math.abs(Math.round(panValue * 100))}%` : `R ${Math.round(panValue * 100)}%`}
+            </span>
+          </div>
+          <input
+            type="range" min={-1} max={1} step={0.01}
+            value={panValue}
+            onInput={(e) => onPanChange?.(Number((e.target as HTMLInputElement).value))}
+            style={{ width: "100%", height: 4, accentColor: hlColor, cursor: "pointer" }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: labelColor, opacity: 0.7 }}>
+            <span>◀ Left</span><span>Right ▶</span>
+          </div>
+        </div>
+
+        {/* Playback Speed */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
+            <IconSpeed size={14} color={labelColor} /> Скорость
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
+            {SPEED_OPTIONS.map((s) => {
+              const active = playbackSpeed === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => { haptic("light"); onSpeedChange?.(s); }}
+                  style={{
+                    padding: "7px 4px", borderRadius: 12,
+                    border: active ? `1px solid ${hlColor}` : panelBorder,
+                    background: active ? activeGrad : inactiveBg,
+                    color: active ? "#fff" : textColor,
+                    fontSize: 11, fontWeight: active ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  {s}x
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Mood Filter for AI Wave */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
+            <IconMood size={14} color={labelColor} /> Настроение
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+            {MOOD_OPTIONS.map((m) => {
+              const active = moodFilter === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => { haptic("light"); onMoodChange?.(active ? null : m.id); }}
+                  style={{
+                    padding: "8px 6px", borderRadius: 14,
+                    border: active ? `1px solid ${hlColor}` : panelBorder,
+                    background: active ? activeGrad : inactiveBg,
+                    color: active ? "#fff" : textColor,
+                    fontSize: 12, fontWeight: active ? 700 : 500,
+                    cursor: "pointer",
+                    display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 2,
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{m.emoji}</span>
+                  <span style={{ fontSize: 10 }}>{m.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Hi-Res Badge */}
+        {(quality === "320" || quality === "auto") && (
+          <div style={{
+            display: "flex", justifyContent: "center", gap: 8, marginTop: 2,
+          }}>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "5px 12px", borderRadius: 999,
+              fontSize: 10, fontWeight: 700, letterSpacing: 1,
+              color: warm ? "#ffd54f" : "#b388ff",
+              background: warm ? "rgba(255, 213, 79, 0.08)" : "rgba(124, 77, 255, 0.08)",
+              border: warm ? "1px solid rgba(255, 213, 79, 0.15)" : "1px solid rgba(179, 136, 255, 0.15)",
+              textTransform: "uppercase",
+            }}>
+              <IconHiRes size={14} color={warm ? "#ffd54f" : "#b388ff"} />
+              HI-RES AUDIO · {quality === "320" ? "320kbps" : "ADAPTIVE"}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ─── TEQUILA LUXURY THEME ───────────────────────────────
   if (isTequila) {
@@ -774,6 +972,15 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
         )}
 
         {audioControlsPanel(true)}
+        {luxuryPanel(true)}
+
+        <style>{`
+          @keyframes partyPulse {
+            0% { box-shadow: 0 0 8px rgba(255, 109, 0, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(224, 64, 251, 0.5); }
+            100% { box-shadow: 0 0 8px rgba(255, 109, 0, 0.3); }
+          }
+        `}</style>
 
         {/* Sleep menu — warm glass */}
         {showSleepMenu && (
@@ -1164,6 +1371,9 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
         </div>
       )}
 
+      {audioControlsPanel(false)}
+      {luxuryPanel(false)}
+
       {/* Share Card Modal */}
       {showShareCard && track && (
         <ShareCard
@@ -1175,6 +1385,4 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       )}
     </div>
   );
-
-      {audioControlsPanel(false)}
 }
