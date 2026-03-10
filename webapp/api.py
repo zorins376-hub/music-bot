@@ -12,11 +12,12 @@ Endpoints:
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from bot.config import settings
 from bot.models.base import init_db
@@ -324,3 +325,19 @@ async def _fetch_lyrics(track_id: str) -> str | None:
             logger.warning("Genius lyrics fetch failed: %s", e)
 
     return None
+
+
+# ── Frontend SPA serving ────────────────────────────────────────────────
+
+_FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
+
+if _FRONTEND_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="static_assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        """Serve index.html for any non-API route (SPA fallback)."""
+        file_path = _FRONTEND_DIST / full_path
+        if full_path and file_path.is_file() and _FRONTEND_DIST in file_path.resolve().parents:
+            return FileResponse(file_path)
+        return FileResponse(_FRONTEND_DIST / "index.html")

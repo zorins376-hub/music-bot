@@ -9,12 +9,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && deno --version
 
+# Node.js для сборки TMA Player фронтенда
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Собираем TMA Player фронтенд
+RUN cd webapp/frontend && npm install && npm run build
 
 RUN mkdir -p /app/data /app/downloads /app/logs
 
