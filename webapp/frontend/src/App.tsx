@@ -5,12 +5,31 @@ import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, type PlayerState, type Track } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, type EqPreset, type PlayerState, type Track, type UserProfile } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 
 type View = "player" | "playlists" | "search" | "lyrics";
+
+const EQ_STORAGE_KEY = "tma:eq-preset";
+const EQ_PRESETS: Record<EqPreset, number[]> = {
+  flat: [0, 0, 0, 0, 0, 0],
+  bass: [6, 4, 2, 0, -1, -2],
+  vocal: [-2, -1, 1, 3, 3, 1],
+  club: [0, 0, 2, 3, 2, 0],
+  bright: [-1, 0, 1, 2, 4, 5],
+};
+
+function getSavedEqPreset(): EqPreset {
+  try {
+    const value = localStorage.getItem(EQ_STORAGE_KEY);
+    if (value === "flat" || value === "bass" || value === "vocal" || value === "club" || value === "bright") {
+      return value;
+    }
+  } catch {}
+  return "flat";
+}
 
 export function App() {
   const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
@@ -38,7 +57,12 @@ export function App() {
   const [audioDuration, setAudioDuration] = useState(0);
   const [isWaveLoading, setIsWaveLoading] = useState(false);
   const [buffering, setBuffering] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [eqPreset, setEqPreset] = useState<EqPreset>(() => getSavedEqPreset());
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
 
   // Create persistent audio element
   useEffect(() => {
@@ -131,6 +155,55 @@ export function App() {
 
     return () => { audio.pause(); audio.src = ""; preload.src = ""; };
   }, []);
+
+  const ensureEqualizerGraph = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (sourceNodeRef.current && eqFiltersRef.current.length) return;
+
+    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    const ctx = audioContextRef.current || new AudioContextCtor();
+    audioContextRef.current = ctx;
+
+    if (!sourceNodeRef.current) {
+      const source = ctx.createMediaElementSource(audio);
+      const freqs = [60, 170, 350, 1000, 3500, 10000];
+      const filters = freqs.map((freq, idx) => {
+        const filter = ctx.createBiquadFilter();
+        filter.type = idx === 0 ? "lowshelf" : idx === freqs.length - 1 ? "highshelf" : "peaking";
+        filter.frequency.value = freq;
+        filter.Q.value = 1;
+        return filter;
+      });
+
+      let node: AudioNode = source;
+      filters.forEach((filter) => {
+        node.connect(filter);
+        node = filter;
+      });
+      node.connect(ctx.destination);
+
+      sourceNodeRef.current = source;
+      eqFiltersRef.current = filters;
+    }
+  }, []);
+
+  const applyEqPreset = useCallback((preset: EqPreset) => {
+    ensureEqualizerGraph();
+    const gains = EQ_PRESETS[preset] || EQ_PRESETS.flat;
+    eqFiltersRef.current.forEach((filter, idx) => {
+      filter.gain.value = gains[idx] ?? 0;
+    });
+  }, [ensureEqualizerGraph]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EQ_STORAGE_KEY, eqPreset);
+    } catch {}
+    applyEqPreset(eqPreset);
+  }, [eqPreset, applyEqPreset]);
 
   // Listen for media control actions from Service Worker notifications
   useEffect(() => {
@@ -344,6 +417,7 @@ export function App() {
 
   useEffect(() => {
     if (userId) {
+      fetchUserProfile().then(setUserProfile).catch(() => {});
       fetchPlayerState(userId).then((s) => {
         // On initial load, force paused state — user must press play
         setState({ ...s, is_playing: false });
@@ -419,6 +493,10 @@ export function App() {
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
       try {
+        if (act === "play") {
+          ensureEqualizerGraph();
+          audioContextRef.current?.resume().catch(() => {});
+        }
         const s = await sendAction(act, trackId, seekPos, track);
         if (act === "seek" && seekPos !== undefined && audioRef.current) {
           audioRef.current.currentTime = seekPos;
@@ -428,8 +506,17 @@ export function App() {
         console.error("Action error:", act, e);
       }
     },
-    []
+    [ensureEqualizerGraph]
   );
+
+  const updateQuality = useCallback(async (quality: string) => {
+    try {
+      const profile = await updateUserAudioSettings(quality);
+      setUserProfile(profile);
+    } catch (e) {
+      console.error("Quality update failed", e);
+    }
+  }, []);
 
   const showLyrics = (trackId: string) => {
     setLyricsTrackId(trackId);
@@ -437,6 +524,7 @@ export function App() {
   };
 
   const isTequila = theme.id === "tequila";
+  const hasAudioControls = Boolean(userProfile?.is_premium || userProfile?.is_admin);
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
@@ -586,6 +674,40 @@ export function App() {
           {theme.id === "tequila" ? "🌙" : "🌅"}
         </button>
       </nav>
+      {(userProfile?.is_premium || userProfile?.is_admin) && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", margin: theme.id === "tequila" ? "8px 0 2px" : "4px 0 10px" }}>
+          {userProfile?.is_premium && (
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: theme.id === "tequila" ? "5px 10px" : "4px 9px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+              color: theme.id === "tequila" ? "#1a120b" : "#fff",
+              background: theme.id === "tequila" ? "linear-gradient(135deg, #ffb300, #ffd54f)" : "linear-gradient(135deg, #7c4dff, #e040fb)",
+              border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+            }}>Premium</span>
+          )}
+          {userProfile?.is_admin && (
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: theme.id === "tequila" ? "5px 10px" : "4px 9px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+              color: theme.id === "tequila" ? "#1a120b" : "#fff",
+              background: theme.id === "tequila" ? "linear-gradient(135deg, #ff6d00, #ffd54f)" : "linear-gradient(135deg, #5e35b1, #7c4dff)",
+              border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+            }}>Admin</span>
+          )}
+        </div>
+      )}
       {/* Theme label for TEQUILA */}
       {theme.id === "tequila" && view === "player" && (
         <div style={{
@@ -640,7 +762,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} />
           {state.queue.length > 0 && (
             <TrackList
               tracks={state.queue}

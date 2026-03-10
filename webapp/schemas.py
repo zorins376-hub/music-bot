@@ -55,3 +55,16 @@ class SearchRequest(BaseModel):
 class SearchResult(BaseModel):
     tracks: list[TrackSchema]
     total: int = 0
+
+
+class UserProfileSchema(BaseModel):
+    id: int
+    first_name: str = ""
+    username: Optional[str] = None
+    is_premium: bool = False
+    is_admin: bool = False
+    quality: str = "192"
+
+
+class UserAudioSettingsSchema(BaseModel):
+    quality: str

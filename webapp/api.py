@@ -39,6 +39,8 @@ from webapp.schemas import (
     PlaylistSchema,
     SearchResult,
     TrackSchema,
+    UserAudioSettingsSchema,
+    UserProfileSchema,
 )
 
 # ── Error file logger ────────────────────────────────────────────────────
@@ -123,6 +125,107 @@ async def catch_exceptions_middleware(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+async def _get_or_create_webapp_user(tg_user: dict):
+    from datetime import datetime, timezone
+    from sqlalchemy import select, update
+
+    from bot.db import is_admin
+    from bot.models.base import async_session
+    from bot.models.user import User
+
+    user_id = int(tg_user["id"])
+    username = tg_user.get("username")
+    first_name = tg_user.get("first_name") or ""
+    admin = is_admin(user_id, username)
+    now = datetime.now(timezone.utc)
+
+    async with async_session() as session:
+        db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if db_user is None:
+            db_user = User(
+                id=user_id,
+                username=username,
+                first_name=first_name,
+                is_admin=admin,
+                is_premium=admin,
+            )
+            session.add(db_user)
+            await session.commit()
+            await session.refresh(db_user)
+            return db_user
+
+        update_values = {
+            "username": username,
+            "first_name": first_name,
+            "last_active": now,
+            "is_admin": admin,
+        }
+        expired_premium = (
+            not admin
+            and db_user.is_premium
+            and db_user.premium_until is not None
+            and db_user.premium_until < now
+        )
+        orphaned_premium = (
+            not admin
+            and db_user.is_premium
+            and db_user.premium_until is None
+        )
+        if admin and not db_user.is_premium:
+            update_values["is_premium"] = True
+        if expired_premium or orphaned_premium:
+            update_values["is_premium"] = False
+
+        await session.execute(update(User).where(User.id == user_id).values(**update_values))
+        await session.commit()
+
+        for key, value in update_values.items():
+            setattr(db_user, key, value)
+        return db_user
+
+
+@app.get("/api/user/me", response_model=UserProfileSchema)
+async def get_me(user: dict = Depends(get_current_user)):
+    db_user = await _get_or_create_webapp_user(user)
+    return UserProfileSchema(
+        id=db_user.id,
+        first_name=db_user.first_name or "",
+        username=db_user.username,
+        is_premium=bool(db_user.is_premium),
+        is_admin=bool(db_user.is_admin),
+        quality=str(db_user.quality or "192"),
+    )
+
+
+@app.post("/api/user/audio-settings", response_model=UserProfileSchema)
+async def update_audio_settings(body: UserAudioSettingsSchema, user: dict = Depends(get_current_user)):
+    from sqlalchemy import update
+
+    from bot.models.base import async_session
+    from bot.models.user import User
+
+    db_user = await _get_or_create_webapp_user(user)
+    quality = str(body.quality)
+    if quality not in {"auto", "128", "192", "320"}:
+        raise HTTPException(status_code=400, detail="Invalid quality")
+    if quality == "320" and not (db_user.is_premium or db_user.is_admin):
+        raise HTTPException(status_code=403, detail="Premium only")
+
+    async with async_session() as session:
+        await session.execute(update(User).where(User.id == db_user.id).values(quality=quality))
+        await session.commit()
+
+    db_user.quality = quality
+    return UserProfileSchema(
+        id=db_user.id,
+        first_name=db_user.first_name or "",
+        username=db_user.username,
+        is_premium=bool(db_user.is_premium),
+        is_admin=bool(db_user.is_admin),
+        quality=quality,
+    )
 
 
 @app.get("/api/errors")

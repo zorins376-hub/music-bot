@@ -33,6 +33,17 @@ export interface Playlist {
   track_count: number;
 }
 
+export type EqPreset = "flat" | "bass" | "vocal" | "club" | "bright";
+
+export interface UserProfile {
+  id: number;
+  first_name: string;
+  username?: string;
+  is_premium: boolean;
+  is_admin: boolean;
+  quality: string;
+}
+
 export async function fetchPlayerState(userId: number): Promise<PlayerState> {
   const r = await fetch(`${API_BASE}/player/state/${userId}`, { headers: getHeaders() });
   if (!r.ok) {
@@ -68,6 +79,25 @@ export async function sendAction(action: string, trackId?: string, seekPos?: num
 export async function fetchPlaylists(userId: number): Promise<Playlist[]> {
   const r = await fetch(`${API_BASE}/playlists/${userId}`, { headers: getHeaders() });
   if (!r.ok) throw new Error("Failed to fetch playlists");
+  return r.json();
+}
+
+export async function fetchUserProfile(): Promise<UserProfile> {
+  const r = await fetch(`${API_BASE}/user/me`, { headers: getHeaders() });
+  if (!r.ok) throw new Error("Failed to fetch user profile");
+  return r.json();
+}
+
+export async function updateUserAudioSettings(quality: string): Promise<UserProfile> {
+  const r = await fetch(`${API_BASE}/user/audio-settings`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ quality }),
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(text || "Failed to update audio settings");
+  }
   return r.json();
 }
 

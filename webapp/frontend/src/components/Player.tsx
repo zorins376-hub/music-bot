@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import type { PlayerState } from "../api";
+import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite } from "../api";
 import { ShareCard } from "./ShareCard";
-import { IconMusic, IconMusicNote } from "./Icons";
+import { IconEqualizer, IconMusic, IconMusicNote } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -18,6 +18,37 @@ interface Props {
   elapsed?: number;
   buffering?: boolean;
   themeId?: string;
+  isPremium?: boolean;
+  isAdmin?: boolean;
+  canUseAudioControls?: boolean;
+  quality?: string;
+  eqPreset?: EqPreset;
+  onQualityChange?: (quality: string) => void;
+  onEqPresetChange?: (preset: EqPreset) => void;
+}
+
+const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
+const EQ_OPTIONS: EqPreset[] = ["flat", "bass", "vocal", "club", "bright"];
+
+function AudioBadge({ label, active, warm = false }: { label: string; active?: boolean; warm?: boolean }) {
+  return (
+    <span style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6,
+      padding: warm ? "5px 10px" : "4px 9px",
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 700,
+      letterSpacing: 0.5,
+      color: warm ? (active ? "#1a120b" : "#ffd54f") : (active ? "#fff" : "#d1c4e9"),
+      background: warm
+        ? (active ? "linear-gradient(135deg, #ffb300, #ffd54f)" : "rgba(255, 213, 79, 0.08)")
+        : (active ? "linear-gradient(135deg, #7c4dff, #e040fb)" : "rgba(124, 77, 255, 0.12)"),
+      border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+      textTransform: "uppercase",
+    }}>{label}</span>
+  );
 }
 
 // --- Haptic Feedback Helper ---
@@ -159,7 +190,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom" }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -169,6 +200,8 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   const [isLiked, setIsLiked] = useState(false);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
   const [showShareCard, setShowShareCard] = useState(false);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [showEqMenu, setShowEqMenu] = useState(false);
 
   // Swipe tracking
   const touchStartX = useRef<number>(0);
@@ -239,6 +272,106 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
     const sec = s % 60;
     return `${m}:${sec < 10 ? "0" : ""}${sec}`;
   };
+
+  const qualityLabel = quality === "auto" ? "Auto" : `${quality} kbps`;
+  const statusBadges = (warm = false) => (
+    <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+      {isPremium && <AudioBadge label="Premium" active warm={warm} />}
+      {isAdmin && <AudioBadge label="Admin" active warm={warm} />}
+    </div>
+  );
+
+  const audioControlsPanel = (warm = false) => canUseAudioControls ? (
+    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <button
+          onClick={() => { setShowQualityMenu((v) => !v); setShowEqMenu(false); }}
+          style={{
+            padding: warm ? "9px 16px" : "8px 14px",
+            borderRadius: 24,
+            border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+            background: warm ? "rgba(40, 25, 15, 0.55)" : "rgba(124, 77, 255, 0.08)",
+            color: warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+          }}
+        >
+          <span>Качество</span>
+          <AudioBadge label={qualityLabel} warm={warm} />
+        </button>
+        <button
+          onClick={() => { setShowEqMenu((v) => !v); setShowQualityMenu(false); }}
+          style={{
+            padding: warm ? "9px 16px" : "8px 14px",
+            borderRadius: 24,
+            border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+            background: warm ? "rgba(40, 25, 15, 0.55)" : "rgba(124, 77, 255, 0.08)",
+            color: warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+          }}
+        >
+          <IconEqualizer size={16} color={warm ? "#ffd54f" : accentColor} animated={false} />
+          <span>EQ · {eqPreset.toUpperCase()}</span>
+        </button>
+      </div>
+
+      {showQualityMenu && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+          {QUALITY_OPTIONS.map((value) => (
+            <button
+              key={value}
+              onClick={() => { onQualityChange?.(value); setShowQualityMenu(false); }}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 14,
+                border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : `1px solid ${accentColorAlpha}`,
+                background: quality === value
+                  ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.28), rgba(255,213,79,0.18))" : accentColor)
+                  : (warm ? "rgba(255, 213, 79, 0.06)" : "rgba(124, 77, 255, 0.08)"),
+                color: quality === value ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              {value === "auto" ? "Auto" : `${value} kbps`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showEqMenu && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+          {EQ_OPTIONS.map((value) => (
+            <button
+              key={value}
+              onClick={() => { onEqPresetChange?.(value); setShowEqMenu(false); }}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 14,
+                border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : `1px solid ${accentColorAlpha}`,
+                background: eqPreset === value
+                  ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.28), rgba(255,213,79,0.18))" : accentColor)
+                  : (warm ? "rgba(255, 213, 79, 0.06)" : "rgba(124, 77, 255, 0.08)"),
+                color: eqPreset === value ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
+                cursor: "pointer",
+                fontSize: 12,
+                textTransform: "capitalize",
+              }}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   // ─── TEQUILA LUXURY THEME ───────────────────────────────
   if (isTequila) {
@@ -356,9 +489,10 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             style={{ fontSize: 17, fontWeight: 600, color: "#fef0e0", letterSpacing: 0.5 }}
           />
           <Marquee
-            text={track ? `${track.artist}  ·  ${track.duration_fmt}` : "—"}
+            text={track ? `${track.artist}  ·  ${track.duration_fmt}  ·  ${qualityLabel}` : "—"}
             style={{ fontSize: 13, color: "#c8a882", marginTop: 4 }}
           />
+          {statusBadges(true)}
         </div>
 
         {/* Seek slider — warm */}
@@ -626,6 +760,8 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           </div>
         )}
 
+        {audioControlsPanel(true)}
+
         {/* Sleep menu — warm glass */}
         {showSleepMenu && (
           <div style={{
@@ -749,10 +885,11 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       </div>
       <div style={{ padding: "0 24px", fontSize: 14, color: "var(--tg-theme-hint-color, #aaa)", marginBottom: 16 }}>
         <Marquee
-          text={track ? `${track.artist} • ${track.duration_fmt} • 128 kbps` : "—"}
+          text={track ? `${track.artist} • ${track.duration_fmt} • ${qualityLabel}` : "—"}
           style={{}}
         />
       </div>
+      {statusBadges(false)}
 
       {/* Seek slider - improved touch area */}
       {track && (
@@ -1026,4 +1163,6 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       )}
     </div>
   );
+
+      {audioControlsPanel(false)}
 }
