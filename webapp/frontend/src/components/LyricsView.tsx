@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { fetchLyrics } from "../api";
 import { SkeletonLyrics } from "./Skeleton";
+import { IconArrowLeft } from "./Icons";
 
 interface LyricLine {
   time: number;   // seconds
@@ -82,9 +83,9 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
     <div>
       <button
         onClick={onBack}
-        style={{ background: "none", border: "none", color: "var(--tg-theme-link-color, #7c4dff)", cursor: "pointer", marginBottom: 12, fontSize: 14 }}
+        style={{ background: "none", border: "none", color: "var(--tg-theme-link-color, #7c4dff)", cursor: "pointer", marginBottom: 12, fontSize: 14, display: "flex", alignItems: "center", gap: 4 }}
       >
-        ← Назад к плееру
+        <IconArrowLeft size={16} /> Назад к плееру
       </button>
 
       {loading ? (

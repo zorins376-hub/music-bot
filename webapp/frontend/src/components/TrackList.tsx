@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import type { Track } from "../api";
 import { sendAction } from "../api";
+import { IconDragHandle, IconTarget, IconSwipeLeft, IconTrash } from "./Icons";
 
 interface Props {
   tracks: Track[];
@@ -166,7 +167,11 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
       }}>
         <span>Очередь ({tracks.length})</span>
         <span style={{ fontSize: 10, color: "var(--tg-theme-hint-color, #888)" }}>
-          {dragIndex !== null ? "🎯 отпусти для перемещения" : "☰ зажми · ← свайп удалить"}
+          {dragIndex !== null ? (
+            <><IconTarget size={12} /> отпусти для перемещения</>
+          ) : (
+            <><IconDragHandle size={12} /> зажми · <IconSwipeLeft size={12} /> удалить</>
+          )}
         </span>
       </div>
       {/* Scrollable track list */}
@@ -225,10 +230,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
               zIndex: 50,
             }}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            </svg>
+            <IconTrash size={24} color="#fff" />
           </div>
           {/* Track item */}
           <div
@@ -262,10 +264,11 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
             <div style={{ 
               marginRight: 10, 
               color: dragIndex === i ? accentColor : "var(--tg-theme-hint-color, #666)", 
-              fontSize: 18,
               padding: "4px",
+              display: "flex",
+              alignItems: "center",
             }}>
-              ☰
+              <IconDragHandle size={18} color={dragIndex === i ? accentColor : "var(--tg-theme-hint-color, #666)"} />
             </div>
           )}
           {/* Playing indicator */}

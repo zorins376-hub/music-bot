@@ -1,5 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import { fetchPlaylists, fetchPlaylistTracks, type Playlist, type Track } from "../api";
+import { IconArrowLeft, IconSpinner } from "./Icons";
 
 interface Props {
   userId: number;
@@ -29,16 +30,16 @@ export function PlaylistView({ userId, onPlayTrack }: Props) {
     }
   }, [selectedId]);
 
-  if (loading) return <div style={{ textAlign: "center", padding: 32 }}>⏳</div>;
+  if (loading) return <div style={{ textAlign: "center", padding: 32 }}><IconSpinner size={24} color="var(--tg-theme-hint-color, #aaa)" /></div>;
 
   if (selectedId !== null) {
     return (
       <div>
         <button
           onClick={() => { setSelectedId(null); setTracks([]); }}
-          style={{ background: "none", border: "none", color: "var(--tg-theme-link-color, #7c4dff)", cursor: "pointer", marginBottom: 8, fontSize: 14 }}
+          style={{ background: "none", border: "none", color: "var(--tg-theme-link-color, #7c4dff)", cursor: "pointer", marginBottom: 8, fontSize: 14, display: "flex", alignItems: "center", gap: 4 }}
         >
-          ← Назад
+          <IconArrowLeft size={16} /> Назад
         </button>
         {tracks.length === 0 ? (
           <div style={{ textAlign: "center", color: "var(--tg-theme-hint-color, #aaa)", padding: 32 }}>Пусто</div>

@@ -1,5 +1,6 @@
 import { useRef } from "preact/hooks";
 import type { PlayerState } from "../api";
+import { IconMusic } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -64,7 +65,9 @@ export function MiniPlayer({ state, accentColor, onAction, onExpand }: Props) {
         {track.cover_url ? (
           <img src={track.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : (
-          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>♫</div>
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <IconMusic size={24} color="rgba(255,255,255,0.6)" />
+          </div>
         )}
       </div>
 

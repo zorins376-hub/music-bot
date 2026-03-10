@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { PlayerState } from "../api";
 import { toggleFavorite, checkFavorite } from "../api";
 import { ShareCard } from "./ShareCard";
+import { IconMusic, IconMusicNote } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -281,7 +282,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         ) : (
-          track ? "♫" : "♪"
+          track ? <IconMusic size={64} color="rgba(255,255,255,0.8)" /> : <IconMusicNote size={48} color="rgba(255,255,255,0.5)" />
         )}
         {/* Audio Visualizer overlay */}
         {track && <AudioVisualizer isPlaying={state.is_playing} accentColor={accentColor} />}

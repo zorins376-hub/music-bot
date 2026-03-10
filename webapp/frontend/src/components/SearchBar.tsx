@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { searchTracks, type Track } from "../api";
 import { SkeletonTrack } from "./Skeleton";
+import { IconSpinner, IconSearch } from "./Icons";
 
 interface Props {
   onSelect: (track: Track) => void;
@@ -57,7 +58,7 @@ export function SearchBar({ onSelect }: Props) {
             cursor: "pointer",
           }}
         >
-          {loading ? "⏳" : "🔍"}
+          {loading ? <IconSpinner size={18} /> : <IconSearch size={18} />}
         </button>
       </div>
 
