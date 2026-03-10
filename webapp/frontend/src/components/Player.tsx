@@ -28,7 +28,21 @@ interface Props {
 }
 
 const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
-const EQ_OPTIONS: EqPreset[] = ["flat", "bass", "vocal", "club", "bright"];
+const EQ_OPTIONS: Array<{ value: EqPreset; label: string; note: string }> = [
+  { value: "flat", label: "Flat", note: "neutral studio" },
+  { value: "bass", label: "Bass", note: "deep low-end" },
+  { value: "vocal", label: "Vocal", note: "clean mids" },
+  { value: "club", label: "Club", note: "wide party curve" },
+  { value: "bright", label: "Bright", note: "sparkling highs" },
+  { value: "night", label: "Night", note: "soft dark top" },
+  { value: "soft", label: "Soft", note: "smooth comfort" },
+  { value: "techno", label: "Techno", note: "punch + air" },
+  { value: "vocal_boost", label: "Vocal Boost", note: "forward voice" },
+];
+
+function formatEqPresetLabel(preset: EqPreset): string {
+  return EQ_OPTIONS.find((option) => option.value === preset)?.label ?? preset.replace(/_/g, " ");
+}
 
 function AudioBadge({ label, active, warm = false }: { label: string; active?: boolean; warm?: boolean }) {
   return (
@@ -200,8 +214,6 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   const [isLiked, setIsLiked] = useState(false);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
   const [showShareCard, setShowShareCard] = useState(false);
-  const [showQualityMenu, setShowQualityMenu] = useState(false);
-  const [showEqMenu, setShowEqMenu] = useState(false);
 
   // Swipe tracking
   const touchStartX = useRef<number>(0);
@@ -274,95 +286,104 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   };
 
   const qualityLabel = quality === "auto" ? "Auto" : `${quality} kbps`;
+  const eqPresetLabel = formatEqPresetLabel(eqPreset);
   const audioControlsPanel = (warm = false) => canUseAudioControls ? (
-    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-        <button
-          onClick={() => { setShowQualityMenu((v) => !v); setShowEqMenu(false); }}
-          style={{
-            padding: warm ? "9px 16px" : "8px 14px",
-            borderRadius: 24,
-            border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
-            background: warm ? "rgba(40, 25, 15, 0.55)" : "rgba(124, 77, 255, 0.08)",
-            color: warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 13,
-          }}
-        >
-          <span>Качество</span>
-          <AudioBadge label={qualityLabel} warm={warm} />
-        </button>
-        <button
-          onClick={() => { setShowEqMenu((v) => !v); setShowQualityMenu(false); }}
-          style={{
-            padding: warm ? "9px 16px" : "8px 14px",
-            borderRadius: 24,
-            border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
-            background: warm ? "rgba(40, 25, 15, 0.55)" : "rgba(124, 77, 255, 0.08)",
-            color: warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 13,
-          }}
-        >
-          <IconEqualizer size={16} color={warm ? "#ffd54f" : accentColor} animated={false} />
-          <span>EQ · {eqPreset.toUpperCase()}</span>
-        </button>
+    <div style={{
+      marginTop: 18,
+      padding: warm ? "16px 16px 14px" : "16px",
+      borderRadius: 22,
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+      background: warm ? "linear-gradient(180deg, rgba(40, 25, 15, 0.78), rgba(28, 18, 12, 0.72))" : "linear-gradient(180deg, rgba(124, 77, 255, 0.12), rgba(32, 24, 50, 0.32))",
+      border: warm ? "1px solid rgba(255, 213, 79, 0.18)" : "1px solid rgba(179, 136, 255, 0.16)",
+      boxShadow: warm ? "0 16px 40px rgba(0,0,0,0.2)" : `0 16px 40px ${accentColorAlpha}`,
+      backdropFilter: "blur(18px)",
+      WebkitBackdropFilter: "blur(18px)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, textAlign: warm ? "left" : "left" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, color: warm ? "#ffd54f" : accentColor, fontSize: 15, fontWeight: 700, letterSpacing: 0.6 }}>
+            <IconEqualizer size={18} color={warm ? "#ffd54f" : accentColor} animated={false} />
+            <span>Audio Pro</span>
+          </div>
+          <div style={{ fontSize: 12, color: warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)" }}>
+            {isAdmin ? "Advanced sound for admin access" : "Premium sound scene with curated EQ presets"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <AudioBadge label={qualityLabel} active warm={warm} />
+          <AudioBadge label={eqPresetLabel} active warm={warm} />
+        </div>
       </div>
 
-      {showQualityMenu && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          {QUALITY_OPTIONS.map((value) => (
-            <button
-              key={value}
-              onClick={() => { onQualityChange?.(value); setShowQualityMenu(false); }}
-              style={{
-                padding: "7px 14px",
-                borderRadius: 14,
-                border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : `1px solid ${accentColorAlpha}`,
-                background: quality === value
-                  ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.28), rgba(255,213,79,0.18))" : accentColor)
-                  : (warm ? "rgba(255, 213, 79, 0.06)" : "rgba(124, 77, 255, 0.08)"),
-                color: quality === value ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              {value === "auto" ? "Auto" : `${value} kbps`}
-            </button>
-          ))}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: warm ? "#c8a882" : "#bca8ff" }}>
+          Stream quality
         </div>
-      )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+          {QUALITY_OPTIONS.map((value) => {
+            const active = quality === value;
+            return (
+              <button
+                key={value}
+                onClick={() => onQualityChange?.(value)}
+                style={{
+                  padding: warm ? "10px 8px" : "9px 8px",
+                  borderRadius: 16,
+                  border: warm ? "1px solid rgba(255, 213, 79, 0.18)" : `1px solid ${active ? accentColor : accentColorAlpha}`,
+                  background: active
+                    ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,213,79,0.24))" : `linear-gradient(135deg, ${accentColor}, #e040fb)`)
+                    : (warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)"),
+                  color: active ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: active ? 700 : 600,
+                }}
+              >
+                {value === "auto" ? "Auto" : `${value}`}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {showEqMenu && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          {EQ_OPTIONS.map((value) => (
-            <button
-              key={value}
-              onClick={() => { onEqPresetChange?.(value); setShowEqMenu(false); }}
-              style={{
-                padding: "7px 14px",
-                borderRadius: 14,
-                border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : `1px solid ${accentColorAlpha}`,
-                background: eqPreset === value
-                  ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.28), rgba(255,213,79,0.18))" : accentColor)
-                  : (warm ? "rgba(255, 213, 79, 0.06)" : "rgba(124, 77, 255, 0.08)"),
-                color: eqPreset === value ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
-                cursor: "pointer",
-                fontSize: 12,
-                textTransform: "capitalize",
-              }}
-            >
-              {value}
-            </button>
-          ))}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: warm ? "#c8a882" : "#bca8ff" }}>
+          EQ presets
         </div>
-      )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+          {EQ_OPTIONS.map((option) => {
+            const active = eqPreset === option.value;
+            return (
+              <button
+                key={option.value}
+                onClick={() => onEqPresetChange?.(option.value)}
+                style={{
+                  padding: warm ? "11px 10px" : "10px",
+                  minHeight: 64,
+                  borderRadius: 18,
+                  border: warm ? "1px solid rgba(255, 213, 79, 0.18)" : `1px solid ${active ? accentColor : accentColorAlpha}`,
+                  background: active
+                    ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.34), rgba(255,213,79,0.22))" : `linear-gradient(135deg, ${accentColor}, rgba(224,64,251,0.92))`)
+                    : (warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)"),
+                  color: active ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  justifyContent: "center",
+                  gap: 4,
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.1 }}>{option.label}</span>
+                <span style={{ fontSize: 10, opacity: active ? 0.95 : 0.72, textTransform: "uppercase", letterSpacing: 0.6 }}>{option.note}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   ) : null;
 

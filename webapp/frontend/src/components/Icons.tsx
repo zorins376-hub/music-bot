@@ -100,6 +100,20 @@ export const IconEqualizer = ({ size = 20, color = "currentColor", animated = tr
   </svg>
 );
 
+export const IconCrown = ({ size = 16, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 8l4.5 4 4.5-7 4.5 7L21 8l-2 10H5L3 8z"/>
+    <line x1="7" y1="18" x2="17" y2="18"/>
+  </svg>
+);
+
+export const IconShield = ({ size = 16, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l7 3v6c0 4.5-2.8 7.9-7 9-4.2-1.1-7-4.5-7-9V6l7-3z"/>
+    <path d="M9.5 12l1.7 1.7L14.8 10"/>
+  </svg>
+);
+
 // Wave icon for AI DJ
 export const IconWave = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">

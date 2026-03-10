@@ -33,7 +33,7 @@ export interface Playlist {
   track_count: number;
 }
 
-export type EqPreset = "flat" | "bass" | "vocal" | "club" | "bright";
+export type EqPreset = "flat" | "bass" | "vocal" | "club" | "bright" | "night" | "soft" | "techno" | "vocal_boost";
 
 export interface UserProfile {
   id: number;

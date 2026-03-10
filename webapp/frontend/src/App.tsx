@@ -5,6 +5,7 @@ import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
+import { IconCrown, IconShield } from "./components/Icons";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, type EqPreset, type PlayerState, type Track, type UserProfile } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
@@ -47,6 +48,26 @@ const EQ_PRESETS: Record<EqPreset, EqProfile> = {
     preamp: -1.6,
     makeup: 0.25,
   },
+  night: {
+    gains: [2.8, 2.2, 1.4, 0.4, -0.6, -1.2, -1.8, -2.2, -2.6, -3],
+    preamp: -1.7,
+    makeup: 0.15,
+  },
+  soft: {
+    gains: [1.5, 1.2, 0.8, 0.5, 0.2, 0, -0.2, 0.3, 0.8, 1.1],
+    preamp: -0.8,
+    makeup: 0.2,
+  },
+  techno: {
+    gains: [4.5, 3.8, 2.5, 0.5, -1, -0.2, 1.8, 3.4, 4.2, 2.6],
+    preamp: -2,
+    makeup: 0.45,
+  },
+  vocal_boost: {
+    gains: [-3, -2.4, -1.2, 0.8, 2.8, 4.4, 5, 3.2, 0.8, -0.3],
+    preamp: -1.5,
+    makeup: 0.35,
+  },
 };
 
 function dbToGain(value: number): number {
@@ -56,7 +77,7 @@ function dbToGain(value: number): number {
 function getSavedEqPreset(): EqPreset {
   try {
     const value = localStorage.getItem(EQ_STORAGE_KEY);
-    if (value === "flat" || value === "bass" || value === "vocal" || value === "club" || value === "bright") {
+    if (value === "flat" || value === "bass" || value === "vocal" || value === "club" || value === "bright" || value === "night" || value === "soft" || value === "techno" || value === "vocal_boost") {
       return value;
     }
   } catch {}
@@ -738,36 +759,44 @@ export function App() {
         </button>
       </nav>
       {(userProfile?.is_premium || userProfile?.is_admin) && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", margin: theme.id === "tequila" ? "8px 0 2px" : "4px 0 10px" }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", margin: theme.id === "tequila" ? "8px 0 2px" : "4px 0 10px" }}>
           {userProfile?.is_premium && (
-            <span style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: theme.id === "tequila" ? "5px 10px" : "4px 9px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-              color: theme.id === "tequila" ? "#1a120b" : "#fff",
-              background: theme.id === "tequila" ? "linear-gradient(135deg, #ffb300, #ffd54f)" : "linear-gradient(135deg, #7c4dff, #e040fb)",
-              border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
-            }}>Premium</span>
+            <span
+              title="Premium"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                color: theme.id === "tequila" ? "#1a120b" : "#fff",
+                background: theme.id === "tequila" ? "linear-gradient(135deg, #ffb300, #ffd54f)" : "linear-gradient(135deg, #7c4dff, #e040fb)",
+                border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+                boxShadow: theme.id === "tequila" ? "0 6px 18px rgba(255, 179, 0, 0.22)" : "0 6px 18px rgba(124, 77, 255, 0.22)",
+              }}
+            >
+              <IconCrown size={16} color={theme.id === "tequila" ? "#1a120b" : "#fff"} />
+            </span>
           )}
           {userProfile?.is_admin && (
-            <span style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: theme.id === "tequila" ? "5px 10px" : "4px 9px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-              color: theme.id === "tequila" ? "#1a120b" : "#fff",
-              background: theme.id === "tequila" ? "linear-gradient(135deg, #ff6d00, #ffd54f)" : "linear-gradient(135deg, #5e35b1, #7c4dff)",
-              border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
-            }}>Admin</span>
+            <span
+              title="Admin"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                color: theme.id === "tequila" ? "#1a120b" : "#fff",
+                background: theme.id === "tequila" ? "linear-gradient(135deg, #ff6d00, #ffd54f)" : "linear-gradient(135deg, #5e35b1, #7c4dff)",
+                border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
+                boxShadow: theme.id === "tequila" ? "0 6px 18px rgba(255, 109, 0, 0.2)" : "0 6px 18px rgba(94, 53, 177, 0.24)",
+              }}
+            >
+              <IconShield size={16} color={theme.id === "tequila" ? "#1a120b" : "#fff"} />
+            </span>
           )}
         </div>
       )}
