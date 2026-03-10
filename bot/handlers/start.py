@@ -140,6 +140,16 @@ async def cmd_start(message: Message) -> None:
         parse_mode="HTML",
     )
 
+    # Smart Onboarding v2: nudge new un-onboarded users
+    if not user.onboarded:
+        await message.answer(
+            t(user.language, "onboard_nudge"),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎵 " + t(user.language, "onboard_nudge_btn"), callback_data="action:recommend")]
+            ]),
+            parse_mode="HTML",
+        )
+
 
 @router.message(Command("version"))
 async def cmd_version(message: Message) -> None:

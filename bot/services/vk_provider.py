@@ -12,6 +12,7 @@ from pathlib import Path
 import aiohttp
 
 from bot.config import settings
+from bot.services.http_session import get_session
 from bot.utils import fmt_duration as _fmt_dur
 
 logger = logging.getLogger(__name__)
@@ -92,12 +93,11 @@ async def download_vk(url: str, dest: Path) -> Path:
             "(Android 11; SDK 30; x86_64; unknown Android SDK built for x86_64; ru; 1080x1920)"
         ),
     }
-    async with aiohttp.ClientSession() as sess:
-        async with sess.get(
-            url, headers=headers, timeout=aiohttp.ClientTimeout(total=90)
-        ) as resp:
-            resp.raise_for_status()
-            with dest.open("wb") as f:
-                async for chunk in resp.content.iter_chunked(64 * 1024):
-                    f.write(chunk)
+    async with get_session().get(
+        url, headers=headers, timeout=aiohttp.ClientTimeout(total=90)
+    ) as resp:
+        resp.raise_for_status()
+        with dest.open("wb") as f:
+            async for chunk in resp.content.iter_chunked(64 * 1024):
+                f.write(chunk)
     return dest

@@ -47,11 +47,12 @@ async def _recap_loop(bot) -> None:
 
 
 async def _send_recaps(bot) -> None:
-    """Build and send weekly recap to active users."""
+    """Build and send weekly recap to active users (batch-optimized)."""
     from bot.models.base import async_session
     from bot.models.user import User
     from bot.models.track import ListeningHistory, Track
     from bot.i18n import t
+    from collections import defaultdict
 
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
@@ -70,110 +71,129 @@ async def _send_recaps(bot) -> None:
             .group_by(ListeningHistory.user_id)
             .having(func.count(ListeningHistory.id) >= 3)
         )
-        active_users = [(row[0], row[1]) for row in active_users_r.all()]
+        active_users = {row[0]: row[1] for row in active_users_r.all()}
 
     if not active_users:
         logger.info("Weekly recap: no active users")
         return
 
-    logger.info("Weekly recap: sending to %d users", len(active_users))
-    sent = 0
+    user_ids = list(active_users.keys())
+    logger.info("Weekly recap: sending to %d users", len(user_ids))
 
-    for user_id, play_count in active_users:
+    # Batch queries for all active users at once
+    async with async_session() as session:
+        # Fetch user languages
+        users_r = await session.execute(
+            select(User.id, User.language).where(User.id.in_(user_ids))
+        )
+        user_langs = {row[0]: row[1] or "ru" for row in users_r.all()}
+
+        # Top artists per user (batch: top 5 per user via window function)
+        from sqlalchemy import literal_column
+        top_artists_r = await session.execute(
+            select(
+                ListeningHistory.user_id,
+                Track.artist,
+                func.count().label("cnt"),
+            )
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id.in_(user_ids),
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
+                Track.artist.isnot(None),
+                Track.artist != "",
+            )
+            .group_by(ListeningHistory.user_id, Track.artist)
+            .order_by(ListeningHistory.user_id, func.count().desc())
+        )
+        # Group and limit to top 5 per user
+        user_top_artists: dict[int, list[tuple]] = defaultdict(list)
+        for row in top_artists_r.all():
+            if len(user_top_artists[row[0]]) < 5:
+                user_top_artists[row[0]].append((row[1], row[2]))
+
+        # Top track per user (batch)
+        top_tracks_r = await session.execute(
+            select(
+                ListeningHistory.user_id,
+                Track.artist,
+                Track.title,
+                func.count().label("cnt"),
+            )
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id.in_(user_ids),
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
+            )
+            .group_by(ListeningHistory.user_id, Track.id, Track.artist, Track.title)
+            .order_by(ListeningHistory.user_id, func.count().desc())
+        )
+        user_top_track: dict[int, tuple] = {}
+        for row in top_tracks_r.all():
+            if row[0] not in user_top_track:
+                user_top_track[row[0]] = (row[1], row[2], row[3])
+
+        # Top genres per user (batch)
+        top_genres_r = await session.execute(
+            select(
+                ListeningHistory.user_id,
+                Track.genre,
+                func.count().label("cnt"),
+            )
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id.in_(user_ids),
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
+                Track.genre.isnot(None),
+                Track.genre != "",
+            )
+            .group_by(ListeningHistory.user_id, Track.genre)
+            .order_by(ListeningHistory.user_id, func.count().desc())
+        )
+        user_top_genres: dict[int, list[tuple]] = defaultdict(list)
+        for row in top_genres_r.all():
+            if len(user_top_genres[row[0]]) < 3:
+                user_top_genres[row[0]].append((row[1], row[2]))
+
+    # Build and send recaps
+    sent = 0
+    for user_id in user_ids:
         try:
-            recap_text = await _build_recap_for_user(user_id, play_count, week_ago)
-            if recap_text:
-                await bot.send_message(user_id, recap_text, parse_mode="HTML")
-                sent += 1
+            lang = user_langs.get(user_id, "ru")
+            play_count = active_users[user_id]
+
+            lines = [t(lang, "recap_header")]
+            lines.append(t(lang, "recap_total", count=play_count))
+            lines.append("")
+
+            top_track = user_top_track.get(user_id)
+            if top_track:
+                lines.append(t(lang, "recap_top_track", artist=top_track[0] or "?", title=top_track[1] or "?", count=top_track[2]))
+
+            artists = user_top_artists.get(user_id, [])
+            if artists:
+                lines.append("")
+                lines.append(t(lang, "recap_top_artists"))
+                for i, (artist, cnt) in enumerate(artists, 1):
+                    lines.append(f"  {i}. {artist} ({cnt})")
+
+            genres = user_top_genres.get(user_id, [])
+            if genres:
+                lines.append("")
+                lines.append(t(lang, "recap_top_genres"))
+                for genre, cnt in genres:
+                    lines.append(f"  ▸ {genre} ({cnt})")
+
+            lines.append("")
+            lines.append(t(lang, "recap_footer"))
+
+            await bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
+            sent += 1
         except Exception as e:
             logger.debug("Recap send failed for %s: %s", user_id, e)
         await asyncio.sleep(0.05)
 
     logger.info("Weekly recap done: sent=%d", sent)
-
-
-async def _build_recap_for_user(user_id: int, play_count: int, since: datetime) -> str | None:
-    """Build the recap message for a single user."""
-    from bot.models.base import async_session
-    from bot.models.user import User
-    from bot.models.track import ListeningHistory, Track
-    from bot.i18n import t
-
-    async with async_session() as session:
-        user = await session.get(User, user_id)
-        if not user:
-            return None
-        lang = user.language or "ru"
-
-        # Top 5 artists
-        top_artists_r = await session.execute(
-            select(Track.artist, func.count().label("cnt"))
-            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-            .where(
-                ListeningHistory.user_id == user_id,
-                ListeningHistory.action == "play",
-                ListeningHistory.created_at >= since,
-                Track.artist.isnot(None),
-                Track.artist != "",
-            )
-            .group_by(Track.artist)
-            .order_by(func.count().desc())
-            .limit(5)
-        )
-        top_artists = [(row[0], row[1]) for row in top_artists_r.all()]
-
-        # Most played track
-        top_track_r = await session.execute(
-            select(Track.artist, Track.title, func.count().label("cnt"))
-            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-            .where(
-                ListeningHistory.user_id == user_id,
-                ListeningHistory.action == "play",
-                ListeningHistory.created_at >= since,
-            )
-            .group_by(Track.id, Track.artist, Track.title)
-            .order_by(func.count().desc())
-            .limit(1)
-        )
-        top_track = top_track_r.first()
-
-        # Top genres
-        top_genres_r = await session.execute(
-            select(Track.genre, func.count().label("cnt"))
-            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-            .where(
-                ListeningHistory.user_id == user_id,
-                ListeningHistory.action == "play",
-                ListeningHistory.created_at >= since,
-                Track.genre.isnot(None),
-                Track.genre != "",
-            )
-            .group_by(Track.genre)
-            .order_by(func.count().desc())
-            .limit(3)
-        )
-        top_genres = [(row[0], row[1]) for row in top_genres_r.all()]
-
-    lines = [t(lang, "recap_header")]
-    lines.append(t(lang, "recap_total", count=play_count))
-    lines.append("")
-
-    if top_track:
-        lines.append(t(lang, "recap_top_track", artist=top_track[0] or "?", title=top_track[1] or "?", count=top_track[2]))
-
-    if top_artists:
-        lines.append("")
-        lines.append(t(lang, "recap_top_artists"))
-        for i, (artist, cnt) in enumerate(top_artists, 1):
-            lines.append(f"  {i}. {artist} ({cnt})")
-
-    if top_genres:
-        lines.append("")
-        lines.append(t(lang, "recap_top_genres"))
-        for genre, cnt in top_genres:
-            lines.append(f"  ▸ {genre} ({cnt})")
-
-    lines.append("")
-    lines.append(t(lang, "recap_footer"))
-
-    return "\n".join(lines)

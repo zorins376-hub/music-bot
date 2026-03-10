@@ -45,6 +45,8 @@ async def _send_release_radar(bot) -> None:
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=1)
 
+    from collections import defaultdict
+
     async with async_session() as session:
         users_r = await session.execute(
             select(User).where(
@@ -64,27 +66,47 @@ async def _send_release_radar(bot) -> None:
         if not fresh_tracks:
             return
 
+        user_ids = [u.id for u in users]
+        fresh_track_ids = [t.id for t in fresh_tracks]
+
+        # Batch: top 8 artists per user (single query)
+        top_artists_r = await session.execute(
+            select(
+                ListeningHistory.user_id,
+                Track.artist,
+                func.count(ListeningHistory.id).label("cnt"),
+            )
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id.in_(user_ids),
+                ListeningHistory.action == "play",
+                Track.artist.is_not(None),
+            )
+            .group_by(ListeningHistory.user_id, Track.artist)
+            .order_by(ListeningHistory.user_id, func.count(ListeningHistory.id).desc())
+        )
+        user_top_artists: dict[int, list[str]] = defaultdict(list)
+        for row in top_artists_r.all():
+            if len(user_top_artists[row[0]]) < 8:
+                user_top_artists[row[0]].append((row[1] or "").strip().lower())
+
+        # Batch: existing notifications for all user+fresh_track combos
+        existing_notif_r = await session.execute(
+            select(ReleaseNotification.user_id, ReleaseNotification.track_id).where(
+                ReleaseNotification.user_id.in_(user_ids),
+                ReleaseNotification.track_id.in_(fresh_track_ids),
+            )
+        )
+        existing_notifs: set[tuple[int, int]] = {
+            (row[0], row[1]) for row in existing_notif_r.all()
+        }
+
         sent_count = 0
         for user in users:
-            preferred_artists = set()
+            preferred_artists: set[str] = set()
             if user.fav_artists:
                 preferred_artists.update(a.strip().lower() for a in user.fav_artists if isinstance(a, str) and a.strip())
-
-            top_artist_r = await session.execute(
-                select(Track.artist, func.count(ListeningHistory.id).label("cnt"))
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(
-                    ListeningHistory.user_id == user.id,
-                    ListeningHistory.action == "play",
-                    Track.artist.is_not(None),
-                )
-                .group_by(Track.artist)
-                .order_by(func.count(ListeningHistory.id).desc())
-                .limit(8)
-            )
-            preferred_artists.update(
-                (row[0] or "").strip().lower() for row in top_artist_r.all() if row[0]
-            )
+            preferred_artists.update(a for a in user_top_artists.get(user.id, []) if a)
 
             if not preferred_artists:
                 continue
@@ -109,12 +131,7 @@ async def _send_release_radar(bot) -> None:
             notify_tracks: list[dict] = []
             added = 0
             for track in candidates[:5]:
-                already = await session.scalar(
-                    select(func.count())
-                    .select_from(ReleaseNotification)
-                    .where(ReleaseNotification.user_id == user.id, ReleaseNotification.track_id == track.id)
-                )
-                if already:
+                if (user.id, track.id) in existing_notifs:
                     continue
                 session.add(
                     ReleaseNotification(
@@ -124,6 +141,7 @@ async def _send_release_radar(bot) -> None:
                         title=track.title,
                     )
                 )
+                existing_notifs.add((user.id, track.id))
                 lines.append(f"• {track.artist or '?'} — {track.title or '?'}")
                 notify_tracks.append(
                     {

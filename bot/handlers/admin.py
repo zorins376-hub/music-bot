@@ -6,7 +6,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update, and_
 
 from bot.config import settings
 from bot.db import get_admin_logs, get_or_create_user, is_admin, log_admin_action, upsert_track
@@ -27,6 +27,14 @@ _USERS_PER_PAGE = 10
 _admin_fwd_state: dict[int, dict] = {}
 
 _LIVE_TRACKS_PER_PAGE = 8
+
+# Admin rate limiting: max operations per minute
+_ADMIN_RATE_LIMIT = 15
+_ADMIN_RATE_WINDOW = 60  # seconds
+
+
+def _admin_rate_key(user_id: int) -> str:
+    return f"admin:rate:{user_id}"
 
 
 class AdmUserCb(CallbackData, prefix="au"):
@@ -70,7 +78,7 @@ async def _resolve_user(identifier: str):
 
 
 async def _build_detailed_stats() -> str:
-    """Build a detailed admin stats message."""
+    """Build a detailed admin stats message (optimized: ~6 queries instead of ~20)."""
     from datetime import datetime, timedelta, timezone
 
     now = datetime.now(timezone.utc)
@@ -79,92 +87,74 @@ async def _build_detailed_stats() -> str:
     month_ago = now - timedelta(days=30)
 
     async with async_session() as session:
-        # ── Users ─────────────────────────────────
-        user_total = await session.scalar(
-            select(func.count()).select_from(User)
-        ) or 0
-        users_today = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.created_at >= today_start)
-        ) or 0
-        users_week = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.created_at >= week_ago)
-        ) or 0
-
-        # ── DAU / WAU / MAU ───────────────────────
-        dau = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.last_active >= today_start)
-        ) or 0
-        wau = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.last_active >= week_ago)
-        ) or 0
-        mau = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.last_active >= month_ago)
-        ) or 0
-        banned_count = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.is_banned == True)  # noqa: E712
-        ) or 0
-
-        # ── Premium ───────────────────────────────
-        premium_total = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.is_premium == True)  # noqa: E712
-        ) or 0
-        admin_premium = await session.scalar(
-            select(func.count()).select_from(User)
-            .where(User.is_premium == True, User.premium_until == None)  # noqa: E711,E712
-        ) or 0
+        # ── Users: single combined query ──────────
+        user_stats_r = await session.execute(
+            select(
+                func.count().label("total"),
+                func.sum(case((User.created_at >= today_start, 1), else_=0)),
+                func.sum(case((User.created_at >= week_ago, 1), else_=0)),
+                func.sum(case((User.last_active >= today_start, 1), else_=0)),
+                func.sum(case((User.last_active >= week_ago, 1), else_=0)),
+                func.sum(case((User.last_active >= month_ago, 1), else_=0)),
+                func.sum(case((User.is_banned == True, 1), else_=0)),
+                func.sum(case((User.is_premium == True, 1), else_=0)),
+                func.sum(case((and_(User.is_premium == True, User.premium_until == None), 1), else_=0)),
+                func.coalesce(func.sum(User.request_count), 0),
+            )
+        )
+        u = user_stats_r.one()
+        user_total = u[0] or 0
+        users_today = int(u[1] or 0)
+        users_week = int(u[2] or 0)
+        dau = int(u[3] or 0)
+        wau = int(u[4] or 0)
+        mau = int(u[5] or 0)
+        banned_count = int(u[6] or 0)
+        premium_total = int(u[7] or 0)
+        admin_premium = int(u[8] or 0)
+        total_requests = int(u[9] or 0)
         paid_premium = premium_total - admin_premium
 
-        # ── Revenue (Stars) ───────────────────────
-        total_revenue = await session.scalar(
-            select(func.sum(Payment.amount))
-        ) or 0
-        payment_count = await session.scalar(
-            select(func.count()).select_from(Payment)
-        ) or 0
-        revenue_month = await session.scalar(
-            select(func.sum(Payment.amount))
-            .where(Payment.created_at >= month_ago)
-        ) or 0
+        # ── Payments: single combined query ───────
+        pay_stats_r = await session.execute(
+            select(
+                func.coalesce(func.sum(Payment.amount), 0),
+                func.count(),
+                func.coalesce(func.sum(case((Payment.created_at >= month_ago, Payment.amount), else_=0)), 0),
+            )
+        )
+        p = pay_stats_r.one()
+        total_revenue = int(p[0] or 0)
+        payment_count = int(p[1] or 0)
+        revenue_month = int(p[2] or 0)
 
-        # ── Tracks & Downloads ────────────────────
-        track_total = await session.scalar(
-            select(func.count()).select_from(Track)
-        ) or 0
-        total_downloads = await session.scalar(
-            select(func.sum(Track.downloads))
-        ) or 0
-        total_requests = await session.scalar(
-            select(func.sum(User.request_count))
-        ) or 0
+        # ── Tracks: single combined query ─────────
+        track_stats_r = await session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(Track.downloads), 0),
+            ).select_from(Track)
+        )
+        tr = track_stats_r.one()
+        track_total = tr[0] or 0
+        total_downloads = int(tr[1] or 0)
 
-        # ── Listening events ──────────────────────
-        plays_today = await session.scalar(
-            select(func.count()).select_from(ListeningHistory)
-            .where(ListeningHistory.action == "play", ListeningHistory.created_at >= today_start)
-        ) or 0
-        plays_week = await session.scalar(
-            select(func.count()).select_from(ListeningHistory)
-            .where(ListeningHistory.action == "play", ListeningHistory.created_at >= week_ago)
-        ) or 0
-        searches_today = await session.scalar(
-            select(func.count()).select_from(ListeningHistory)
-            .where(ListeningHistory.action == "search", ListeningHistory.created_at >= today_start)
-        ) or 0
-        likes = await session.scalar(
-            select(func.count()).select_from(ListeningHistory)
-            .where(ListeningHistory.action == "like")
-        ) or 0
-        dislikes = await session.scalar(
-            select(func.count()).select_from(ListeningHistory)
-            .where(ListeningHistory.action == "dislike")
-        ) or 0
+        # ── Listening events: single combined query
+        lh_stats_r = await session.execute(
+            select(
+                func.sum(case((and_(ListeningHistory.action == "play", ListeningHistory.created_at >= today_start), 1), else_=0)),
+                func.sum(case((and_(ListeningHistory.action == "play", ListeningHistory.created_at >= week_ago), 1), else_=0)),
+                func.sum(case((and_(ListeningHistory.action == "search", ListeningHistory.created_at >= today_start), 1), else_=0)),
+                func.sum(case((ListeningHistory.action == "like", 1), else_=0)),
+                func.sum(case((ListeningHistory.action == "dislike", 1), else_=0)),
+            )
+        )
+        lh = lh_stats_r.one()
+        plays_today = int(lh[0] or 0)
+        plays_week = int(lh[1] or 0)
+        searches_today = int(lh[2] or 0)
+        likes = int(lh[3] or 0)
+        dislikes = int(lh[4] or 0)
 
         # ── Source breakdown ──────────────────────
         source_result = await session.execute(
@@ -456,6 +446,18 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     if not _is_admin(message.from_user.id):
         return
 
+    # Rate limit admin commands
+    rkey = _admin_rate_key(message.from_user.id)
+    try:
+        cnt = await cache.redis.incr(rkey)
+        if cnt == 1:
+            await cache.redis.expire(rkey, _ADMIN_RATE_WINDOW)
+        if cnt > _ADMIN_RATE_LIMIT:
+            await message.answer("⚠️ Слишком много команд. Подожди минуту.")
+            return
+    except Exception:
+        pass
+
     user = await get_or_create_user(message.from_user)
     lang = user.language
     args = message.text.split(maxsplit=2)
@@ -521,8 +523,24 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             await message.answer("Использование: /admin broadcast <текст>")
             return
         text = args[2]
-        await _broadcast(bot, message, text)
-        await log_admin_action(message.from_user.id, "broadcast", details=text[:200])
+        # Store pending broadcast for confirmation
+        await cache.redis.setex(
+            f"admin:broadcast_pending:{message.from_user.id}",
+            300,  # 5 min TTL
+            text,
+        )
+        preview = text[:200] + ("..." if len(text) > 200 else "")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить рассылку", callback_data="adm:broadcast_confirm"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="adm:broadcast_cancel"),
+            ]
+        ])
+        await message.answer(
+            f"⚠️ <b>Подтверди рассылку ВСЕМ пользователям:</b>\n\n{preview}",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
 
     # /admin release — force send current version changelog to eligible users
     elif subcmd in ("release", "version", "whatsnew"):
@@ -785,6 +803,33 @@ async def handle_adm_health(callback: CallbackQuery) -> None:
     from bot.services.provider_health import get_health_summary
     text = get_health_summary()
     await callback.message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(lambda c: c.data == "adm:broadcast_confirm")
+async def handle_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
+    if not _is_admin(callback.from_user.id):
+        return await callback.answer("⛔", show_alert=True)
+    await callback.answer()
+    pending_key = f"admin:broadcast_pending:{callback.from_user.id}"
+    text = await cache.redis.get(pending_key)
+    if not text:
+        await callback.message.edit_text("⚠️ Рассылка истекла или уже отправлена.")
+        return
+    if isinstance(text, bytes):
+        text = text.decode()
+    await cache.redis.delete(pending_key)
+    await callback.message.edit_text("⏳ Рассылка запущена...")
+    await _broadcast(bot, callback.message, text)
+    await log_admin_action(callback.from_user.id, "broadcast", details=text[:200])
+
+
+@router.callback_query(lambda c: c.data == "adm:broadcast_cancel")
+async def handle_broadcast_cancel(callback: CallbackQuery) -> None:
+    if not _is_admin(callback.from_user.id):
+        return await callback.answer("⛔", show_alert=True)
+    await callback.answer()
+    await cache.redis.delete(f"admin:broadcast_pending:{callback.from_user.id}")
+    await callback.message.edit_text("❌ Рассылка отменена.")
 
 
 @router.callback_query(lambda c: c.data == "adm:back")

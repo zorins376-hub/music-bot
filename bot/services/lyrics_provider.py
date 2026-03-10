@@ -12,6 +12,7 @@ import re
 import aiohttp
 
 from bot.config import settings
+from bot.services.http_session import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -61,41 +62,41 @@ async def _search_genius(artist: str, title: str) -> dict | None:
     headers = {"Authorization": f"Bearer {settings.GENIUS_TOKEN}"}
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                _GENIUS_SEARCH_URL,
-                params={"q": query},
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning("Genius search failed: %s", resp.status)
-                    return None
-                data = await resp.json()
-
-            hits = data.get("response", {}).get("hits", [])
-            if not hits:
+        session = get_session()
+        async with session.get(
+            _GENIUS_SEARCH_URL,
+            params={"q": query},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                logger.warning("Genius search failed: %s", resp.status)
                 return None
+            data = await resp.json()
 
-            # Take the first result
-            hit = hits[0]["result"]
-            genius_url = hit.get("url", "")
-            full_title = hit.get("full_title", f"{artist} — {title}")
+        hits = data.get("response", {}).get("hits", [])
+        if not hits:
+            return None
 
-            # Scrape lyrics from Genius page
-            lyrics_text = await _scrape_lyrics(session, genius_url)
-            if not lyrics_text:
-                return None
+        # Take the first result
+        hit = hits[0]["result"]
+        genius_url = hit.get("url", "")
+        full_title = hit.get("full_title", f"{artist} — {title}")
 
-            lines = [l for l in lyrics_text.split("\n") if l.strip()]
-            # Return only first 10 lines (copyright compliance)
-            preview_lines = lines[:10]
+        # Scrape lyrics from Genius page
+        lyrics_text = await _scrape_lyrics(session, genius_url)
+        if not lyrics_text:
+            return None
 
-            return {
-                "lines": preview_lines,
-                "url": genius_url,
-                "full_title": full_title,
-            }
+        lines = [l for l in lyrics_text.split("\n") if l.strip()]
+        # Return only first 10 lines (copyright compliance)
+        preview_lines = lines[:10]
+
+        return {
+            "lines": preview_lines,
+            "url": genius_url,
+            "full_title": full_title,
+        }
     except Exception as e:
         logger.warning("Genius API error: %s", e)
         return None
@@ -152,15 +153,15 @@ async def translate_lyrics(lines: list[str], target_lang: str = "ru") -> list[st
     params = {"q": text[:4500], "langpair": f"auto|{target_lang}"}
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.mymemory.translated.net/get",
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
+        session = get_session()
+        async with session.get(
+            "https://api.mymemory.translated.net/get",
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
 
         translated = data.get("responseData", {}).get("translatedText", "")
         if not translated or "MYMEMORY" in translated.upper():

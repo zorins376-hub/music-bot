@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import time
 from pathlib import Path
 
 from aiogram import Router
@@ -47,7 +48,8 @@ class VideoQualCb(CallbackData, prefix="vq"):
 
 # ── State: waiting for video query ──────────────────────────────────────
 
-_video_wait: set[int] = set()  # user IDs waiting for video query input
+# user_id → timestamp when they entered video wait mode
+_video_wait: dict[int, float] = {}
 
 
 # ── UI builders ──────────────────────────────────────────────────────────
@@ -89,7 +91,7 @@ async def cmd_video(message: Message) -> None:
     if query:
         await _do_video_search(message, query)
     else:
-        _video_wait.add(message.from_user.id)
+        _video_wait[message.from_user.id] = time.monotonic()
         await message.answer(
             f"{_LOGO}\n\n🎬 <b>Поиск видео</b>\n\nНапиши название клипа или исполнителя:",
             parse_mode="HTML",
@@ -99,7 +101,7 @@ async def cmd_video(message: Message) -> None:
 @router.callback_query(lambda c: c.data == "action:video")
 async def handle_video_button(callback: CallbackQuery) -> None:
     await callback.answer()
-    _video_wait.add(callback.from_user.id)
+    _video_wait[callback.from_user.id] = time.monotonic()
     try:
         await callback.message.edit_text(
             f"{_LOGO}\n\n🎬 <b>Поиск видео</b>\n\nНапиши название клипа или исполнителя:",
@@ -114,7 +116,12 @@ async def handle_video_button(callback: CallbackQuery) -> None:
 
 @router.message(lambda m: m.text and not m.text.startswith("/") and m.from_user and m.from_user.id in _video_wait)
 async def handle_video_query(message: Message) -> None:
-    _video_wait.discard(message.from_user.id)
+    _video_wait.pop(message.from_user.id, None)
+    # Purge stale entries older than 5 minutes
+    now = time.monotonic()
+    stale = [uid for uid, ts in _video_wait.items() if now - ts > 300]
+    for uid in stale:
+        _video_wait.pop(uid, None)
     query = message.text.strip()[:500]
     if query:
         await _do_video_search(message, query)

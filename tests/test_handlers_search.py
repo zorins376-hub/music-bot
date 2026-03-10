@@ -108,7 +108,7 @@ class TestFeedbackKeyboard:
         kb = _feedback_keyboard(42)
         row = kb.inline_keyboard[0]
         assert len(row) == 4  # like, dislike, add to playlist, add to queue
-        assert len(kb.inline_keyboard) == 2  # row2 = lyrics button
+        assert len(kb.inline_keyboard) == 3  # row2 = lyrics/fav/share, row3 = similar
 
 
 # ── cmd_search ───────────────────────────────────────────────────────────

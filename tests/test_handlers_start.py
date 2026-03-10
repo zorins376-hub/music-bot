@@ -20,6 +20,8 @@ def _make_user(uid=100, username="testuser", first_name="Test", lang="ru",
     u.fav_vibe = fav_vibe
     u.fav_artists = fav_artists
     u.created_at = MagicMock(strftime=MagicMock(return_value="01.01.2025"))
+    u.last_seen_version = "99.0.0"
+    u.onboarded = True
     return u
 
 
@@ -56,14 +58,16 @@ class TestCmdStart:
         user = _make_user()
         msg = AsyncMock()
         msg.from_user = MagicMock(id=100, username="test", first_name="Test")
+        msg.text = "/start"
         msg.answer = AsyncMock()
 
         with patch("bot.handlers.start.get_or_create_user", new_callable=AsyncMock, return_value=user), \
              patch("bot.handlers.start.is_admin", return_value=False):
             await cmd_start(msg)
 
-        msg.answer.assert_called_once()
-        args, kwargs = msg.answer.call_args
+        assert msg.answer.call_count >= 1
+        # First call is the main menu
+        args, kwargs = msg.answer.call_args_list[0]
         assert kwargs.get("reply_markup") is not None
         assert kwargs.get("parse_mode") == "HTML"
 

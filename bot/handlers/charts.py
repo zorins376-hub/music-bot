@@ -27,6 +27,7 @@ from bot.models.base import async_session
 from bot.models.playlist import Playlist, PlaylistTrack
 from bot.services.downloader import cleanup_file, download_track, search_tracks
 from bot.services.cache import cache
+from bot.services.http_session import get_session
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -123,47 +124,47 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
     # Primary: official iTunes RSS API
     itunes_url = f"https://itunes.apple.com/{storefront}/rss/topsongs/limit=50/json"
     try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(itunes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    entries = data.get("feed", {}).get("entry", [])
-                    tracks = []
-                    for item in entries[:50]:
-                        title = (item.get("im:name") or {}).get("label", "Unknown")
-                        artist = (item.get("im:artist") or {}).get("label", "Unknown")
-                        if title and artist:
-                            tracks.append({
-                                "title": title,
-                                "artist": artist,
-                                "query": f"{artist} - {title}",
-                            })
-                    if tracks:
-                        return tracks
-                else:
-                    logger.warning("iTunes RSS %s returned HTTP %s", storefront, resp.status)
+        sess = get_session()
+        async with sess.get(itunes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                entries = data.get("feed", {}).get("entry", [])
+                tracks = []
+                for item in entries[:50]:
+                    title = (item.get("im:name") or {}).get("label", "Unknown")
+                    artist = (item.get("im:artist") or {}).get("label", "Unknown")
+                    if title and artist:
+                        tracks.append({
+                            "title": title,
+                            "artist": artist,
+                            "query": f"{artist} - {title}",
+                        })
+                if tracks:
+                    return tracks
+            else:
+                logger.warning("iTunes RSS %s returned HTTP %s", storefront, resp.status)
     except Exception as e:
         logger.warning("iTunes RSS error (%s): %s", storefront, e)
 
     # Fallback: Apple Music RSS v2 (unofficial mirror, may be down)
     fallback_url = f"https://rss.applemonitoring.com/api/v2/{storefront}/music/most-played/100/songs.json"
     try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(fallback_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    results = data.get("feed", {}).get("results", [])
-                    tracks = []
-                    for item in results[:50]:
-                        artist = item.get("artistName", "Unknown")
-                        title = item.get("name", "Unknown")
-                        tracks.append({
-                            "title": title,
-                            "artist": artist,
-                            "query": f"{artist} - {title}",
-                        })
-                    if tracks:
-                        return tracks
+        sess = get_session()
+        async with sess.get(fallback_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                results = data.get("feed", {}).get("results", [])
+                tracks = []
+                for item in results[:50]:
+                    artist = item.get("artistName", "Unknown")
+                    title = item.get("name", "Unknown")
+                    tracks.append({
+                        "title": title,
+                        "artist": artist,
+                        "query": f"{artist} - {title}",
+                    })
+                if tracks:
+                    return tracks
     except Exception as e:
         logger.warning("Apple Music RSS mirror error (%s): %s", storefront, e)
 
@@ -281,12 +282,12 @@ async def _fetch_yandex_chart() -> list[dict]:
 async def _fetch_html(url: str, headers: dict) -> str:
     """Fetch HTML from URL, return empty string on failure."""
     try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    logger.warning("HTTP %s for %s", resp.status, url)
-                    return ""
-                return await resp.text()
+        sess = get_session()
+        async with sess.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                logger.warning("HTTP %s for %s", resp.status, url)
+                return ""
+            return await resp.text()
     except Exception as e:
         logger.warning("Fetch error %s: %s", url, e)
         return ""

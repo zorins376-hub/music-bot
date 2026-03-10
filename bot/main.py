@@ -41,10 +41,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_DL_DIR = Path("/app/downloads") if Path("/app").exists() else Path("downloads")
+
+
+def _cleanup_stale_downloads(max_age_sec: int = 3600) -> None:
+    """Remove temp files from downloads/ older than max_age_sec."""
+    import time
+    if not _DL_DIR.exists():
+        return
+    now = time.time()
+    removed = 0
+    for f in _DL_DIR.iterdir():
+        if f.is_file():
+            try:
+                if now - f.stat().st_mtime > max_age_sec:
+                    f.unlink()
+                    removed += 1
+            except Exception:
+                pass
+    if removed:
+        logger.info("Cleaned up %d stale download(s)", removed)
+
 
 async def on_startup(bot: Bot) -> None:
     from bot.services.downloader import log_runtime_info
     log_runtime_info()
+
+    # Cleanup stale downloads from previous runs
+    _cleanup_stale_downloads()
 
     await init_db()
 
@@ -124,6 +148,10 @@ async def on_shutdown(bot: Bot) -> None:
     if app_settings.USE_WEBHOOK:
         await bot.delete_webhook()
     await cache.close()
+
+    # Close shared aiohttp session
+    from bot.services.http_session import close_session
+    await close_session()
 
     # Gracefully shutdown thread pools
     from bot.services.downloader import _ytdl_pool

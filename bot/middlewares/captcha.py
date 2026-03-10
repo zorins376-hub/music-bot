@@ -22,7 +22,7 @@ from bot.version import WELCOME_MESSAGE
 
 _CHALLENGE_TTL = 60 * 10  # 10 minutes to answer
 _MAX_ATTEMPTS = 5          # max wrong answers before cooldown
-_BLOCK_TTL = 60 * 10      # 10 min block after too many failures
+_BLOCK_TTLS = [60 * 10, 60 * 30, 60 * 60 * 24]  # escalating: 10m, 30m, 24h
 
 
 def _challenge_key(user_id: int) -> str:
@@ -35,6 +35,10 @@ def _fails_key(user_id: int) -> str:
 
 def _block_key(user_id: int) -> str:
     return f"captcha:block:{user_id}"
+
+
+def _block_count_key(user_id: int) -> str:
+    return f"captcha:blockcnt:{user_id}"
 
 
 class CaptchaMiddleware(BaseMiddleware):
@@ -129,11 +133,16 @@ class CaptchaMiddleware(BaseMiddleware):
                 if fails == 1:
                     await cache.redis.expire(_fails_key(tg_user.id), _CHALLENGE_TTL)
                 if fails >= _MAX_ATTEMPTS:
-                    await cache.redis.setex(_block_key(tg_user.id), _BLOCK_TTL, "1")
+                    # Escalating block: 10m → 30m → 24h
+                    block_cnt = int(await cache.redis.get(_block_count_key(tg_user.id)) or 0)
+                    block_ttl = _BLOCK_TTLS[min(block_cnt, len(_BLOCK_TTLS) - 1)]
+                    await cache.redis.setex(_block_key(tg_user.id), block_ttl, "1")
+                    await cache.redis.set(_block_count_key(tg_user.id), str(block_cnt + 1))
+                    await cache.redis.expire(_block_count_key(tg_user.id), 60 * 60 * 48)  # reset after 48h
                     await cache.redis.delete(_challenge_key(tg_user.id))
                     await cache.redis.delete(_fails_key(tg_user.id))
                     await event.answer(
-                        t(db_user.language, "captcha_blocked", minutes=_BLOCK_TTL // 60),
+                        t(db_user.language, "captcha_blocked", minutes=block_ttl // 60),
                         parse_mode="HTML",
                     )
                     return

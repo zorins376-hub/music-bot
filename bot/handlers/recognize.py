@@ -1,6 +1,7 @@
 """FR-002: Shazam-based recognition for voice messages, audio files, videos."""
 import asyncio
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -20,7 +21,9 @@ _MIN_DURATION = 5  # seconds
 
 async def _tg_download(bot, file_id: str, suffix: str) -> Path:
     tg_file = await bot.get_file(file_id)
-    path = Path(tempfile.mktemp(suffix=suffix))
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    path = Path(tmp)
     await bot.download_file(tg_file.file_path, destination=str(path))
     return path
 

@@ -7,6 +7,7 @@
   "did_you_mean": "Did you mean:",
   "downloading": "▽ Downloading...",
   "error_download": "Failed to download the track. Try another one.",
+  "retry_btn": "Try again",
   "error_age_restricted": "△ This track is age-restricted (18+). Try another one.",
   "error_geo_restricted": "△ This track is not available in your region. Try another one.",
   "error_timeout": "△ Server is not responding — please try again in a minute.",
@@ -53,6 +54,8 @@
   "onboard_q3": "<b>Type up to 5 favorite artists, separated by commas:</b>\n\n<i>e.g. Drake, The Weeknd, Billie Eilish</i>",
   "onboard_done": "✓ Profile set up! I'll now recommend music tailored to you.",
   "onboard_skip": "Skip",
+  "onboard_nudge": "💡 Tell me what music you like — and I'll pick tracks just for you!",
+  "onboard_nudge_btn": "Set up taste",
 
   "premium_invoice_title": "BLACK ROOM Premium (30 days)",
   "premium_invoice_desc": "Unlimited tracks · 320 kbps · VIP stream · No ads",

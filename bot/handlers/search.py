@@ -138,7 +138,7 @@ async def _get_bot_setting(key: str, default: str) -> str:
         return val if isinstance(val, str) else val.decode()
     return default
 
-# session_id → {chat_id, user_msg_id, status_msg_id}
+# session_id → {chat_id, user_msg_id, status_msg_id, created_at}
 _group_sessions: dict[str, dict] = {}
 
 
@@ -827,7 +827,17 @@ async def handle_track_select(
                         cleanup_file(retry_path)
             except Exception as retry_err:
                 logger.debug("Auto-retry also failed: %s", retry_err)
-        await status.edit_text(t(lang, _classify_download_error(err_msg)))
+        # Add a retry button so the user can try again
+        retry_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🔄 " + t(lang, "retry_btn"),
+                callback_data=TrackCallback(sid=session_id, i=idx).pack(),
+            )]
+        ])
+        await status.edit_text(
+            t(lang, _classify_download_error(err_msg)),
+            reply_markup=retry_kb,
+        )
     finally:
         if mp3_path:
             cleanup_file(mp3_path)
