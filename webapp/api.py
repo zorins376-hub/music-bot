@@ -9,6 +9,7 @@ Endpoints:
   GET  /api/lyrics/{track_id}       — lyrics for a track
   GET  /api/search?q=...            — search tracks
 """
+import asyncio
 import json
 import logging
 import traceback
@@ -24,6 +25,7 @@ from pydantic import BaseModel
 
 from bot.config import settings
 from bot.services.downloader import download_track, resolve_youtube_audio_stream_url
+from bot.services.download_manager import download_manager
 from bot.models.base import init_db
 from webapp.auth import verify_init_data
 from webapp.schemas import (
@@ -222,6 +224,11 @@ async def stream_audio(
                         if content_range:
                             response_headers["Content-Range"] = content_range
 
+                        # Start background chunked download so file is cached for next time
+                        asyncio.ensure_future(
+                            _background_cache(video_id, stream_url, mp3_path)
+                        )
+
                         return StreamingResponse(
                             _iter_upstream(),
                             status_code=upstream.status,
@@ -230,8 +237,8 @@ async def stream_audio(
                         )
                     upstream.close()
 
-                # Fallback: full download + local file serving
-                mp3_path = await download_track(video_id)
+                # Fallback: coalesced download via download manager
+                mp3_path = await download_manager.download(video_id)
         except HTTPException:
             raise
         except Exception as e:
@@ -293,6 +300,27 @@ async def stream_audio(
 
 
 # ── Helper: Redis player state ──────────────────────────────────────────
+
+
+async def _background_cache(video_id: str, stream_url: str, dest: Path) -> None:
+    """Download audio via parallel chunks in background so next play is instant."""
+    if dest.exists():
+        return
+    try:
+        from bot.services.http_session import get_session
+        session = get_session()
+        await download_manager.chunked_download_url(stream_url, dest, session)
+        logger.info("Background cache complete: %s", video_id)
+    except Exception as e:
+        logger.warning("Background cache failed for %s: %s", video_id, e)
+        dest.unlink(missing_ok=True)
+
+
+@app.get("/api/downloads/stats")
+async def download_stats():
+    """Return download manager statistics."""
+    return download_manager.stats
+
 
 async def _get_redis():
     from bot.services.cache import cache
