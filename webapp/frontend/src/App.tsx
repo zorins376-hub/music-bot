@@ -294,7 +294,12 @@ export function App() {
   }, [state.current_track?.cover_url]);
 
   useEffect(() => {
-    if (userId) fetchPlayerState(userId).then(setState).catch(() => {});
+    if (userId) {
+      fetchPlayerState(userId).then((s) => {
+        // On initial load, force paused state — user must press play
+        setState({ ...s, is_playing: false });
+      }).catch(() => {});
+    }
     // Handle deep link from share: startapp=play_VIDEOID
     const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
     if (startParam && startParam.startsWith("play_")) {
