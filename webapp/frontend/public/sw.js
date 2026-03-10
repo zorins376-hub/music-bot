@@ -144,6 +144,52 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "CLEAR_AUDIO_CACHE") {
     caches.delete(AUDIO_CACHE_NAME);
   }
+
+  // Persistent notification for the notification shade
+  if (event.data?.type === "SHOW_NOW_PLAYING") {
+    const { title, artist, icon } = event.data;
+    self.registration.showNotification(title || "Playing", {
+      body: artist || "Black Room Radio",
+      icon: icon || "/icon.svg",
+      badge: "/icon.svg",
+      tag: "now-playing",
+      renotify: true,
+      silent: true,
+      ongoing: true,
+      requireInteraction: true,
+      actions: [
+        { action: "prev", title: "⏮" },
+        { action: "pause", title: "⏯" },
+        { action: "next", title: "⏭" },
+      ],
+    }).catch(() => {});
+  }
+
+  if (event.data?.type === "HIDE_NOW_PLAYING") {
+    self.registration.getNotifications({ tag: "now-playing" }).then((notifications) => {
+      notifications.forEach((n) => n.close());
+    });
+  }
+});
+
+// Handle notification actions (play/pause/next/prev from shade)
+self.addEventListener("notificationclick", (event) => {
+  const action = event.action;
+  event.notification.close();
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      if (clients.length > 0) {
+        const client = clients[0];
+        // Send action back to the app
+        client.postMessage({ type: "MEDIA_ACTION", action: action || "toggle" });
+        client.focus().catch(() => {});
+      } else {
+        // No open window — try to open one
+        self.clients.openWindow("/");
+      }
+    })
+  );
 });
 
 // Background sync for offline actions (future)

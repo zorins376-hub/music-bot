@@ -35,6 +35,7 @@ export function App() {
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isWaveLoading, setIsWaveLoading] = useState(false);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -122,6 +123,58 @@ export function App() {
     return () => { audio.pause(); audio.src = ""; preload.src = ""; };
   }, []);
 
+  // Listen for media control actions from Service Worker notifications
+  useEffect(() => {
+    const onSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === "MEDIA_ACTION") {
+        const action = event.data.action;
+        if (action === "pause" || action === "toggle") {
+          const a = audioRef.current;
+          if (a && !a.paused) {
+            sendAction("pause").then(setState).catch(() => {});
+          } else {
+            sendAction("play").then(setState).catch(() => {});
+          }
+        } else if (action === "next") {
+          sendAction("next").then(setState).catch(() => {});
+        } else if (action === "prev") {
+          sendAction("prev").then(setState).catch(() => {});
+        }
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", onSWMessage);
+    return () => navigator.serviceWorker?.removeEventListener("message", onSWMessage);
+  }, []);
+
+  // Screen Wake Lock: keep screen on while playing
+  useEffect(() => {
+    const acquireWakeLock = async () => {
+      if (!("wakeLock" in navigator)) return;
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+        wakeLockRef.current.addEventListener("release", () => {
+          wakeLockRef.current = null;
+        });
+      } catch {}
+    };
+    const releaseWakeLock = () => {
+      wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
+    };
+
+    if (state.is_playing) {
+      acquireWakeLock();
+      // Re-acquire after tab becomes visible again (browser releases on hide)
+      const onVisibility = () => {
+        if (document.visibilityState === "visible" && state.is_playing) acquireWakeLock();
+      };
+      document.addEventListener("visibilitychange", onVisibility);
+      return () => { document.removeEventListener("visibilitychange", onVisibility); releaseWakeLock(); };
+    } else {
+      releaseWakeLock();
+    }
+  }, [state.is_playing]);
+
   // Track ID ref to detect changes
   const currentTrackIdRef = useRef<string | null>(null);
 
@@ -134,6 +187,10 @@ export function App() {
       audio.pause(); audio.src = "";
       currentTrackIdRef.current = null;
       if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
+      // Hide notification shade entry
+      if (navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: "HIDE_NOW_PLAYING" });
+      }
       return;
     }
 
@@ -163,12 +220,30 @@ export function App() {
       navigator.mediaSession.metadata = new window.MediaMetadata({
         title: track.title,
         artist: track.artist || "Black Room Radio",
-        artwork: [
-          { src: artworkSrc, sizes: "192x192", type: artworkType },
-          { src: artworkSrc, sizes: "512x512", type: artworkType }
-        ]
+        artwork: track.cover_url
+          ? [
+              { src: track.cover_url, sizes: "96x96", type: "image/jpeg" },
+              { src: track.cover_url, sizes: "128x128", type: "image/jpeg" },
+              { src: track.cover_url, sizes: "192x192", type: "image/jpeg" },
+              { src: track.cover_url, sizes: "256x256", type: "image/jpeg" },
+              { src: track.cover_url, sizes: "384x384", type: "image/jpeg" },
+              { src: track.cover_url, sizes: "512x512", type: "image/jpeg" },
+            ]
+          : [
+              { src: artworkSrc, sizes: "any", type: artworkType },
+            ]
       });
       navigator.mediaSession.playbackState = state.is_playing ? "playing" : "paused";
+
+      // Push persistent notification to notification shade via Service Worker
+      if (navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: "SHOW_NOW_PLAYING",
+          title: track.title,
+          artist: track.artist || "Black Room Radio",
+          icon: track.cover_url || "/icon.svg",
+        });
+      }
 
       navigator.mediaSession.setActionHandler("play", () => {
         sendAction("play").then(setState).catch(() => {});
