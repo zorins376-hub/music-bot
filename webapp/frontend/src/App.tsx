@@ -22,6 +22,17 @@ type EqProfile = {
   makeup: number;
 };
 
+// Studio-grade tube warmth curve (subtle 2nd/3rd harmonic saturation)
+function makeTubeWarmthCurve(samples = 8192): Float32Array {
+  const curve = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / samples - 1;
+    // Soft-clip with asymmetric warmth: 2nd harmonic on positive half
+    curve[i] = Math.tanh(x * 1.1) * 0.97 + x * 0.03;
+  }
+  return curve;
+}
+
 const EQ_PRESETS: Record<EqPreset, EqProfile> = {
   flat: {
     gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -29,46 +40,49 @@ const EQ_PRESETS: Record<EqPreset, EqProfile> = {
     makeup: 0,
   },
   bass: {
-    gains: [5.5, 5, 4, 2.5, 1, -0.5, -1.5, -2, -1, 0.5],
+    gains: [5.2, 4.8, 3.6, 2, 0.6, -0.8, -1.2, -1.6, -0.6, 0.8],
+    preamp: -2.5,
+    makeup: 0.35,
+  },
+  vocal: {
+    gains: [-2, -1.6, -0.8, 0.6, 2.4, 3.8, 3.6, 2, 0.4, -0.6],
+    preamp: -1.4,
+    makeup: 0.28,
+  },
+  club: {
+    gains: [3.8, 2.8, 1.2, -0.8, -1.4, 0.6, 2, 3, 2.6, 1],
+    preamp: -2,
+    makeup: 0.42,
+  },
+  bright: {
+    gains: [-1.2, -0.8, -0.4, 0.2, 1, 1.8, 3, 4, 4.5, 3],
+    preamp: -1.8,
+    makeup: 0.22,
+  },
+  night: {
+    gains: [2.4, 1.8, 1.2, 0.4, -0.4, -1, -1.6, -2, -2.8, -3.4],
+    preamp: -1.5,
+    makeup: 0.12,
+  },
+  soft: {
+    gains: [1.2, 1, 0.6, 0.4, 0.2, 0, -0.2, 0.2, 0.6, 0.8],
+    preamp: -0.6,
+    makeup: 0.18,
+  },
+  techno: {
+    gains: [4.2, 3.6, 2.2, 0.4, -1.2, -0.4, 1.6, 3.2, 4, 2.4],
     preamp: -2.2,
     makeup: 0.4,
   },
-  vocal: {
-    gains: [-2.5, -2, -1, 0.5, 2, 3.5, 4, 2.5, 0.5, -0.5],
-    preamp: -1.2,
-    makeup: 0.3,
-  },
-  club: {
-    gains: [4, 3, 1.5, -0.5, -1.2, 0.8, 2.2, 3.2, 2.8, 1.2],
-    preamp: -1.8,
-    makeup: 0.5,
-  },
-  bright: {
-    gains: [-1.5, -1, -0.5, 0, 0.8, 1.6, 2.8, 4.2, 4.8, 3.2],
-    preamp: -1.6,
-    makeup: 0.25,
-  },
-  night: {
-    gains: [2.8, 2.2, 1.4, 0.4, -0.6, -1.2, -1.8, -2.2, -2.6, -3],
-    preamp: -1.7,
-    makeup: 0.15,
-  },
-  soft: {
-    gains: [1.5, 1.2, 0.8, 0.5, 0.2, 0, -0.2, 0.3, 0.8, 1.1],
-    preamp: -0.8,
-    makeup: 0.2,
-  },
-  techno: {
-    gains: [4.5, 3.8, 2.5, 0.5, -1, -0.2, 1.8, 3.4, 4.2, 2.6],
-    preamp: -2,
-    makeup: 0.45,
-  },
   vocal_boost: {
-    gains: [-3, -2.4, -1.2, 0.8, 2.8, 4.4, 5, 3.2, 0.8, -0.3],
-    preamp: -1.5,
-    makeup: 0.35,
+    gains: [-2.8, -2.2, -1, 0.6, 2.6, 4.2, 4.8, 3, 0.6, -0.4],
+    preamp: -1.6,
+    makeup: 0.32,
   },
 };
+
+// Per-band Q factor: wide on extremes, precise in mids (studio practice)
+const EQ_Q: number[] = [0.6, 0.7, 0.85, 1.0, 1.2, 1.2, 1.1, 0.9, 0.75, 0.6];
 
 function dbToGain(value: number): number {
   return Math.pow(10, value / 20);
@@ -118,6 +132,7 @@ export function App() {
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const eqInputGainRef = useRef<GainNode | null>(null);
   const eqOutputGainRef = useRef<GainNode | null>(null);
+  const crossfadeGainRef = useRef<GainNode | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -217,38 +232,67 @@ export function App() {
 
     if (!sourceNodeRef.current) {
       const source = ctx.createMediaElementSource(audio);
+      const crossfadeGain = ctx.createGain();
       const inputGain = ctx.createGain();
       const outputGain = ctx.createGain();
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -8;
-      compressor.knee.value = 12;
-      compressor.ratio.value = 3;
-      compressor.attack.value = 0.02;
-      compressor.release.value = 0.25;
 
+      // ── Subsonic filter: HPF @ 20Hz removes inaudible rumble ──
+      const subsonicFilter = ctx.createBiquadFilter();
+      subsonicFilter.type = "highpass";
+      subsonicFilter.frequency.value = 20;
+      subsonicFilter.Q.value = 0.7;
+
+      // ── 10-band parametric EQ with studio Q values ──
       const filters = EQ_BANDS.map((freq, idx) => {
         const filter = ctx.createBiquadFilter();
         filter.type = idx === 0 ? "lowshelf" : idx === EQ_BANDS.length - 1 ? "highshelf" : "peaking";
         filter.frequency.value = freq;
-        filter.Q.value = idx < 2 || idx > EQ_BANDS.length - 3 ? 0.75 : 1.05;
+        filter.Q.value = EQ_Q[idx];
         return filter;
       });
 
-      source.connect(inputGain);
+      // ── Tube warmth: subtle harmonic saturation ──
+      const waveshaper = ctx.createWaveShaper();
+      waveshaper.curve = makeTubeWarmthCurve();
+      waveshaper.oversample = "4x";
 
-      let node: AudioNode = inputGain;
+      // ── Glue compressor: gentle bus compression ──
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -12;
+      compressor.knee.value = 10;
+      compressor.ratio.value = 2.5;
+      compressor.attack.value = 0.025;
+      compressor.release.value = 0.25;
+
+      // ── Brick-wall limiter: catches final peaks ──
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1.5;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.001;
+      limiter.release.value = 0.05;
+
+      // ── Signal chain ──
+      source.connect(crossfadeGain);
+      crossfadeGain.connect(inputGain);
+      inputGain.connect(subsonicFilter);
+
+      let node: AudioNode = subsonicFilter;
       filters.forEach((filter) => {
         node.connect(filter);
         node = filter;
       });
-      node.connect(compressor);
-      compressor.connect(outputGain);
+      node.connect(waveshaper);
+      waveshaper.connect(compressor);
+      compressor.connect(limiter);
+      limiter.connect(outputGain);
       outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
       eqFiltersRef.current = filters;
       eqInputGainRef.current = inputGain;
       eqOutputGainRef.current = outputGain;
+      crossfadeGainRef.current = crossfadeGain;
     }
   }, []);
 
@@ -353,18 +397,35 @@ export function App() {
       return;
     }
 
-    // Load audio with cache
+    // Load audio with crossfade
     const loadAudio = async () => {
       if (currentTrackIdRef.current === track.video_id) return;
       currentTrackIdRef.current = track.video_id;
       setBuffering(true);
-      
+
+      // Crossfade out (150ms) before switching source
+      const ctx = audioContextRef.current;
+      const cfGain = crossfadeGainRef.current;
+      if (ctx && cfGain && !audio.paused) {
+        const t = ctx.currentTime;
+        cfGain.gain.setValueAtTime(cfGain.gain.value, t);
+        cfGain.gain.linearRampToValueAtTime(0, t + 0.15);
+        await new Promise(r => setTimeout(r, 160));
+      }
+
       const apiUrl = getStreamUrl(track.video_id);
       const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
       audio.src = cachedUrl;
       
       if (state.is_playing) {
         audio.play().catch(() => {});
+      }
+
+      // Crossfade in (200ms)
+      if (ctx && cfGain) {
+        const t = ctx.currentTime;
+        cfGain.gain.setValueAtTime(0, t);
+        cfGain.gain.linearRampToValueAtTime(1, t + 0.2);
       }
 
       // Prefetch next 2 tracks in queue so they start instantly
