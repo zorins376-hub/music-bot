@@ -438,6 +438,39 @@ export function App() {
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
+      {isTequila && (
+        <>
+          <div
+            style={{
+              position: "fixed",
+              top: -120,
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 420,
+              height: 220,
+              borderRadius: "50%",
+              background: "radial-gradient(circle, rgba(255,213,79,0.22) 0%, rgba(255,167,38,0.12) 35%, rgba(255,167,38,0) 72%)",
+              filter: "blur(22px)",
+              zIndex: -1,
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              bottom: -90,
+              right: -60,
+              width: 280,
+              height: 280,
+              borderRadius: "50%",
+              background: "radial-gradient(circle, rgba(255,109,0,0.18) 0%, rgba(255,109,0,0.08) 40%, rgba(255,109,0,0) 72%)",
+              filter: "blur(28px)",
+              zIndex: -1,
+              pointerEvents: "none",
+            }}
+          />
+        </>
+      )}
       {/* Theme Background Image */}
       {theme.bgImage && (
         <div
@@ -576,6 +609,29 @@ export function App() {
             letterSpacing: 2,
             textTransform: "uppercase",
           }}>inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘.</div>
+        </div>
+      )}
+
+      {isTequila && view === "player" && !state.current_track && (
+        <div style={{
+          margin: "12px auto 10px",
+          maxWidth: 360,
+          padding: "16px 18px",
+          borderRadius: 22,
+          background: "rgba(40, 25, 15, 0.48)",
+          border: "1px solid rgba(255, 213, 79, 0.14)",
+          backdropFilter: "blur(18px)",
+          WebkitBackdropFilter: "blur(18px)",
+          textAlign: "center",
+          boxShadow: "0 14px 40px rgba(0,0,0,0.18)",
+        }}>
+          <div style={{ fontSize: 12, letterSpacing: 3, color: "#ffd54f", marginBottom: 8 }}>SUNSET LUXURY MODE</div>
+          <div style={{ fontSize: 15, lineHeight: 1.5, color: "#fef0e0", fontWeight: 600 }}>
+            Выбери трек и включи атмосферу тёплого, дорогого, мягкого вайба.
+          </div>
+          <div style={{ fontSize: 11, color: "#c8a882", marginTop: 8 }}>
+            amber glow · warm glass · premium motion
+          </div>
         </div>
       )}
 

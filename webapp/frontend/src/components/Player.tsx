@@ -260,6 +260,23 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
 
     return (
       <div style={{ textAlign: "center", padding: "8px 0" }}>
+        <style>{`
+          @keyframes tequilaGlow {
+            0% { box-shadow: 0 12px 40px rgba(255, 109, 0, 0.22), 0 0 0 1px rgba(255, 213, 79, 0.22), inset 0 0 0 1px rgba(255,213,79,0.1); }
+            50% { box-shadow: 0 16px 54px rgba(255, 109, 0, 0.34), 0 0 0 1px rgba(255, 213, 79, 0.30), inset 0 0 0 1px rgba(255,213,79,0.16); }
+            100% { box-shadow: 0 12px 40px rgba(255, 109, 0, 0.22), 0 0 0 1px rgba(255, 213, 79, 0.22), inset 0 0 0 1px rgba(255,213,79,0.1); }
+          }
+          @keyframes tequilaPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.04); }
+            100% { transform: scale(1); }
+          }
+          @keyframes tequilaShimmer {
+            0% { opacity: .35; transform: translateX(-140%) rotate(18deg); }
+            50% { opacity: .55; }
+            100% { opacity: 0; transform: translateX(160%) rotate(18deg); }
+          }
+        `}</style>
         {/* Cover — luxury framed */}
         <div
           onTouchStart={handleTouchStart}
@@ -280,6 +297,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             boxShadow: track
               ? `0 12px 40px rgba(255, 109, 0, 0.25), 0 0 0 1px ${borderGold}, inset 0 0 0 1px rgba(255,213,79,0.1)`
               : "0 8px 24px rgba(255,109,0,0.3)",
+            animation: state.is_playing ? "tequilaGlow 3.6s ease-in-out infinite" : "none",
             overflow: "hidden",
             transition: swipeOffset === 0 ? "transform 0.3s ease-out" : "none",
             transform: `translateX(${swipeOffset}px) scale(${state.is_playing ? 1.03 : 1})`,
@@ -308,6 +326,19 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             border: `1.5px solid ${borderGold}`,
             pointerEvents: "none",
           }} />
+          {state.is_playing && (
+            <div style={{
+              position: "absolute",
+              top: -20,
+              left: -60,
+              width: 120,
+              height: 320,
+              background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,244,200,0.26), rgba(255,255,255,0))",
+              transform: "rotate(18deg)",
+              animation: "tequilaShimmer 2.8s ease-in-out infinite",
+              pointerEvents: "none",
+            }} />
+          )}
         </div>
 
         {/* Glass info card */}
@@ -412,6 +443,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               transition: "all 0.4s ease",
               position: "relative",
               border: "none",
+              animation: state.is_playing && !buffering ? "tequilaPulse 2.6s ease-in-out infinite" : "none",
             }}
             onClick={() => { haptic("heavy"); onAction(state.is_playing ? "pause" : "play"); }}
           >
