@@ -182,15 +182,29 @@ export const IconSearch = ({ size = 18, color = "currentColor", strokeWidth = 2 
   </svg>
 );
 
-// Lime / citrus icon (for Tequila theme)
+// Lime / citrus icon in cross-section (for Tequila theme)
 export const IconLime = ({ size = 18, color = "currentColor", strokeWidth = 1.8 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="9"/>
-    <path d="M12 3c0 5 4 9 9 9"/>
-    <path d="M12 3c0 5 -4 9 -9 9"/>
-    <path d="M12 21c0 -5 4 -9 9 -9"/>
-    <path d="M12 21c0 -5 -4 -9 -9 -9"/>
-    <circle cx="12" cy="12" r="2.5"/>
+    {/* Outer peel */}
+    <circle cx="12" cy="12" r="10"/>
+    {/* Inner pith */}
+    <circle cx="12" cy="12" r="8" strokeDasharray="1 3" strokeWidth="1" opacity="0.8"/>
+    {/* Center core */}
+    <circle cx="12" cy="12" r="2" fill={color} fillOpacity="0.1"/>
+    {/* Segments (8 slices) */}
+    <path d="M12 4 L12 10" />
+    <path d="M12 20 L12 14" />
+    <path d="M4 12 L10 12" />
+    <path d="M20 12 L14 12" />
+    <path d="M6.34 6.34 L10.59 10.59" />
+    <path d="M17.66 17.66 L13.41 13.41" />
+    <path d="M17.66 6.34 L13.41 10.59" />
+    <path d="M6.34 17.66 L10.59 13.41" />
+    {/* Juice droplets (dots) in segments */}
+    <circle cx="14" cy="8" r="0.5" fill={color} stroke="none"/>
+    <circle cx="10" cy="16" r="0.5" fill={color} stroke="none"/>
+    <circle cx="8" cy="10" r="0.5" fill={color} stroke="none"/>
+    <circle cx="16" cy="14" r="0.5" fill={color} stroke="none"/>
   </svg>
 );
 
