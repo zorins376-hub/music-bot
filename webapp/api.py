@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from bot.config import settings
-from bot.services.downloader import download_track
+from bot.services.downloader import download_track, resolve_youtube_audio_stream_url
 from bot.models.base import init_db
 from webapp.auth import verify_init_data
 from webapp.schemas import (
@@ -109,7 +109,46 @@ async def stream_audio(
                 # VK Music — need to re-fetch URL (temporary links)
                 raise HTTPException(status_code=501, detail="VK streaming not supported in TMA yet")
             else:
-                # YouTube
+                # YouTube: try direct streaming URL first for immediate playback
+                stream_url = await resolve_youtube_audio_stream_url(video_id)
+                if stream_url:
+                    from bot.services.http_session import get_session
+
+                    range_header = request.headers.get("range")
+                    upstream_headers = {}
+                    if range_header:
+                        upstream_headers["Range"] = range_header
+
+                    session = get_session()
+                    upstream = await session.get(stream_url, headers=upstream_headers, allow_redirects=True)
+                    if upstream.status in (200, 206):
+                        async def _iter_upstream():
+                            try:
+                                async for chunk in upstream.content.iter_chunked(64 * 1024):
+                                    yield chunk
+                            finally:
+                                upstream.close()
+
+                        response_headers = {
+                            "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
+                            "Cache-Control": "no-store",
+                        }
+                        content_length = upstream.headers.get("Content-Length")
+                        content_range = upstream.headers.get("Content-Range")
+                        if content_length:
+                            response_headers["Content-Length"] = content_length
+                        if content_range:
+                            response_headers["Content-Range"] = content_range
+
+                        return StreamingResponse(
+                            _iter_upstream(),
+                            status_code=upstream.status,
+                            media_type=upstream.headers.get("Content-Type", "audio/mpeg"),
+                            headers=response_headers,
+                        )
+                    upstream.close()
+
+                # Fallback: full download + local file serving
                 mp3_path = await download_track(video_id)
         except HTTPException:
             raise

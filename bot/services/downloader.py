@@ -85,6 +85,16 @@ async def resolve_youtube_url(video_id: str) -> dict | None:
         return None
 
 
+async def resolve_youtube_audio_stream_url(video_id: str) -> str | None:
+    """Resolve direct audio stream URL for immediate playback."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(_ytdl_pool, _resolve_youtube_audio_stream_url_sync, video_id)
+    except Exception as e:
+        logger.error("YouTube audio stream URL resolve failed for %s: %s", video_id, e)
+        return None
+
+
 def _resolve_youtube_sync(video_id: str) -> dict | None:
     url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
@@ -116,6 +126,46 @@ def _resolve_youtube_sync(video_id: str) -> dict | None:
             }
     except Exception as e:
         logger.error("YouTube resolve sync error for %s: %s", video_id, e)
+        return None
+
+
+def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "socket_timeout": 15,
+        "format": "bestaudio/best",
+        **_base_opts(),
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return None
+            stream_url = info.get("url")
+            if isinstance(stream_url, str) and stream_url:
+                return stream_url
+
+            formats = info.get("formats") or []
+            best_audio_url = None
+            best_abr = -1.0
+            for fmt in formats:
+                acodec = (fmt.get("acodec") or "none")
+                vcodec = (fmt.get("vcodec") or "none")
+                fmt_url = fmt.get("url")
+                if acodec == "none" or not fmt_url:
+                    continue
+                if vcodec != "none":
+                    continue
+                abr = float(fmt.get("abr") or 0)
+                if abr > best_abr:
+                    best_abr = abr
+                    best_audio_url = fmt_url
+            return best_audio_url
+    except Exception as e:
+        logger.error("YouTube audio URL resolve sync error for %s: %s", video_id, e)
         return None
 
 # Junk to strip from YouTube titles
