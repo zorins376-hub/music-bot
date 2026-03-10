@@ -398,3 +398,20 @@ export const IconMoodParty = ({ size = 18, color = "currentColor" }: IconProps) 
     <circle cx="21" cy="14" r="1" fill={color} stroke="none"/>
   </svg>
 );
+
+/** 📊 Chart — bar chart icon */
+export const IconChart = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="12" width="4" height="9" rx="1" />
+    <rect x="10" y="6" width="4" height="15" rx="1" />
+    <rect x="17" y="3" width="4" height="18" rx="1" />
+  </svg>
+);
+
+/** ➕ Plus icon */
+export const IconPlus = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);

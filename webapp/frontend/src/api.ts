@@ -164,3 +164,74 @@ export async function fetchWave(userId: number, limit = 10, mood: string | null 
   const data = await r.json();
   return data.tracks;
 }
+
+// ── Charts ──────────────────────────────────────────────────────────────
+
+export interface ChartSource {
+  id: string;
+  label: string;
+}
+
+export async function fetchChartSources(): Promise<ChartSource[]> {
+  const r = await fetch(`${API_BASE}/charts`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  return r.json();
+}
+
+export async function fetchChart(source: string, limit = 30): Promise<Track[]> {
+  const r = await fetch(`${API_BASE}/charts/${source}?limit=${limit}`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}
+
+// ── Playlist CRUD ───────────────────────────────────────────────────────
+
+export async function createPlaylist(name: string): Promise<Playlist> {
+  const r = await fetch(`${API_BASE}/playlists`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) throw new Error("Failed to create playlist");
+  return r.json();
+}
+
+export async function addTrackToPlaylist(playlistId: number, track: Track): Promise<Playlist> {
+  const r = await fetch(`${API_BASE}/playlist/${playlistId}/tracks`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({
+      video_id: track.video_id,
+      title: track.title,
+      artist: track.artist,
+      duration: track.duration,
+      source: track.source,
+      cover_url: track.cover_url,
+    }),
+  });
+  if (!r.ok) throw new Error("Failed to add track");
+  return r.json();
+}
+
+export async function removeTrackFromPlaylist(playlistId: number, videoId: string): Promise<void> {
+  await fetch(`${API_BASE}/playlist/${playlistId}/tracks/${videoId}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+}
+
+export async function renamePlaylist(playlistId: number, name: string): Promise<void> {
+  await fetch(`${API_BASE}/playlist/${playlistId}`, {
+    method: "PUT",
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deletePlaylist(playlistId: number): Promise<void> {
+  await fetch(`${API_BASE}/playlist/${playlistId}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+}

@@ -2,17 +2,18 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { Player } from "./components/Player";
 import { TrackList } from "./components/TrackList";
 import { PlaylistView } from "./components/PlaylistView";
+import { ChartsView } from "./components/ChartsView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart } from "./components/Icons";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, type EqPreset, type PlayerState, type Track, type UserProfile } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 
-type View = "player" | "playlists" | "search" | "lyrics";
+type View = "player" | "playlists" | "charts" | "search" | "lyrics";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -916,7 +917,7 @@ export function App() {
           margin: "0 auto 4px",
         } : {}),
       }}>
-        {(["player", "playlists", "search"] as View[]).map((v) => (
+        {(["player", "playlists", "charts", "search"] as View[]).map((v) => (
           <button
             key={v}
             onClick={() => setView(v)}
@@ -937,7 +938,7 @@ export function App() {
               transition: "all 0.4s ease",
             }}
           >
-            {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
+            {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : v === "charts" ? (<><IconChart size={12} color="currentColor" /> Чарты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
           </button>
         ))}
         {/* Theme switcher */}
@@ -1135,7 +1136,9 @@ export function App() {
         </>
       )}
 
-      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
+
+      {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 

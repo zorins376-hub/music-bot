@@ -846,6 +846,203 @@ async def get_wave(
     return SearchResult(tracks=tracks, total=len(tracks))
 
 
+# ── Charts API ───────────────────────────────────────────────────────────
+
+@app.get("/api/charts")
+async def list_charts(user: dict = Depends(get_current_user)):
+    """List available chart sources."""
+    from bot.handlers.charts import _CHART_LABELS
+    return [{"id": k, "label": v} for k, v in _CHART_LABELS.items()]
+
+
+@app.get("/api/charts/{source}", response_model=SearchResult)
+async def get_chart(
+    source: str,
+    limit: int = Query(default=30, ge=1, le=50),
+    user: dict = Depends(get_current_user),
+):
+    """Get chart tracks by source."""
+    from bot.handlers.charts import _get_chart
+    tracks_raw = await _get_chart(source)
+    if not tracks_raw:
+        return SearchResult(tracks=[], total=0)
+    tracks = [
+        TrackSchema(
+            video_id=r.get("video_id", ""),
+            title=r.get("title", "Unknown"),
+            artist=r.get("artist", "Unknown"),
+            duration=r.get("duration", 0),
+            duration_fmt=r.get("duration_fmt", "0:00"),
+            source=r.get("source", "youtube"),
+            cover_url=r.get("cover_url") or (
+                f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg"
+                if r.get("video_id") and r.get("source", "youtube") == "youtube"
+                else None
+            ),
+        )
+        for r in tracks_raw[:limit]
+        if r.get("title")
+    ]
+    return SearchResult(tracks=tracks, total=len(tracks))
+
+
+# ── Playlist CRUD API ────────────────────────────────────────────────────
+
+class CreatePlaylistRequest(BaseModel):
+    name: str
+
+
+class AddTrackToPlaylistRequest(BaseModel):
+    video_id: str
+    title: str = "Unknown"
+    artist: str = "Unknown"
+    duration: int = 0
+    source: str = "youtube"
+    cover_url: str | None = None
+
+
+class RenamePlaylistRequest(BaseModel):
+    name: str
+
+
+@app.post("/api/playlists", response_model=PlaylistSchema)
+async def create_playlist(body: CreatePlaylistRequest, user: dict = Depends(get_current_user)):
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist
+
+    name = body.name.strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+
+    async with async_session() as session:
+        pl = Playlist(user_id=user["id"], name=name)
+        session.add(pl)
+        await session.commit()
+        await session.refresh(pl)
+        return PlaylistSchema(id=pl.id, name=pl.name, track_count=0)
+
+
+@app.post("/api/playlist/{playlist_id}/tracks", response_model=PlaylistSchema)
+async def add_track_to_playlist(
+    playlist_id: int,
+    body: AddTrackToPlaylistRequest,
+    user: dict = Depends(get_current_user),
+):
+    from sqlalchemy import select, func
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist, PlaylistTrack
+    from bot.models.track import Track
+    from bot.db import upsert_track
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user["id"]:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+        # Upsert track in DB
+        track_data = {
+            "source_id": body.video_id,
+            "source": body.source,
+            "title": body.title,
+            "artist": body.artist,
+            "duration": body.duration,
+        }
+        db_track = await upsert_track(track_data)
+
+        # Check if already in playlist
+        existing = (await session.execute(
+            select(PlaylistTrack).where(
+                PlaylistTrack.playlist_id == playlist_id,
+                PlaylistTrack.track_id == db_track.id,
+            )
+        )).scalar_one_or_none()
+        if existing:
+            cnt = (await session.execute(
+                select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist_id)
+            )).scalar() or 0
+            return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt)
+
+        # Get max position
+        max_pos = (await session.execute(
+            select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
+        )).scalar() or 0
+
+        pt = PlaylistTrack(playlist_id=playlist_id, track_id=db_track.id, position=max_pos + 1)
+        session.add(pt)
+        await session.commit()
+
+        cnt = (await session.execute(
+            select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist_id)
+        )).scalar() or 0
+        return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt)
+
+
+@app.delete("/api/playlist/{playlist_id}/tracks/{video_id}")
+async def remove_track_from_playlist(
+    playlist_id: int,
+    video_id: str,
+    user: dict = Depends(get_current_user),
+):
+    from sqlalchemy import select, delete
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist, PlaylistTrack
+    from bot.models.track import Track
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user["id"]:
+            raise HTTPException(status_code=404)
+
+        track = (await session.execute(
+            select(Track).where(Track.source_id == video_id)
+        )).scalar_one_or_none()
+        if track:
+            await session.execute(
+                delete(PlaylistTrack).where(
+                    PlaylistTrack.playlist_id == playlist_id,
+                    PlaylistTrack.track_id == track.id,
+                )
+            )
+            await session.commit()
+    return {"ok": True}
+
+
+@app.put("/api/playlist/{playlist_id}")
+async def rename_playlist(
+    playlist_id: int,
+    body: RenamePlaylistRequest,
+    user: dict = Depends(get_current_user),
+):
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user["id"]:
+            raise HTTPException(status_code=404)
+        pl.name = body.name.strip()[:100]
+        await session.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/playlist/{playlist_id}")
+async def delete_playlist(playlist_id: int, user: dict = Depends(get_current_user)):
+    from sqlalchemy import delete as sa_delete
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist, PlaylistTrack
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user["id"]:
+            raise HTTPException(status_code=404)
+        await session.execute(
+            sa_delete(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id)
+        )
+        await session.delete(pl)
+        await session.commit()
+    return {"ok": True}
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 async def _get_track_by_source_id(source_id: str) -> TrackSchema | None:
