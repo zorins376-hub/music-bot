@@ -207,6 +207,29 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
         # Seek position stored but actual seeking is client-side
         pass
 
+    elif body.action == "remove":
+        # Remove track from queue by video_id
+        if body.track_id and state.queue:
+            for i, t in enumerate(state.queue):
+                if t.video_id == body.track_id:
+                    state.queue.pop(i)
+                    # Adjust position if needed
+                    if i < state.position:
+                        state.position -= 1
+                    elif i == state.position:
+                        # If removing current track, move to next (or prev if last)
+                        if state.position >= len(state.queue):
+                            state.position = max(0, len(state.queue) - 1)
+                        state.is_playing = False
+                    break
+
+    elif body.action == "add":
+        # Add track to queue without playing
+        if body.track_id:
+            track = await _get_track_by_source_id(body.track_id)
+            if track and not any(t.video_id == body.track_id for t in state.queue):
+                state.queue.append(track)
+
     # Update current track
     if state.queue and 0 <= state.position < len(state.queue):
         state.current_track = state.queue[state.position]

@@ -1,11 +1,13 @@
-import { useState, useRef } from "preact/hooks";
+import { useState, useRef, useCallback } from "preact/hooks";
 import type { Track } from "../api";
+import { sendAction } from "../api";
 
 interface Props {
   tracks: Track[];
   currentIndex: number;
   onPlay: (track: Track) => void;
   onReorder?: (newOrder: Track[]) => void;
+  onRemove?: (track: Track) => void;
   accentColor?: string;
 }
 
@@ -16,40 +18,62 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   } catch {}
 };
 
-export function TrackList({ tracks, currentIndex, onPlay, onReorder, accentColor = "var(--tg-theme-button-color, #7c4dff)" }: Props) {
+export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, accentColor = "var(--tg-theme-button-color, #7c4dff)" }: Props) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [swipedIndex, setSwipedIndex] = useState<number | null>(null);
   const dragStartY = useRef(0);
+  const dragStartX = useRef(0);
   const longPressTimer = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleTouchStart = (e: TouchEvent, idx: number) => {
     dragStartY.current = e.touches[0].clientY;
+    dragStartX.current = e.touches[0].clientX;
+    // Long press for drag mode
     longPressTimer.current = window.setTimeout(() => {
       haptic("heavy");
       setDragIndex(idx);
-    }, 400);
+      setSwipedIndex(null);
+    }, 500);
   };
 
-  const handleTouchMove = (e: TouchEvent) => {
-    if (longPressTimer.current) {
-      const moved = Math.abs(e.touches[0].clientY - dragStartY.current);
-      if (moved > 10) {
-        clearTimeout(longPressTimer.current);
-        longPressTimer.current = null;
-      }
+  const handleTouchMove = useCallback((e: TouchEvent, idx: number) => {
+    const touchY = e.touches[0].clientY;
+    const touchX = e.touches[0].clientX;
+    const movedY = Math.abs(touchY - dragStartY.current);
+    const movedX = touchX - dragStartX.current;
+
+    // Cancel long press if moved
+    if (longPressTimer.current && movedY > 10) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
     }
+
+    // Swipe left to reveal delete (only if not dragging)
+    if (dragIndex === null && movedX < -50 && movedY < 30) {
+      setSwipedIndex(idx);
+    } else if (movedX > 20 && swipedIndex === idx) {
+      setSwipedIndex(null);
+    }
+
+    // Drag mode - find target position
     if (dragIndex !== null) {
-      const touch = e.touches[0];
-      const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+      e.preventDefault();
+      const elements = document.elementsFromPoint(touchX, touchY);
       for (const el of elements) {
-        const idx = (el as HTMLElement).dataset?.trackIdx;
-        if (idx !== undefined) {
-          setOverIndex(parseInt(idx));
+        const dataIdx = (el as HTMLElement).dataset?.trackIdx;
+        if (dataIdx !== undefined) {
+          const newOver = parseInt(dataIdx);
+          if (newOver !== overIndex) {
+            setOverIndex(newOver);
+            haptic("light");
+          }
           break;
         }
       }
     }
-  };
+  }, [dragIndex, overIndex, swipedIndex]);
 
   const handleTouchEnd = () => {
     if (longPressTimer.current) {
@@ -67,43 +91,93 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, accentColor
     setOverIndex(null);
   };
 
+  const handleRemove = async (e: Event, track: Track, idx: number) => {
+    e.stopPropagation();
+    haptic("medium");
+    setSwipedIndex(null);
+    
+    if (onRemove) {
+      onRemove(track);
+    } else {
+      // Default: remove via API
+      try {
+        await sendAction("remove", track.video_id);
+        // Trigger reorder without the removed track
+        if (onReorder) {
+          const newTracks = tracks.filter((_, i) => i !== idx);
+          onReorder(newTracks);
+        }
+      } catch (err) {
+        console.error("Remove track error:", err);
+      }
+    }
+  };
+
   return (
     <div
-      style={{ marginTop: 16 }}
-      onTouchMove={handleTouchMove}
+      ref={containerRef}
+      style={{ marginTop: 16, overflowY: "auto", maxHeight: "40vh", WebkitOverflowScrolling: "touch" }}
       onTouchEnd={handleTouchEnd}
     >
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
         <span>Очередь ({tracks.length})</span>
-        {onReorder && <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>зажми для перетаскивания</span>}
+        <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>← свайп для удаления</span>
       </div>
       {tracks.map((t, i) => (
         <div
           key={t.video_id}
           data-track-idx={i}
-          onTouchStart={(e) => handleTouchStart(e as unknown as TouchEvent, i)}
-          onClick={() => dragIndex === null && onPlay(t)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            padding: "10px 12px",
-            borderRadius: 10,
-            marginBottom: 6,
-            cursor: "pointer",
-            background: i === currentIndex
-              ? accentColor
-              : dragIndex === i
-              ? "rgba(124, 77, 255, 0.3)"
-              : overIndex === i && dragIndex !== null
-              ? "rgba(124, 77, 255, 0.15)"
-              : "rgba(255,255,255,0.08)",
-            transform: dragIndex === i ? "scale(1.02)" : "scale(1)",
-            transition: "transform 0.15s, background 0.15s",
-            boxShadow: dragIndex === i ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
-            touchAction: "none",
-            userSelect: "none",
-          }}
+          style={{ position: "relative", overflow: "hidden", marginBottom: 6 }}
         >
+          {/* Delete button (revealed on swipe) */}
+          <div
+            onClick={(e) => handleRemove(e as unknown as Event, t, i)}
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 60,
+              background: "#ff4444",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: "0 10px 10px 0",
+              cursor: "pointer",
+              opacity: swipedIndex === i ? 1 : 0,
+              transition: "opacity 0.2s",
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </div>
+          {/* Track item */}
+          <div
+            onTouchStart={(e) => handleTouchStart(e as unknown as TouchEvent, i)}
+            onTouchMove={(e) => handleTouchMove(e as unknown as TouchEvent, i)}
+            onClick={() => dragIndex === null && swipedIndex !== i && onPlay(t)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "10px 12px",
+              borderRadius: 10,
+              cursor: "pointer",
+              background: i === currentIndex
+                ? accentColor
+                : dragIndex === i
+                ? "rgba(124, 77, 255, 0.3)"
+                : overIndex === i && dragIndex !== null
+                ? "rgba(124, 77, 255, 0.15)"
+                : "rgba(255,255,255,0.08)",
+              transform: `translateX(${swipedIndex === i ? -60 : 0}px) scale(${dragIndex === i ? 1.02 : 1})`,
+              transition: "transform 0.2s, background 0.15s",
+              boxShadow: dragIndex === i ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
+              touchAction: dragIndex !== null ? "none" : "pan-y",
+              userSelect: "none",
+            }}
+          >
           {/* Drag handle */}
           {onReorder && (
             <div style={{ marginRight: 10, color: "var(--tg-theme-hint-color, #666)", fontSize: 16 }}>
@@ -128,6 +202,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, accentColor
           </div>
           <div style={{ fontSize: 12, color: i === currentIndex ? "rgba(255,255,255,0.8)" : "var(--tg-theme-hint-color, #aaa)", marginLeft: 8 }}>
             {t.duration_fmt}
+          </div>
           </div>
         </div>
       ))}
