@@ -22,17 +22,6 @@ type EqProfile = {
   makeup: number;
 };
 
-// Studio-grade tube warmth curve (subtle 2nd/3rd harmonic saturation)
-function makeTubeWarmthCurve(samples = 8192): Float32Array {
-  const curve = new Float32Array(samples);
-  for (let i = 0; i < samples; i++) {
-    const x = (i * 2) / samples - 1;
-    // Soft-clip with asymmetric warmth: 2nd harmonic on positive half
-    curve[i] = Math.tanh(x * 1.1) * 0.97 + x * 0.03;
-  }
-  return curve;
-}
-
 const EQ_PRESETS: Record<EqPreset, EqProfile> = {
   flat: {
     gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -251,28 +240,15 @@ export function App() {
         return filter;
       });
 
-      // ── Tube warmth: subtle harmonic saturation ──
-      const waveshaper = ctx.createWaveShaper();
-      waveshaper.curve = makeTubeWarmthCurve();
-      waveshaper.oversample = "4x";
-
-      // ── Glue compressor: gentle bus compression ──
+      // ── Gentle glue compressor (no limiter — it fights compressor causing pumping) ──
       const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -12;
-      compressor.knee.value = 10;
-      compressor.ratio.value = 2.5;
-      compressor.attack.value = 0.025;
-      compressor.release.value = 0.25;
+      compressor.threshold.value = -18;
+      compressor.knee.value = 20;
+      compressor.ratio.value = 2;
+      compressor.attack.value = 0.05;
+      compressor.release.value = 0.3;
 
-      // ── Brick-wall limiter: catches final peaks ──
-      const limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -1.5;
-      limiter.knee.value = 0;
-      limiter.ratio.value = 20;
-      limiter.attack.value = 0.001;
-      limiter.release.value = 0.05;
-
-      // ── Signal chain ──
+      // ── Signal chain: source → crossfade → preamp → HPF → EQ → compressor → output ──
       source.connect(crossfadeGain);
       crossfadeGain.connect(inputGain);
       inputGain.connect(subsonicFilter);
@@ -282,10 +258,8 @@ export function App() {
         node.connect(filter);
         node = filter;
       });
-      node.connect(waveshaper);
-      waveshaper.connect(compressor);
-      compressor.connect(limiter);
-      limiter.connect(outputGain);
+      node.connect(compressor);
+      compressor.connect(outputGain);
       outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
@@ -300,22 +274,27 @@ export function App() {
     ensureEqualizerGraph();
     const profile = EQ_PRESETS[preset] || EQ_PRESETS.flat;
     const ctx = audioContextRef.current;
-    const now = ctx?.currentTime ?? 0;
+    if (!ctx) return;
+    const now = ctx.currentTime;
 
+    // Smooth ramp: anchor current value then exponentially approach target
+    // Time constant 0.15 = ~450ms to reach 95% of target (no clicks)
     eqFiltersRef.current.forEach((filter, idx) => {
       const target = profile.gains[idx] ?? 0;
-      filter.gain.cancelScheduledValues(now);
-      filter.gain.setTargetAtTime(target, now, 0.08);
+      filter.gain.setValueAtTime(filter.gain.value, now);
+      filter.gain.setTargetAtTime(target, now, 0.15);
     });
 
     if (eqInputGainRef.current) {
-      eqInputGainRef.current.gain.cancelScheduledValues(now);
-      eqInputGainRef.current.gain.setTargetAtTime(dbToGain(profile.preamp), now, 0.08);
+      const g = eqInputGainRef.current.gain;
+      g.setValueAtTime(g.value, now);
+      g.setTargetAtTime(dbToGain(profile.preamp), now, 0.15);
     }
 
     if (eqOutputGainRef.current) {
-      eqOutputGainRef.current.gain.cancelScheduledValues(now);
-      eqOutputGainRef.current.gain.setTargetAtTime(dbToGain(profile.makeup), now, 0.12);
+      const g = eqOutputGainRef.current.gain;
+      g.setValueAtTime(g.value, now);
+      g.setTargetAtTime(dbToGain(profile.makeup), now, 0.2);
     }
   }, [ensureEqualizerGraph]);
 
@@ -403,29 +382,36 @@ export function App() {
       currentTrackIdRef.current = track.video_id;
       setBuffering(true);
 
-      // Crossfade out (150ms) before switching source
+      // Resume AudioContext if suspended (required on mobile after user gesture)
       const ctx = audioContextRef.current;
+      if (ctx && ctx.state === "suspended") {
+        await ctx.resume().catch(() => {});
+      }
+
+      // Crossfade out (120ms) before switching source — exponential for smooth hearing
       const cfGain = crossfadeGainRef.current;
       if (ctx && cfGain && !audio.paused) {
         const t = ctx.currentTime;
         cfGain.gain.setValueAtTime(cfGain.gain.value, t);
-        cfGain.gain.linearRampToValueAtTime(0, t + 0.15);
-        await new Promise(r => setTimeout(r, 160));
+        cfGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+        await new Promise(r => setTimeout(r, 130));
       }
 
+      audio.pause();
       const apiUrl = getStreamUrl(track.video_id);
       const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
       audio.src = cachedUrl;
+      audio.load();
       
       if (state.is_playing) {
-        audio.play().catch(() => {});
+        await audio.play().catch(() => {});
       }
 
-      // Crossfade in (200ms)
+      // Crossfade in (250ms) — exponential ramp from near-zero
       if (ctx && cfGain) {
         const t = ctx.currentTime;
-        cfGain.gain.setValueAtTime(0, t);
-        cfGain.gain.linearRampToValueAtTime(1, t + 0.2);
+        cfGain.gain.setValueAtTime(0.001, t);
+        cfGain.gain.exponentialRampToValueAtTime(1, t + 0.25);
       }
 
       // Prefetch next 2 tracks in queue so they start instantly
