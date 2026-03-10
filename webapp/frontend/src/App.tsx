@@ -13,13 +13,45 @@ import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "
 type View = "player" | "playlists" | "search" | "lyrics";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
-const EQ_PRESETS: Record<EqPreset, number[]> = {
-  flat: [0, 0, 0, 0, 0, 0],
-  bass: [6, 4, 2, 0, -1, -2],
-  vocal: [-2, -1, 1, 3, 3, 1],
-  club: [0, 0, 2, 3, 2, 0],
-  bright: [-1, 0, 1, 2, 4, 5],
+const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
+
+type EqProfile = {
+  gains: number[];
+  preamp: number;
+  makeup: number;
 };
+
+const EQ_PRESETS: Record<EqPreset, EqProfile> = {
+  flat: {
+    gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    preamp: 0,
+    makeup: 0,
+  },
+  bass: {
+    gains: [5.5, 5, 4, 2.5, 1, -0.5, -1.5, -2, -1, 0.5],
+    preamp: -2.2,
+    makeup: 0.4,
+  },
+  vocal: {
+    gains: [-2.5, -2, -1, 0.5, 2, 3.5, 4, 2.5, 0.5, -0.5],
+    preamp: -1.2,
+    makeup: 0.3,
+  },
+  club: {
+    gains: [4, 3, 1.5, -0.5, -1.2, 0.8, 2.2, 3.2, 2.8, 1.2],
+    preamp: -1.8,
+    makeup: 0.5,
+  },
+  bright: {
+    gains: [-1.5, -1, -0.5, 0, 0.8, 1.6, 2.8, 4.2, 4.8, 3.2],
+    preamp: -1.6,
+    makeup: 0.25,
+  },
+};
+
+function dbToGain(value: number): number {
+  return Math.pow(10, value / 20);
+}
 
 function getSavedEqPreset(): EqPreset {
   try {
@@ -63,6 +95,8 @@ export function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
+  const eqInputGainRef = useRef<GainNode | null>(null);
+  const eqOutputGainRef = useRef<GainNode | null>(null);
 
   // Create persistent audio element
   useEffect(() => {
@@ -169,33 +203,62 @@ export function App() {
 
     if (!sourceNodeRef.current) {
       const source = ctx.createMediaElementSource(audio);
-      const freqs = [60, 170, 350, 1000, 3500, 10000];
-      const filters = freqs.map((freq, idx) => {
+      const inputGain = ctx.createGain();
+      const outputGain = ctx.createGain();
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 6;
+      compressor.ratio.value = 2.5;
+      compressor.attack.value = 0.005;
+      compressor.release.value = 0.18;
+
+      const filters = EQ_BANDS.map((freq, idx) => {
         const filter = ctx.createBiquadFilter();
-        filter.type = idx === 0 ? "lowshelf" : idx === freqs.length - 1 ? "highshelf" : "peaking";
+        filter.type = idx === 0 ? "lowshelf" : idx === EQ_BANDS.length - 1 ? "highshelf" : "peaking";
         filter.frequency.value = freq;
-        filter.Q.value = 1;
+        filter.Q.value = idx < 2 || idx > EQ_BANDS.length - 3 ? 0.75 : 1.05;
         return filter;
       });
 
-      let node: AudioNode = source;
+      source.connect(inputGain);
+
+      let node: AudioNode = inputGain;
       filters.forEach((filter) => {
         node.connect(filter);
         node = filter;
       });
-      node.connect(ctx.destination);
+      node.connect(compressor);
+      compressor.connect(outputGain);
+      outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
       eqFiltersRef.current = filters;
+      eqInputGainRef.current = inputGain;
+      eqOutputGainRef.current = outputGain;
     }
   }, []);
 
   const applyEqPreset = useCallback((preset: EqPreset) => {
     ensureEqualizerGraph();
-    const gains = EQ_PRESETS[preset] || EQ_PRESETS.flat;
+    const profile = EQ_PRESETS[preset] || EQ_PRESETS.flat;
+    const ctx = audioContextRef.current;
+    const now = ctx?.currentTime ?? 0;
+
     eqFiltersRef.current.forEach((filter, idx) => {
-      filter.gain.value = gains[idx] ?? 0;
+      const target = profile.gains[idx] ?? 0;
+      filter.gain.cancelScheduledValues(now);
+      filter.gain.setTargetAtTime(target, now, 0.08);
     });
+
+    if (eqInputGainRef.current) {
+      eqInputGainRef.current.gain.cancelScheduledValues(now);
+      eqInputGainRef.current.gain.setTargetAtTime(dbToGain(profile.preamp), now, 0.08);
+    }
+
+    if (eqOutputGainRef.current) {
+      eqOutputGainRef.current.gain.cancelScheduledValues(now);
+      eqOutputGainRef.current.gain.setTargetAtTime(dbToGain(profile.makeup), now, 0.12);
+    }
   }, [ensureEqualizerGraph]);
 
   useEffect(() => {
