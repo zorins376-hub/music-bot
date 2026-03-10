@@ -5,7 +5,7 @@ import { PlaylistView } from "./components/PlaylistView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
-import { IconCrown, IconShield } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch } from "./components/Icons";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, type EqPreset, type PlayerState, type Track, type UserProfile } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
@@ -784,7 +784,7 @@ export function App() {
               transition: "all 0.4s ease",
             }}
           >
-            {v === "player" ? (isTequila ? "♪ Плеер" : "▸ Плеер") : v === "playlists" ? (isTequila ? "♫ Плейлисты" : "▸ Плейлисты") : (isTequila ? "◆ Поиск" : "◈ Поиск")}
+            {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
           </button>
         ))}
         {/* Theme switcher */}
@@ -807,7 +807,7 @@ export function App() {
             gap: 4,
           }}
         >
-          {theme.id === "tequila" ? "🌙" : "🌅"}
+          {theme.id === "tequila" ? <IconMoon size={16} /> : <IconLime size={16} />}
         </button>
       </nav>
       {(userProfile?.is_premium || userProfile?.is_admin) && (

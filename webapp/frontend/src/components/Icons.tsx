@@ -181,3 +181,70 @@ export const IconSearch = ({ size = 18, color = "currentColor", strokeWidth = 2 
     <line x1="21" y1="21" x2="16.65" y2="16.65"/>
   </svg>
 );
+
+// Lime / citrus icon (for Tequila theme)
+export const IconLime = ({ size = 18, color = "currentColor", strokeWidth = 1.8 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 3c0 5 4 9 9 9"/>
+    <path d="M12 3c0 5 -4 9 -9 9"/>
+    <path d="M12 21c0 -5 4 -9 9 -9"/>
+    <path d="M12 21c0 -5 -4 -9 -9 -9"/>
+    <circle cx="12" cy="12" r="2.5"/>
+  </svg>
+);
+
+// Sunrise icon (for theme switch → Tequila)
+export const IconSunrise = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 18a5 5 0 0 0-10 0"/>
+    <line x1="12" y1="9" x2="12" y2="2"/>
+    <line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/>
+    <line x1="1" y1="18" x2="3" y2="18"/>
+    <line x1="21" y1="18" x2="23" y2="18"/>
+    <line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/>
+    <line x1="23" y1="22" x2="1" y2="22"/>
+    <polyline points="8 6 12 2 16 6"/>
+  </svg>
+);
+
+// Close / X icon
+export const IconClose = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+);
+
+// Upload / Share out icon
+export const IconUpload = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+);
+
+// Sad face icon
+export const IconSad = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M16 16s-1.5-2-4-2-4 2-4 2"/>
+    <line x1="9" y1="9" x2="9.01" y2="9"/>
+    <line x1="15" y1="9" x2="15.01" y2="9"/>
+  </svg>
+);
+
+// Play triangle icon (small, for nav)
+export const IconPlaySmall = ({ size = 12, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+    <polygon points="6,3 20,12 6,21"/>
+  </svg>
+);
+
+// Diamond icon
+export const IconDiamond = ({ size = 12, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+    <polygon points="12,2 22,12 12,22 2,12"/>
+  </svg>
+);

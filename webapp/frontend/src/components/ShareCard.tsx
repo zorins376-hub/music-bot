@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from "preact/hooks";
 import { extractDominantColor, rgbToCSS } from "../colorExtractor";
+import { IconClose, IconUpload } from "./Icons";
 
 interface ShareCardProps {
   track: {
@@ -242,7 +243,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
           cursor: "pointer",
         }}
       >
-        ✕
+        <IconClose size={20} />
       </button>
 
       {/* Preview */}
@@ -286,7 +287,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
                 boxShadow: isTequila ? "0 8px 24px rgba(255, 109, 0, 0.3)" : "none",
               }}
             >
-              📤 Share
+              <IconUpload size={16} /> Share
             </button>
             <button
               onClick={handleDownload}

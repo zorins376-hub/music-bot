@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { fetchLyrics } from "../api";
 import { SkeletonLyrics } from "./Skeleton";
-import { IconArrowLeft } from "./Icons";
+import { IconArrowLeft, IconSad } from "./Icons";
 
 interface LyricLine {
   time: number;   // seconds
@@ -131,7 +131,7 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
         </div>
       ) : (
         <div style={{ textAlign: "center", padding: 32, color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)" }}>
-          Текст не найден 😔
+          Текст не найден <IconSad size={16} />
         </div>
       )}
     </div>
