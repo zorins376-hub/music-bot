@@ -48,6 +48,12 @@
       50% { transform: scale(1.065) translate3d(0, -0.4%, 0); }
       100% { transform: scale(1.1) translate3d(0, -0.8%, 0); }
     }
+    @keyframes tequilaImageSweep {
+      0% { transform: translateX(-135%) skewX(-18deg); opacity: 0; }
+      18% { opacity: 0.06; }
+      45% { opacity: 0.18; }
+      100% { transform: translateX(240%) skewX(-18deg); opacity: 0; }
+    }
     @keyframes tequilaLoaderPulse {
       0%, 100% { opacity: 0.45; transform: scale(1); }
       50% { opacity: 0.82; transform: scale(1.08); }
@@ -149,9 +155,19 @@
       inset: 0;
       background:
         radial-gradient(circle at center, transparent 42%, rgba(5, 4, 6, 0.14) 62%, rgba(5, 4, 6, 0.52) 100%),
-        linear-gradient(180deg, rgba(8,6,6,0.10) 0%, rgba(8,6,6,0.22) 58%, rgba(8,6,6,0.82) 100%),
+        linear-gradient(180deg, rgba(8,6,6,0.12) 0%, rgba(8,6,6,0.28) 50%, rgba(8,6,6,0.92) 84%, rgba(4,4,5,0.98) 100%),
         linear-gradient(135deg, rgba(255,255,255,0.06), transparent 38%, rgba(255,193,7,0.06));
       pointer-events: none;
+    }
+    .boot-loader-image-wrap::before {
+      content: "";
+      position: absolute;
+      inset: -8% auto -8% -16%;
+      width: 26%;
+      background: linear-gradient(90deg, transparent, rgba(255, 239, 184, 0.22), rgba(255, 193, 7, 0.12), transparent);
+      pointer-events: none;
+      z-index: 1;
+      animation: tequilaImageSweep 4.8s ease-in-out infinite;
     }
     .boot-loader-image {
       display: block;
@@ -170,7 +186,7 @@
       width: min(96vw, 980px);
       padding: 0 8px;
       font-size: clamp(18px, 4.2vw, 28px);
-      line-height: 1.22;
+      line-height: 1.14;
       font-weight: 900;
       letter-spacing: 0.18em;
       text-transform: uppercase;
@@ -182,6 +198,12 @@
       text-shadow: 0 0 28px rgba(255, 202, 40, 0.22);
       animation: tequilaGoldSweep 4.6s linear infinite;
       z-index: 2;
+    }
+    .boot-loader-caption-line {
+      display: block;
+    }
+    .boot-loader-caption-line + .boot-loader-caption-line {
+      margin-top: 6px;
     }
     .boot-loader-caption .spark {
       color: rgba(255, 229, 159, 0.95);
@@ -235,7 +257,10 @@
       <div class="boot-loader-image-wrap">
         <img class="boot-loader-image" src="/tequila-loader.png" alt="Luxury loader" />
       </div>
-      <div class="boot-loader-caption"><span class="spark">✦</span> Inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘 <span class="spark">✦</span></div>
+      <div class="boot-loader-caption">
+        <span class="boot-loader-caption-line"><span class="spark">✦</span> Inspired by</span>
+        <span class="boot-loader-caption-line">𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘 <span class="spark">✦</span></span>
+      </div>
       <div class="boot-loader-subline">Luxury sound entrance</div>
     </div>
   </div>
