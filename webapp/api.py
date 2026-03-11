@@ -86,9 +86,9 @@ async def lifespan(app: FastAPI):
     from bot.services.track_indexer import start_indexer_scheduler
     await start_indexer_scheduler()
 
-    # Deep crawler — continuously indexes entire Yandex & Spotify catalogs
-    from bot.services.deep_crawler import start_deep_crawler
-    await start_deep_crawler()
+    # Deep crawler — runs on separate VPS, not here
+    # from bot.services.deep_crawler import start_deep_crawler
+    # await start_deep_crawler()
 
     # Periodic cleanup of expired stream URL cache entries
     async def _cleanup_url_cache():

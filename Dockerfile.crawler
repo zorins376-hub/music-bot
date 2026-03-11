@@ -1,0 +1,15 @@
+# Standalone deep crawler — lightweight, no ffmpeg/node/deno needed
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.crawler.txt .
+RUN pip install --no-cache-dir -r requirements.crawler.txt
+
+COPY bot/ bot/
+COPY crawler/ crawler/
+COPY recommender/ recommender/
+
+RUN mkdir -p /app/data /app/logs
+
+CMD ["python", "-m", "crawler"]

@@ -1,0 +1,17 @@
+# Minimal dependencies for the standalone crawler service
+# Connects to existing Supabase PostgreSQL + Redis — no Telegram, no ffmpeg, no yt-dlp
+
+# Core
+pydantic-settings>=2.0.0
+sqlalchemy[asyncio]>=2.0.0
+psycopg[binary]>=3.1.0
+
+# Redis (crawler queue state)
+redis[asyncio]>=5.0.0
+
+# Music APIs
+yandex-music>=2.0.0
+spotipy>=2.23.0
+
+# HTTP
+aiohttp>=3.9.0
