@@ -8,7 +8,7 @@ import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
 import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner } from "./components/Icons";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
@@ -734,9 +734,20 @@ export function App() {
               softPlay(audioRef.current).catch(() => {});
             }
           }
+          // Ingest play event for AI learning
+          const playTrack = track || state.current_track;
+          if (playTrack) {
+            ingestEvent("play", playTrack, undefined, "wave");
+          }
         } else if (act === "pause") {
           if (audioRef.current && !audioRef.current.paused) {
             softPause(audioRef.current).catch(() => {});
+          }
+        } else if (act === "next" || act === "skip") {
+          // Ingest skip event for AI learning
+          if (state.current_track) {
+            const listened = audioRef.current ? Math.round(audioRef.current.currentTime) : 0;
+            ingestEvent("skip", state.current_track, listened, "wave");
           }
         }
         
@@ -749,7 +760,7 @@ export function App() {
         console.error("Action error:", act, e);
       }
     },
-    [ensureEqualizerGraph, softPlay, softPause]
+    [ensureEqualizerGraph, softPlay, softPause, state.current_track]
   );
 
   const updateQuality = useCallback(async (quality: string) => {

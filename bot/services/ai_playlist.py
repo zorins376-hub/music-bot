@@ -182,12 +182,27 @@ def _generate_queries_fallback(prompt: str) -> list[str]:
 
 
 async def generate_ai_playlist(
-    prompt: str, max_tracks: int = 20
+    prompt: str, max_tracks: int = 20, user_id: int | None = None
 ) -> list[dict]:
     """Generate a playlist from a natural language prompt.
 
     Returns list of track dicts compatible with search_tracks output.
     """
+    # Use Supabase AI if enabled (Gemini-powered vector search)
+    if settings.SUPABASE_AI_ENABLED and user_id is not None:
+        try:
+            from bot.services.supabase_ai import supabase_ai
+            results = await supabase_ai.generate_ai_playlist(
+                user_id=user_id,
+                prompt=prompt,
+                limit=max_tracks,
+            )
+            if results:
+                return results
+            # Fall through to local fallback if Supabase returns empty
+        except Exception as e:
+            logger.warning("Supabase AI playlist failed, falling back: %s", e)
+
     # Try OpenAI first if key is configured
     queries: list[str] = []
     if settings.OPENAI_API_KEY:

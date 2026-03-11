@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
-import { toggleFavorite, checkFavorite } from "../api";
+import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent } from "../api";
 import { ShareCard } from "./ShareCard";
 import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus } from "./Icons";
 
@@ -252,6 +252,11 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
     try {
       const newState = await toggleFavorite(track.video_id);
       setIsLiked(newState);
+      // Send feedback to Supabase AI
+      sendFeedback(newState ? "like" : "dislike", track.video_id, "player");
+      if (newState) {
+        ingestEvent("like", track, undefined, "player");
+      }
     } catch {}
   };
 

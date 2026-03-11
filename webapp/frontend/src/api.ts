@@ -235,3 +235,59 @@ export async function deletePlaylist(playlistId: number): Promise<void> {
     headers: getHeaders(),
   });
 }
+
+// ── Supabase AI ─────────────────────────────────────────────────────────
+
+export async function ingestEvent(
+  event: "play" | "skip" | "like" | "dislike",
+  track: Track,
+  listenDuration?: number,
+  source: string = "wave",
+): Promise<void> {
+  fetch(`${API_BASE}/ingest`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({
+      event,
+      track: {
+        source_id: track.video_id,
+        title: track.title,
+        artist: track.artist,
+        duration: track.duration,
+        source: track.source,
+      },
+      listen_duration: listenDuration,
+      source,
+    }),
+  }).catch(() => {}); // fire-and-forget
+}
+
+export async function sendFeedback(
+  feedback: "like" | "dislike",
+  sourceId: string,
+  context: string = "player",
+): Promise<void> {
+  fetch(`${API_BASE}/feedback`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ feedback, source_id: sourceId, context }),
+  }).catch(() => {});
+}
+
+export async function fetchSimilar(videoId: string, limit = 10): Promise<Track[]> {
+  const r = await fetch(`${API_BASE}/similar/${videoId}?limit=${limit}`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}
+
+export async function generateAiPlaylist(prompt: string, limit = 10): Promise<Track[]> {
+  const r = await fetch(`${API_BASE}/ai-playlist`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ prompt, limit }),
+  });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}

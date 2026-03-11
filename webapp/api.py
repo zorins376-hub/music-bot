@@ -838,21 +838,138 @@ async def get_wave(
     if user.get("id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    from recommender.ai_dj import get_recommendations
+    recs: list[dict] = []
+    if settings.SUPABASE_AI_ENABLED:
+        from bot.services.supabase_ai import supabase_ai
+        recs = await supabase_ai.get_recommendations(user_id, limit=limit)
+    else:
+        from recommender.ai_dj import get_recommendations
+        recs = await get_recommendations(user_id, limit=limit)
 
-    recs = await get_recommendations(user_id, limit=limit)
     tracks = [
         TrackSchema(
-            video_id=r.get("video_id", ""),
+            video_id=r.get("video_id", r.get("source_id", "")),
             title=r.get("title", "Unknown"),
             artist=r.get("artist", r.get("uploader", "Unknown")),
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
-            cover_url=r.get("cover_url") or (f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None),
+            cover_url=r.get("cover_url") or (f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None),
         )
         for r in recs
-        if r.get("video_id")
+        if r.get("video_id") or r.get("source_id")
+    ]
+    return SearchResult(tracks=tracks, total=len(tracks))
+
+
+# ── Supabase AI Endpoints ────────────────────────────────────────────────
+
+
+class IngestEventRequest(BaseModel):
+    event: str  # "play" | "skip" | "like" | "dislike"
+    track: dict
+    listen_duration: int | None = None
+    source: str = "wave"
+
+
+class FeedbackRequest(BaseModel):
+    feedback: str  # "like" | "dislike" | "skip" | "save" | "share" | "repeat"
+    source_id: str | None = None
+    context: str | None = None
+
+
+class AiPlaylistRequest(BaseModel):
+    prompt: str
+    limit: int = 10
+
+
+@app.post("/api/ingest")
+async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_current_user)):
+    """Send a play/skip/like event to Supabase AI for learning user taste."""
+    if not settings.SUPABASE_AI_ENABLED:
+        return {"ok": False, "reason": "AI not enabled"}
+    from bot.services.supabase_ai import supabase_ai
+    ok = await supabase_ai.ingest_event(
+        event=body.event,
+        user_id=user["id"],
+        track=body.track,
+        listen_duration=body.listen_duration,
+        source=body.source,
+    )
+    return {"ok": ok}
+
+
+@app.post("/api/feedback")
+async def send_feedback(body: FeedbackRequest, user: dict = Depends(get_current_user)):
+    """Send explicit like/dislike feedback to Supabase AI."""
+    if not settings.SUPABASE_AI_ENABLED:
+        return {"ok": False, "reason": "AI not enabled"}
+    from bot.services.supabase_ai import supabase_ai
+    ok = await supabase_ai.send_feedback(
+        user_id=user["id"],
+        feedback=body.feedback,
+        source_id=body.source_id,
+        context=body.context,
+    )
+    return {"ok": ok}
+
+
+@app.get("/api/similar/{video_id}", response_model=SearchResult)
+async def get_similar(
+    video_id: str,
+    limit: int = Query(default=10, ge=1, le=30),
+    user: dict = Depends(get_current_user),
+):
+    """Find tracks similar to a given track using Supabase AI embeddings."""
+    if not settings.SUPABASE_AI_ENABLED:
+        return SearchResult(tracks=[], total=0)
+    from bot.services.supabase_ai import supabase_ai
+    results = await supabase_ai.get_similar(source_id=video_id, limit=limit)
+    tracks = [
+        TrackSchema(
+            video_id=r.get("video_id", r.get("source_id", "")),
+            title=r.get("title", "Unknown"),
+            artist=r.get("artist", "Unknown"),
+            duration=r.get("duration", 0),
+            duration_fmt=r.get("duration_fmt", "0:00"),
+            source=r.get("source", "youtube"),
+            cover_url=r.get("cover_url") or (
+                f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg"
+                if r.get("source", "youtube") == "youtube" else None
+            ),
+        )
+        for r in results
+        if r.get("video_id") or r.get("source_id")
+    ]
+    return SearchResult(tracks=tracks, total=len(tracks))
+
+
+@app.post("/api/ai-playlist", response_model=SearchResult)
+async def create_ai_playlist(body: AiPlaylistRequest, user: dict = Depends(get_current_user)):
+    """Generate AI playlist from a text prompt via Supabase Edge Function."""
+    if not settings.SUPABASE_AI_ENABLED:
+        return SearchResult(tracks=[], total=0)
+    from bot.services.supabase_ai import supabase_ai
+    results = await supabase_ai.generate_ai_playlist(
+        user_id=user["id"],
+        prompt=body.prompt,
+        limit=body.limit,
+    )
+    tracks = [
+        TrackSchema(
+            video_id=r.get("video_id", r.get("source_id", "")),
+            title=r.get("title", "Unknown"),
+            artist=r.get("artist", "Unknown"),
+            duration=r.get("duration", 0),
+            duration_fmt=r.get("duration_fmt", "0:00"),
+            source=r.get("source", "youtube"),
+            cover_url=r.get("cover_url") or (
+                f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg"
+                if r.get("source", "youtube") == "youtube" else None
+            ),
+        )
+        for r in results
+        if r.get("video_id") or r.get("source_id")
     ]
     return SearchResult(tracks=tracks, total=len(tracks))
 

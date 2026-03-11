@@ -67,7 +67,7 @@ async def _process_prompt(message: Message, user, prompt: str) -> None:
         t(lang, "ai_playlist_generating"), parse_mode="HTML"
     )
 
-    tracks = await generate_ai_playlist(prompt, max_tracks=20)
+    tracks = await generate_ai_playlist(prompt, max_tracks=20, user_id=user.id)
 
     if not tracks:
         await status_msg.edit_text(
