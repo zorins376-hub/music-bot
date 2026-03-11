@@ -245,6 +245,18 @@ export function App() {
       elapsedRef.current = t;
       setElapsed(t);
 
+      // Aggressive pre-fetch: start caching next tracks at 70% playback
+      if (audio.duration && audio.currentTime / audio.duration >= 0.7) {
+        const nextIds: string[] = [];
+        for (let i = 1; i <= 2; i++) {
+          const idx = (state.position + i) % state.queue.length;
+          if (state.queue.length > 1 && state.queue[idx]?.video_id) {
+            nextIds.push(state.queue[idx].video_id);
+          }
+        }
+        if (nextIds.length) prefetchTracks(nextIds);
+      }
+
       // Gapless: preload next track 30 seconds before end
       if (audio.duration && audio.duration - audio.currentTime < 30 && audio.duration > 35) {
         const nextIdx = (state.position + 1) % state.queue.length;

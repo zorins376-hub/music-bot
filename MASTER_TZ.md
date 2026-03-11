@@ -949,21 +949,26 @@ rapidfuzz>=3.0.0
 | Фича | Статус | Детали |
 |-------|--------|--------|
 | MediaSession API | ✅ DONE | play/pause/next/prev/seek/seekforward/seekbackward + artwork + positionState |
-| Dynamic Color Extraction | ✅ DONE | Canvas 64×64, pixel bucketing, dominant saturated color |
-| Glassmorphism Background | ✅ DONE | Blurred cover image behind player |
-| Crossfade | ✅ DONE | 120ms exponential out, 300ms ramp in |
+| Dynamic Color Extraction | ✅ DONE | Canvas 64×64, pixel bucketing, dominant saturated color + top-3 colors |
+| Animated Mesh Gradient | ✅ DONE | 3 radial gradients из обложки + CSS meshRotate 20s анимация |
+| Crossfade | ✅ DONE | 120ms exponential out, 300ms ramp in, preload 30s |
 | Preload Next Track | ✅ DONE | 30s before end via `<audio preload>` |
 | Prefetch Queue (IndexedDB) | ✅ DONE | Next 2 tracks cached as blobs, 100MB LRU |
 | Wake Lock API | ✅ DONE | Screen-on during playback, re-acquire on visibility |
 | Service Worker Notifications | ✅ DONE | SHOW/HIDE_NOW_PLAYING persistent notification |
 | 10-band Parametric EQ | ✅ DONE | Studio Q values, lowshelf/peaking/highshelf |
 | Compressor + Panner + Subsonic HPF | ✅ DONE | Glue compressor, stereo panner, 20Hz HPF |
-| Haptic Feedback | ⚠️ PARTIAL | Только в Player.tsx, не на всех кнопках |
-| Loudness Normalization | ❌ TODO | Нет нормализации громкости (-14 LUFS) |
-| Infinity Autoplay | ❌ TODO | Очередь кончается → тишина |
-| True Gapless Playback | ⚠️ PARTIAL | Есть crossfade, но нет zero-gap overlap |
-| Animated Mesh Gradient | ❌ TODO | Сейчас один цвет, нужен 3-цветный mesh |
-| Global Haptic | ❌ TODO | Нет вибрации на nav, чартах, поиске |
+| Loudness Normalization | ✅ DONE | RMS via AnalyserNode → gain compensation ±12dB → target -14 LUFS |
+| Infinity Autoplay | ✅ DONE | fetchSimilar → fallback fetchWave, max 3 auto-rounds |
+| Global Haptic Feedback | ✅ DONE | Nav, theme, SearchBar, Player, TrackList, PlaylistView, Charts, MiniPlayer |
+| Synced Lyrics / Karaoke | ✅ DONE | LRC parsing, word-by-word fill, auto-scroll, karaoke mode toggle |
+| AI Playlists by Prompt | ✅ DONE | generateAiPlaylist(prompt) → трек-лист по вайбу |
+| Share to TG Stories | ✅ DONE | ShareCard canvas (9:16 ratio) → download image |
+| Share Track Deeplink | ✅ DONE | startapp=play_ + inline share via Telegram |
+| Offline Cache (IndexedDB) | ✅ DONE | 100MB LRU, audio blob storage, background prefetch |
+| Glassmorphic UI | ✅ DONE | Кнопки Волна / В плейлист — glass blur + rgba(255,255,255,0.06) |
+| Party Playlists (чаты) | ❌ TODO | Совместное добавление треков из группового чата |
+| Aggressive Pre-fetch (70%) | ✅ DONE | prefetchTracks при 70% прослушивания + preload при 30s до конца |
 
 ## 11.2 Реализуемые фичи
 
