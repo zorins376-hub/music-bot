@@ -1076,7 +1076,7 @@ async def list_charts(user: dict = Depends(get_current_user)):
 @app.get("/api/charts/{source}", response_model=SearchResult)
 async def get_chart(
     source: str,
-    limit: int = Query(default=30, ge=1, le=50),
+    limit: int = Query(default=100, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
     """Get chart tracks by source."""
@@ -1093,8 +1093,8 @@ async def get_chart(
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
             cover_url=r.get("cover_url") or (
-                f"https://i.ytimg.com/vi/{r.get('video_id', '')}/hqdefault.jpg"
-                if r.get("video_id") and r.get("source", "youtube") == "youtube"
+                f"https://i.ytimg.com/vi/{r['video_id']}/hqdefault.jpg"
+                if r.get("video_id")
                 else None
             ),
         )

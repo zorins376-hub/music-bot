@@ -35,9 +35,9 @@ router = Router()
 _LOGO = "◉ <b>BLACK ROOM</b>"
 _PER_PAGE = 5
 _CHART_TTL = 6 * 3600  # 6 hours cache
-_CHART_IMPORT_DEFAULT_LIMIT = 30
+_CHART_IMPORT_DEFAULT_LIMIT = 100
 _CHART_PREWARM_INTERVAL = 2 * 3600
-_CHART_PREPARE_TOP_N = 20
+_CHART_PREPARE_TOP_N = 100
 _chart_cancel_jobs: set[str] = set()
 
 _ytdl_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chart")
@@ -102,11 +102,13 @@ def _parse_yt_entries(entries: list, cyrillic_only: bool = False) -> list[dict]:
             artist, title = uploader, raw_title
         if cyrillic_only and not (_has_cyrillic(artist) or _has_cyrillic(title)):
             continue
+        vid = entry.get("id", "")
         tracks.append({
             "title": title,
             "artist": artist,
             "query": f"{artist} - {title}",
-            "video_id": entry.get("id", ""),
+            "video_id": vid,
+            "cover_url": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg" if vid else None,
         })
     return tracks
 
@@ -122,7 +124,7 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
     }
 
     # Primary: official iTunes RSS API
-    itunes_url = f"https://itunes.apple.com/{storefront}/rss/topsongs/limit=50/json"
+    itunes_url = f"https://itunes.apple.com/{storefront}/rss/topsongs/limit=100/json"
     try:
         sess = get_session()
         async with sess.get(itunes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
@@ -130,14 +132,23 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
                 data = await resp.json(content_type=None)
                 entries = data.get("feed", {}).get("entry", [])
                 tracks = []
-                for item in entries[:50]:
+                for item in entries[:100]:
                     title = (item.get("im:name") or {}).get("label", "Unknown")
                     artist = (item.get("im:artist") or {}).get("label", "Unknown")
+                    # Extract cover art from im:image (take largest)
+                    images = item.get("im:image") or []
+                    cover_url = None
+                    if images:
+                        raw_url = images[-1].get("label", "") if isinstance(images[-1], dict) else str(images[-1])
+                        if raw_url:
+                            # Upscale: replace size suffix (e.g. 170x170bb) with 400x400bb
+                            cover_url = re.sub(r'\d+x\d+(bb|cc|sr)', '400x400\\1', raw_url) if raw_url else None
                     if title and artist:
                         tracks.append({
                             "title": title,
                             "artist": artist,
                             "query": f"{artist} - {title}",
+                            "cover_url": cover_url,
                         })
                 if tracks:
                     return tracks
@@ -155,13 +166,17 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
                 data = await resp.json(content_type=None)
                 results = data.get("feed", {}).get("results", [])
                 tracks = []
-                for item in results[:50]:
+                for item in results[:100]:
                     artist = item.get("artistName", "Unknown")
                     title = item.get("name", "Unknown")
+                    cover_url = item.get("artworkUrl100") or None
+                    if cover_url:
+                        cover_url = cover_url.replace("100x100", "400x400")
                     tracks.append({
                         "title": title,
                         "artist": artist,
                         "query": f"{artist} - {title}",
+                        "cover_url": cover_url,
                     })
                 if tracks:
                     return tracks
@@ -171,7 +186,7 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
     return []
 
 
-def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 50, cyrillic_only: bool = False) -> list[dict]:
+def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 100, cyrillic_only: bool = False) -> list[dict]:
     """Try multiple YouTube playlists, return first that works. Individual songs only."""
     import yt_dlp
     from bot.services.downloader import _base_opts
@@ -257,7 +272,7 @@ async def _fetch_yandex_chart() -> list[dict]:
             return []
 
         tracks = []
-        for item in (chart_info.chart.tracks or [])[:50]:
+        for item in (chart_info.chart.tracks or [])[:100]:
             track = getattr(item, "track", None) or item
             if not track:
                 continue
@@ -268,10 +283,20 @@ async def _fetch_yandex_chart() -> list[dict]:
             dur_ms = getattr(track, "duration_ms", 0) or 0
             if dur_ms and dur_ms > 480_000:
                 continue
+            # Extract cover art
+            cover_url = None
+            cover_uri = getattr(track, "cover_uri", None) or ""
+            if cover_uri:
+                cover_url = "https://" + cover_uri.replace("%%", "400x400")
+            elif hasattr(track, "og_image"):
+                og = getattr(track, "og_image", "") or ""
+                if og:
+                    cover_url = "https://" + og.replace("%%", "400x400")
             tracks.append({
                 "title": title,
                 "artist": artist,
                 "query": f"{artist} - {title}",
+                "cover_url": cover_url,
             })
         return tracks
     except Exception as e:
@@ -476,7 +501,7 @@ async def _fetch_rusradio() -> list[dict]:
     if apple_tracks:
         ru_tracks = [t for t in apple_tracks if _has_cyrillic(t["artist"]) or _has_cyrillic(t["title"])]
         if ru_tracks:
-            return ru_tracks[:30]
+            return ru_tracks[:100]
 
     return []
 

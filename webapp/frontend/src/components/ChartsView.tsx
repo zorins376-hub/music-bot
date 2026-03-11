@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import {
   fetchChartSources, fetchChart, fetchPlaylists, addTrackToPlaylist,
+  searchTracks,
   type ChartSource, type Track, type Playlist,
 } from "../api";
 import { IconMusic, IconSpinner, IconPlus } from "./Icons";
@@ -47,7 +48,7 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
   useEffect(() => {
     if (!activeSource) return;
     setLoading(true);
-    fetchChart(activeSource, 30)
+    fetchChart(activeSource, 100)
       .then(setTracks)
       .catch(() => setTracks([]))
       .finally(() => setLoading(false));
@@ -68,6 +69,25 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
     } catch {}
     setAddingTo(null);
     setAddMenuTrack(null);
+  };
+
+  const handlePlayTrack = async (t: Track) => {
+    haptic("light");
+    let track = t;
+    if (!track.video_id) {
+      // Track has no video_id (Apple/Yandex chart) — search YouTube first
+      try {
+        const results = await searchTracks(`${track.artist} - ${track.title}`, 1);
+        if (results.length > 0) {
+          track = { ...track, video_id: results[0].video_id, cover_url: track.cover_url || results[0].cover_url };
+        } else {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+    onPlayTrack(track);
   };
 
   return (
@@ -105,14 +125,14 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             <div style={{ width: 20, fontSize: 12, color: idx < 3 ? (warm ? "#ffd54f" : accentColor) : hintColor, fontWeight: 700, marginRight: 8, textAlign: "center", flexShrink: 0 }}>
               {idx + 1}
             </div>
-            <div onClick={() => { haptic("light"); onPlayTrack(t); }}
+            <div onClick={() => handlePlayTrack(t)}
               style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 12, cursor: "pointer",
                 background: warm ? "rgba(255, 213, 79, 0.08)" : "rgba(124,77,255,0.08)",
                 border: warm ? "1px solid rgba(255, 213, 79, 0.14)" : "1px solid rgba(255,255,255,0.06)",
                 display: "flex", alignItems: "center", justifyContent: "center" }}>
               {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={hintColor} />}
             </div>
-            <div onClick={() => { haptic("light"); onPlayTrack(t); }} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+            <div onClick={() => handlePlayTrack(t)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
               <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: textColor }}>{t.title}</div>
               <div style={{ fontSize: 12, color: hintColor }}>{t.artist}</div>
             </div>

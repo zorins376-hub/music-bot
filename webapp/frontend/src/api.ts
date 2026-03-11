@@ -178,7 +178,7 @@ export async function fetchChartSources(): Promise<ChartSource[]> {
   return r.json();
 }
 
-export async function fetchChart(source: string, limit = 30): Promise<Track[]> {
+export async function fetchChart(source: string, limit = 100): Promise<Track[]> {
   const r = await fetch(`${API_BASE}/charts/${source}?limit=${limit}`, { headers: getHeaders() });
   if (!r.ok) return [];
   const data = await r.json();
