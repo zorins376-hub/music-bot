@@ -429,6 +429,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const upNext = party.tracks.filter(t => t.position > party.current_position).sort((a, b) => a.position - b.position);
     const played = party.tracks.filter(t => t.position < party.current_position).sort((a, b) => a.position - b.position);
     const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
+    const orbitMembers = party.members.slice(0, 6);
 
     return (
       <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
@@ -757,6 +758,35 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               <span>Party recap</span>
               <button onClick={handleShareRecap} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📤 Share recap</button>
             </div>
+            <div style={{
+              position: "relative",
+              overflow: "hidden",
+              marginBottom: 10,
+              padding: "16px 14px",
+              borderRadius: 18,
+              background: warm ? "linear-gradient(135deg, rgba(255,171,64,0.22), rgba(255,109,0,0.10), rgba(255,224,178,0.10))" : `linear-gradient(135deg, ${accentColor}33, rgba(123,97,255,0.10), rgba(255,255,255,0.06))`,
+              border: warm ? "1px solid rgba(255,193,7,0.16)" : `1px solid ${accentColor}22`,
+              boxShadow: warm ? "0 16px 34px rgba(255,145,0,0.14)" : `0 16px 34px ${accentColor}20`,
+            }}>
+              <div style={{ position: "absolute", width: 120, height: 120, right: -26, top: -40, borderRadius: "50%", background: "rgba(255,255,255,0.08)", filter: "blur(12px)" }} />
+              <div style={{ position: "relative", zIndex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase", color: hintColor, marginBottom: 6 }}>Poster card</div>
+                    <div style={{ color: textColor, fontSize: 18, fontWeight: 800, lineHeight: 1.1 }}>Party recap · {party.name}</div>
+                  </div>
+                  <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 11, fontWeight: 800 }}>#{party.invite_code}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 }}>🎶 {recap.total_tracks} tracks</div>
+                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 }}>👥 {recap.total_members} members</div>
+                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 }}>⏱ {formatDuration(recap.total_duration)}</div>
+                </div>
+                <div style={{ color: hintColor, fontSize: 12, lineHeight: 1.5 }}>
+                  {recap.top_artists[0] ? <>Главный вайб вечера — <span style={{ color: textColor, fontWeight: 700 }}>{recap.top_artists[0].label}</span>.</> : "Вечеринка собрала свой особый вайб."} {recap.top_contributors[0] ? <>Главный куратор — <span style={{ color: textColor, fontWeight: 700 }}>{recap.top_contributors[0].label}</span>.</> : null}
+                </div>
+              </div>
+            </div>
             <div style={{ marginBottom: 10, padding: "12px 12px", borderRadius: 16, background: warm ? "linear-gradient(135deg, rgba(255,193,7,0.12), rgba(255,109,0,0.08))" : `linear-gradient(135deg, ${accentColor}22, rgba(255,255,255,0.04))`, border: warm ? "1px solid rgba(255,193,7,0.14)" : `1px solid ${accentColor}22` }}>
               <div style={{ color: textColor, fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Ночь получилась громкой</div>
               <div style={{ color: hintColor, fontSize: 12, lineHeight: 1.45 }}>В комнате было {recap.total_members} участников, прозвучало {recap.total_tracks} треков и музыка играла {formatDuration(recap.total_duration)}.</div>
@@ -819,8 +849,41 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               </div>
 
               <div>
-                <div style={{ width: "min(72vw, 320px)", aspectRatio: "1 / 1", margin: "0 auto", borderRadius: 28, overflow: "hidden", boxShadow: warm ? "0 24px 70px rgba(255,145,0,0.24)" : `0 24px 70px ${accentColor}33`, background: "rgba(255,255,255,0.06)" }}>
-                  {currentTrack.cover_url ? <img src={currentTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={46} color={textColor} /></div>}
+                <div style={{ position: "relative", width: "min(72vw, 320px)", margin: "0 auto" }}>
+                  <div style={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 28, overflow: "hidden", boxShadow: warm ? "0 24px 70px rgba(255,145,0,0.24)" : `0 24px 70px ${accentColor}33`, background: "rgba(255,255,255,0.06)" }}>
+                    {currentTrack.cover_url ? <img src={currentTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={46} color={textColor} /></div>}
+                  </div>
+                  {orbitMembers.map((member, index) => {
+                    const positions = [
+                      { top: -12, left: "50%", marginLeft: -21 },
+                      { top: 28, right: -10 },
+                      { bottom: 34, right: -14 },
+                      { bottom: -12, left: "50%", marginLeft: -21 },
+                      { bottom: 34, left: -14 },
+                      { top: 28, left: -10 },
+                    ] as const;
+                    const position = positions[index] || positions[0];
+                    return (
+                      <div key={`orbit-${member.user_id}`} style={{
+                        position: "absolute",
+                        width: 42,
+                        height: 42,
+                        borderRadius: 999,
+                        background: member.is_online ? activeBg : "rgba(255,255,255,0.1)",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        boxShadow: "0 12px 24px rgba(0,0,0,0.2)",
+                        animation: `partyOrbitPulse 2.2s ${index * 0.18}s ease-in-out infinite`,
+                        ...position,
+                      }}>
+                        {(member.display_name || "U").slice(0, 1).toUpperCase()}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div style={{ textAlign: "center", marginTop: 18 }}>
@@ -869,7 +932,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           </div>
         )}
 
-        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } }`}</style>
+        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } } @keyframes partyOrbitPulse { 0%, 100% { transform: scale(0.96); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } }`}</style>
       </div>
     );
   }
@@ -877,6 +940,28 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   return (
     <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
       {Toast}
+
+      {initialCode && !showCreate && (
+        <div style={{
+          ...glassCard,
+          borderRadius: 22,
+          padding: "16px 14px",
+          marginBottom: 12,
+          position: "relative",
+          overflow: "hidden",
+          background: warm ? "linear-gradient(135deg, rgba(255,171,64,0.16), rgba(56,34,18,0.84))" : `linear-gradient(135deg, ${accentColor}22, rgba(15,18,35,0.82))`,
+        }}>
+          <div style={{ position: "absolute", right: -20, top: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.08)", filter: "blur(10px)" }} />
+          <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase", color: hintColor, marginBottom: 6 }}>Invite landing</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: textColor, lineHeight: 1.1, marginBottom: 6 }}>Тебя позвали в Party room</div>
+              <div style={{ fontSize: 12, color: hintColor, lineHeight: 1.45 }}>Код комнаты: <span style={{ color: textColor, fontWeight: 700 }}>#{initialCode}</span>. Зайди и подключись к общему вайбу.</div>
+            </div>
+            <button onClick={() => handleJoinParty(initialCode)} style={{ padding: "11px 14px", borderRadius: 14, border: "none", background: partyGradient, color: "#000", fontSize: 12, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}>Join</button>
+          </div>
+        </div>
+      )}
 
       <div style={{
         ...glassCard,
