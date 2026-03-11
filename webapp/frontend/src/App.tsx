@@ -905,19 +905,20 @@ export function App() {
       {/* Nav */}
       <nav style={{
         display: "flex",
-        gap: 8,
+        gap: isTequila ? 5 : 8,
         marginBottom: isTequila ? 4 : 12,
         justifyContent: "center",
         alignItems: "center",
         ...(isTequila ? {
-          padding: "6px 12px",
+          padding: "6px 8px",
           borderRadius: 22,
           background: "rgba(40, 25, 15, 0.5)",
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
           border: "1px solid rgba(255, 213, 79, 0.12)",
-          maxWidth: 380,
+          maxWidth: 460,
           margin: "0 auto 4px",
+          flexWrap: "wrap" as const,
         } : {}),
       }}>
         {(["player", "playlists", "charts", "search"] as View[]).map((v) => (
@@ -925,7 +926,7 @@ export function App() {
             key={v}
             onClick={() => setView(v)}
             style={{
-              padding: isTequila ? "7px 16px" : "6px 14px",
+              padding: isTequila ? "7px 11px" : "6px 14px",
               borderRadius: isTequila ? 18 : 16,
               border: isTequila && view === v ? "1px solid rgba(255,213,79,0.3)" : "none",
               background: view === v
@@ -934,7 +935,7 @@ export function App() {
               color: view === v
                 ? (isTequila ? "#ffd54f" : "#fff")
                 : theme.hintColor,
-              fontSize: 13,
+              fontSize: isTequila ? 12 : 13,
               fontWeight: isTequila && view === v ? 600 : 400,
               letterSpacing: isTequila ? 0.5 : 0,
               cursor: "pointer",
