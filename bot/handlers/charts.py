@@ -283,20 +283,29 @@ async def _fetch_yandex_chart() -> list[dict]:
             dur_ms = getattr(track, "duration_ms", 0) or 0
             if dur_ms and dur_ms > 480_000:
                 continue
-            # Extract cover art
+            # Build ym_ video_id for direct Yandex streaming
+            track_id = getattr(track, "id", None) or getattr(track, "track_id", None)
+            ym_video_id = f"ym_{track_id}" if track_id else ""
+            # Extract cover art (try track → albums → og_image)
             cover_url = None
             cover_uri = getattr(track, "cover_uri", None) or ""
+            if not cover_uri:
+                # Try album cover
+                albums = getattr(track, "albums", []) or []
+                if albums:
+                    cover_uri = getattr(albums[0], "cover_uri", None) or ""
+            if not cover_uri:
+                cover_uri = getattr(track, "og_image", None) or ""
             if cover_uri:
                 cover_url = "https://" + cover_uri.replace("%%", "400x400")
-            elif hasattr(track, "og_image"):
-                og = getattr(track, "og_image", "") or ""
-                if og:
-                    cover_url = "https://" + og.replace("%%", "400x400")
             tracks.append({
                 "title": title,
                 "artist": artist,
                 "query": f"{artist} - {title}",
+                "video_id": ym_video_id,
                 "cover_url": cover_url,
+                "source": "yandex",
+                "duration": round(dur_ms / 1000) if dur_ms else 0,
             })
         return tracks
     except Exception as e:

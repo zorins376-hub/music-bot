@@ -1086,6 +1086,7 @@ async def get_chart(
 ):
     """Get chart tracks by source."""
     from bot.handlers.charts import _get_chart
+    from bot.utils import fmt_duration as _fmt_dur
     tracks_raw = await _get_chart(source)
     if not tracks_raw:
         return SearchResult(tracks=[], total=0)
@@ -1095,11 +1096,11 @@ async def get_chart(
             title=r.get("title", "Unknown"),
             artist=r.get("artist", "Unknown"),
             duration=r.get("duration", 0),
-            duration_fmt=r.get("duration_fmt", "0:00"),
+            duration_fmt=_fmt_dur(r.get("duration", 0)),
             source=r.get("source", "youtube"),
             cover_url=r.get("cover_url") or (
                 f"https://i.ytimg.com/vi/{r['video_id']}/hqdefault.jpg"
-                if r.get("video_id")
+                if r.get("video_id") and not r.get("video_id", "").startswith(("ym_", "sp_", "vk_"))
                 else None
             ),
         )

@@ -75,11 +75,18 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
     haptic("light");
     let track = t;
     if (!track.video_id) {
-      // Track has no video_id (Apple/Yandex chart) — search YouTube first
+      // Track has no video_id (Apple chart) — search YouTube first
       try {
         const results = await searchTracks(`${track.artist} - ${track.title}`, 1);
         if (results.length > 0) {
-          track = { ...track, video_id: results[0].video_id, cover_url: track.cover_url || results[0].cover_url };
+          track = {
+            ...track,
+            video_id: results[0].video_id,
+            source: results[0].source || "youtube",
+            duration: track.duration || results[0].duration,
+            duration_fmt: track.duration_fmt || results[0].duration_fmt,
+            cover_url: track.cover_url || results[0].cover_url,
+          };
         } else {
           return;
         }
