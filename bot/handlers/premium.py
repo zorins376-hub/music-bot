@@ -16,7 +16,7 @@ from aiogram.types import (
     Message,
     PreCheckoutQuery,
 )
-from sqlalchemy import select, update
+from sqlalchemy import update
 
 from bot.config import settings
 from bot.db import get_or_create_user

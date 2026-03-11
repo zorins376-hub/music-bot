@@ -78,12 +78,6 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 and user.premium_until is not None
                 and user.premium_until < now
             )
-            # BUG-005: premium=True but no expiry and not admin → revoke
-            orphaned_premium = (
-                not admin
-                and user.is_premium
-                and user.premium_until is None
-            )
             update_values: dict = {
                 "username": tg_user.username,
                 "first_name": tg_user.first_name,
@@ -96,7 +90,7 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 update_values["is_admin"] = False
             if admin and not user.is_premium:
                 update_values["is_premium"] = True
-            if expired_premium or orphaned_premium:
+            if expired_premium:
                 update_values["is_premium"] = False
 
             await session.execute(

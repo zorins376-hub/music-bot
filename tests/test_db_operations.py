@@ -124,6 +124,34 @@ class TestGetOrCreateUser:
 
         assert user.id == 50003
 
+    async def test_keeps_manual_premium_without_expiry(self, db_session):
+        """Ручной Premium от админа без premium_until не должен сниматься."""
+        existing = User(
+            id=50004,
+            username="vipuser",
+            first_name="VIP",
+            is_premium=True,
+            premium_until=None,
+        )
+        db_session.add(existing)
+        await db_session.commit()
+
+        tg = _tg_user(50004, "vipuser", "VIP")
+
+        with patch("bot.db.async_session") as mock_sm, \
+             patch("bot.db.is_admin", return_value=False):
+            mock_sm.return_value.__aenter__ = lambda s: db_session.__aenter__()
+            mock_sm.return_value.__aexit__ = lambda s, *a: db_session.__aexit__(*a)
+
+            from bot.db import get_or_create_user
+            user = await get_or_create_user(tg)
+
+        assert user.is_premium is True
+
+        refreshed = await db_session.get(User, 50004)
+        assert refreshed is not None
+        assert refreshed.is_premium is True
+
 
 # ═══════════════════════════════════ upsert_track ═════════════════════════
 
