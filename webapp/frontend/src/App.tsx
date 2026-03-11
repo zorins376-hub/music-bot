@@ -1043,84 +1043,139 @@ export function App() {
       )}
       <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
       {/* Nav */}
-      <nav style={{
-        display: "flex",
-        gap: isTequila ? 5 : 8,
+      <div style={{
+        position: "relative",
         marginBottom: isTequila ? 4 : 12,
-        alignItems: "center",
-        overflowX: "auto",
-        overflowY: "hidden",
-        WebkitOverflowScrolling: "touch",
-        scrollbarWidth: "none",
-        msOverflowStyle: "none",
-        whiteSpace: "nowrap",
-        ...(isTequila ? {
-          padding: "6px 8px",
-          borderRadius: 22,
-          background: "rgba(40, 25, 15, 0.5)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          border: "1px solid rgba(255, 213, 79, 0.12)",
-          maxWidth: "100%",
-          margin: "0 auto 4px",
-        } : {
-          padding: "0 8px",
-        }),
       }}>
-        {(["player", "playlists", "party", "charts", "search"] as View[]).map((v) => (
+        <div style={{
+          pointerEvents: "none",
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 22,
+          zIndex: 2,
+          borderRadius: 22,
+          background: `linear-gradient(90deg, ${theme.bgColor}, transparent)`,
+        }} />
+        <div style={{
+          pointerEvents: "none",
+          position: "absolute",
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 22,
+          zIndex: 2,
+          borderRadius: 22,
+          background: `linear-gradient(270deg, ${theme.bgColor}, transparent)`,
+        }} />
+        <nav className="luxury-carousel" style={{
+          display: "flex",
+          gap: isTequila ? 7 : 10,
+          alignItems: "center",
+          overflowX: "auto",
+          overflowY: "hidden",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
+          whiteSpace: "nowrap",
+          scrollSnapType: "x proximity",
+          scrollPaddingLeft: 12,
+          scrollPaddingRight: 12,
+          padding: isTequila ? "8px 12px" : "8px 12px",
+          borderRadius: 24,
+          background: isTequila
+            ? "linear-gradient(135deg, rgba(40, 25, 15, 0.72), rgba(82, 45, 18, 0.38))"
+            : `linear-gradient(135deg, ${theme.cardBg}, rgba(255,255,255,0.04))`,
+          backdropFilter: "blur(18px) saturate(140%)",
+          WebkitBackdropFilter: "blur(18px) saturate(140%)",
+          border: isTequila
+            ? "1px solid rgba(255, 213, 79, 0.16)"
+            : `1px solid ${theme.accentAlpha}`,
+          boxShadow: isTequila
+            ? "0 10px 30px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,224,130,0.08)"
+            : `0 10px 30px rgba(0,0,0,0.22), inset 0 1px 0 ${theme.accentAlpha}`,
+          maxWidth: "100%",
+          margin: "0 auto",
+        }}>
+          {(["player", "playlists", "party", "charts", "search"] as View[]).map((v) => {
+            const isActive = view === v;
+            const isParty = v === "party";
+            return (
+              <button
+                key={v}
+                onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView(v); }}
+                style={{
+                  padding: isTequila ? "9px 14px" : "9px 15px",
+                  borderRadius: 18,
+                  border: isActive
+                    ? (isTequila ? "1px solid rgba(255,213,79,0.26)" : `1px solid ${theme.accent}`)
+                    : (isTequila ? "1px solid rgba(255,255,255,0.06)" : "1px solid rgba(255,255,255,0.06)"),
+                  background: isActive
+                    ? (isParty
+                        ? "linear-gradient(135deg, #ff6d00, #ffb300)"
+                        : (isTequila
+                            ? "linear-gradient(135deg, rgba(255,109,0,0.42), rgba(255,213,79,0.18))"
+                            : `linear-gradient(135deg, ${accentColor}, ${accentColorAlpha})`))
+                    : "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+                  color: isActive
+                    ? (isTequila ? "#ffe082" : "#fff")
+                    : theme.textColor,
+                  fontSize: isTequila ? 12 : 13,
+                  fontWeight: isActive ? 700 : 500,
+                  letterSpacing: isTequila ? 0.45 : 0.2,
+                  cursor: "pointer",
+                  transition: "all 0.35s ease",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  scrollSnapAlign: "start",
+                  boxShadow: isActive
+                    ? (isParty
+                        ? "0 10px 24px rgba(255,109,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18)"
+                        : `0 10px 24px ${accentColorAlpha}, inset 0 1px 0 rgba(255,255,255,0.18)`)
+                    : "inset 0 1px 0 rgba(255,255,255,0.08)",
+                  textShadow: isActive ? "0 1px 10px rgba(0,0,0,0.18)" : "none",
+                }}
+              >
+                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? "🎉 Party" : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
+              </button>
+            );
+          })}
+          {/* Theme switcher */}
           <button
-            key={v}
-            onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView(v); }}
+            onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} switchTheme(); }}
+            title={`Switch theme (${theme.name})`}
             style={{
-              padding: isTequila ? "7px 11px" : "6px 14px",
-              borderRadius: isTequila ? 18 : 16,
-              border: isTequila && view === v ? "1px solid rgba(255,213,79,0.3)" : "none",
-              background: view === v
-                ? (v === "party" ? "linear-gradient(135deg, #ff6d00, #ff9100)" : (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))" : accentColor))
-                : theme.navInactiveBg,
-              color: view === v
-                ? (isTequila ? "#ffd54f" : "#fff")
-                : theme.hintColor,
-              fontSize: isTequila ? 12 : 13,
-              fontWeight: isTequila && view === v ? 600 : 400,
-              letterSpacing: isTequila ? 0.5 : 0,
+              padding: "9px 12px",
+              borderRadius: 18,
+              border: `1px solid ${theme.accentAlpha}`,
+              background: `linear-gradient(135deg, ${theme.accentAlpha}, rgba(255,255,255,0.02))`,
+              color: theme.accent,
+              fontSize: 11,
+              fontWeight: 700,
               cursor: "pointer",
-              transition: "all 0.4s ease",
+              transition: "all 0.35s ease",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              letterSpacing: 0.45,
               flexShrink: 0,
-              whiteSpace: "nowrap",
+              scrollSnapAlign: "end",
+              boxShadow: `0 8px 20px ${theme.accentAlpha}, inset 0 1px 0 rgba(255,255,255,0.14)`,
             }}
           >
-            {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : v === "party" ? "🎉 Party" : v === "charts" ? (<><IconChart size={12} color="currentColor" /> Чарты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
+            {theme.id === "tequila" ? <IconLime size={14} /> :
+             theme.id === "neon" ? <IconDiamond size={14} /> :
+             theme.id === "midnight" ? <IconMoon size={14} /> :
+             theme.id === "emerald" ? <IconPlaySmall size={14} /> :
+             <IconMoon size={14} />}
           </button>
-        ))}
-        {/* Theme switcher */}
-        <button
-          onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} switchTheme(); }}
-          title={`Switch theme (${theme.name})`}
-          style={{
-            padding: "6px 10px",
-            borderRadius: 16,
-            border: `1px solid ${theme.accentAlpha}`,
-            background: `linear-gradient(135deg, ${theme.accentAlpha}, transparent)`,
-            color: theme.accent,
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: "pointer",
-            transition: "all 0.4s ease",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            letterSpacing: 0.3,
-            flexShrink: 0,
-          }}
-        >
-          {theme.id === "tequila" ? <IconLime size={14} /> :
-           theme.id === "neon" ? <IconDiamond size={14} /> :
-           theme.id === "midnight" ? <IconMoon size={14} /> :
-           theme.id === "emerald" ? <IconPlaySmall size={14} /> :
-           <IconMoon size={14} />}
-        </button>
-      </nav>
+        </nav>
+      </div>
       {(userProfile?.is_premium || userProfile?.is_admin) && (
         <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", margin: theme.id === "tequila" ? "8px 0 2px" : "4px 0 10px" }}>
           {userProfile?.is_premium && (
