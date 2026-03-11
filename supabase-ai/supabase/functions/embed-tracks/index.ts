@@ -6,7 +6,7 @@
  *
  * Processes tracks from the embedding_queue:
  *   1. Fetches batch of tracks without embeddings
- *   2. Generates embeddings via OpenAI text-embedding-3-small
+ *   2. Generates embeddings via Google Gemini text-embedding-004 (768d, free)
  *   3. Stores embeddings in tracks.embedding (pgvector)
  *   4. Removes processed tracks from queue
  *
@@ -17,8 +17,48 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders, corsResponse } from "../_shared/cors.ts";
 import { getSupabase } from "../_shared/supabase.ts";
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+const GEMINI_MODEL = "gemini-embedding-001";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}`;
+const EMBED_DIMENSIONS = 768;
 const MAX_RETRIES = 3;
+
+/**
+ * Get embedding for a single text via Gemini.
+ */
+async function getEmbedding(text: string): Promise<number[]> {
+  const resp = await fetch(`${GEMINI_URL}:embedContent?key=${GEMINI_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: `models/${GEMINI_MODEL}`,
+      content: { parts: [{ text }] },
+      taskType: "RETRIEVAL_DOCUMENT",
+      outputDimensionality: EMBED_DIMENSIONS,
+    }),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Gemini API error: ${resp.status} ${errText}`);
+  }
+  const data = await resp.json();
+  return data.embedding?.values || [];
+}
+
+/**
+ * Get embeddings for multiple texts via parallel embedContent calls.
+ * Processes in chunks to respect rate limits.
+ */
+async function getBatchEmbeddings(texts: string[]): Promise<number[][]> {
+  const PARALLEL = 5;
+  const results: number[][] = [];
+  for (let i = 0; i < texts.length; i += PARALLEL) {
+    const chunk = texts.slice(i, i + PARALLEL);
+    const chunkResults = await Promise.all(chunk.map((t) => getEmbedding(t)));
+    results.push(...chunkResults);
+  }
+  return results;
+}
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsResponse();
@@ -27,9 +67,9 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const batchSize = Math.min(body.batch_size || 50, 100);
 
-    if (!OPENAI_API_KEY) {
+    if (!GEMINI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "OPENAI_API_KEY not configured" }),
+        JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -69,7 +109,6 @@ serve(async (req: Request) => {
     }
 
     // ── 3. Build text for embedding ─────────────────────────────────────
-    // Format: "Artist - Title [genre]" for rich semantic representation
     const texts = tracks.map((t: any) => {
       const parts: string[] = [];
       if (t.artist) parts.push(t.artist);
@@ -78,33 +117,30 @@ serve(async (req: Request) => {
       return t.genre ? `${text} [${t.genre}]` : text;
     });
 
-    // ── 4. Call OpenAI Embeddings API ───────────────────────────────────
-    const embResp = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "text-embedding-3-small",
-        input: texts,
-      }),
-    });
-
-    if (!embResp.ok) {
-      const errText = await embResp.text();
-      // Increment attempt counters
-      for (const tid of trackIds) {
-        await sb
-          .from("embedding_queue")
-          .update({ attempts: (queue.find((q: any) => q.track_id === tid)?.attempts || 0) + 1, last_error: errText })
-          .eq("track_id", tid);
+    // ── 4. Call Gemini Embeddings API (batch, max 100 per call) ─────────
+    // Gemini batchEmbedContents supports up to 100 texts per request
+    let allEmbeddings: number[][] = [];
+    const BATCH_LIMIT = 100;
+    for (let i = 0; i < texts.length; i += BATCH_LIMIT) {
+      const batch = texts.slice(i, i + BATCH_LIMIT);
+      try {
+        const batchResult = await getBatchEmbeddings(batch);
+        allEmbeddings = allEmbeddings.concat(batchResult);
+      } catch (err) {
+        // Increment attempt counters for failed batch
+        const failedIds = tracks.slice(i, i + BATCH_LIMIT).map((t: any) => t.id);
+        for (const tid of failedIds) {
+          await sb
+            .from("embedding_queue")
+            .update({
+              attempts: (queue.find((q: any) => q.track_id === tid)?.attempts || 0) + 1,
+              last_error: String(err),
+            })
+            .eq("track_id", tid);
+        }
+        throw err;
       }
-      throw new Error(`OpenAI API error: ${embResp.status} ${errText}`);
     }
-
-    const embData = await embResp.json();
-    const embeddings = embData.data as Array<{ index: number; embedding: number[] }>;
 
     // ── 5. Store embeddings in tracks table (batch) ────────────────────
     let processed = 0;
@@ -112,13 +148,12 @@ serve(async (req: Request) => {
     const updates: Array<{ id: number; embedding: number[] }> = [];
     const doneIds: number[] = [];
 
-    for (const emb of embeddings) {
-      const track = tracks[emb.index];
-      if (!track) continue;
-      updates.push({ id: track.id, embedding: emb.embedding });
+    for (let i = 0; i < allEmbeddings.length; i++) {
+      const track = tracks[i];
+      if (!track || !allEmbeddings[i]?.length) continue;
+      updates.push({ id: track.id, embedding: allEmbeddings[i] });
     }
 
-    // Process updates in parallel chunks of 10
     const CHUNK = 10;
     for (let i = 0; i < updates.length; i += CHUNK) {
       const chunk = updates.slice(i, i + CHUNK);
@@ -142,7 +177,6 @@ serve(async (req: Request) => {
       }
     }
 
-    // Remove processed tracks from queue in one call
     if (doneIds.length > 0) {
       await sb.from("embedding_queue").delete().in("track_id", doneIds);
     }

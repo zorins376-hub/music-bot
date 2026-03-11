@@ -4,8 +4,8 @@
  * POST /ai-playlist
  * Body: { "user_id": 123, "prompt": "грустный плейлист на вечер", "limit": 10 }
  *
- * Uses OpenAI GPT-4o to understand the prompt, then:
- *   1. Extracts mood/genre/artist/era from the prompt
+ * Uses Google Gemini to understand the prompt, then:
+ *   1. Extracts mood/genre/artist/era from the prompt via Gemini Flash
  *   2. Searches track embeddings via pgvector for matching tracks
  *   3. Falls back to keyword-based SQL search
  *   4. Returns a curated playlist
@@ -15,7 +15,11 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders, corsResponse } from "../_shared/cors.ts";
 import { getSupabase } from "../_shared/supabase.ts";
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+const EMBED_MODEL = "gemini-embedding-001";
+const EMBED_URL = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}`;
+const CHAT_MODEL = "gemini-2.0-flash";
+const CHAT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}`;
 
 interface PlaylistRequest {
   user_id: number;
@@ -40,16 +44,15 @@ serve(async (req: Request) => {
     const sb = getSupabase();
     let tracks: any[] = [];
 
-    // ── Strategy 1: OpenAI embedding search ──────────────────────────────
-    if (OPENAI_API_KEY) {
+    // ── Strategy 1: Gemini embedding search ──────────────────────────────
+    if (GEMINI_API_KEY) {
       tracks = await embeddingSearch(sb, prompt, limit);
     }
 
-    // ── Strategy 2: GPT-powered keyword search ──────────────────────────
-    if (tracks.length < limit && OPENAI_API_KEY) {
+    // ── Strategy 2: Gemini-powered keyword search ───────────────────────
+    if (tracks.length < limit && GEMINI_API_KEY) {
       const keywords = await extractKeywords(prompt);
       const moreTracks = await keywordSearch(sb, keywords, limit - tracks.length);
-      // Merge without duplicates
       const seenIds = new Set(tracks.map((t) => t.id));
       for (const t of moreTracks) {
         if (!seenIds.has(t.id)) {
@@ -72,7 +75,6 @@ serve(async (req: Request) => {
       }
     }
 
-    // Format response
     const playlist = tracks.slice(0, limit).map((t: any, i: number) => ({
       position: i,
       track_id: t.id,
@@ -90,7 +92,7 @@ serve(async (req: Request) => {
         playlist,
         count: playlist.length,
         prompt,
-        method: OPENAI_API_KEY ? "ai" : "keyword",
+        method: GEMINI_API_KEY ? "ai" : "keyword",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
@@ -104,29 +106,27 @@ serve(async (req: Request) => {
 });
 
 /**
- * Embed the prompt text with OpenAI, then find closest tracks via pgvector.
+ * Embed the prompt text with Gemini, then find closest tracks via pgvector.
  */
 async function embeddingSearch(sb: any, prompt: string, limit: number) {
-  // Get embedding for the prompt
-  const embResp = await fetch("https://api.openai.com/v1/embeddings", {
+  const url = `${EMBED_URL}:embedContent?key=${GEMINI_API_KEY}`;
+  const embResp = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: prompt,
+      model: `models/${EMBED_MODEL}`,
+      content: { parts: [{ text: prompt }] },
+      taskType: "RETRIEVAL_QUERY",
+      outputDimensionality: 768,
     }),
   });
 
   if (!embResp.ok) return [];
 
   const embData = await embResp.json();
-  const embedding = embData.data?.[0]?.embedding;
+  const embedding = embData.embedding?.values;
   if (!embedding) return [];
 
-  // Vector similarity search
   const { data, error } = await sb.rpc("match_tracks_by_embedding", {
     query_embedding: embedding,
     match_threshold: 0.3,
@@ -137,36 +137,34 @@ async function embeddingSearch(sb: any, prompt: string, limit: number) {
 }
 
 /**
- * Use GPT to extract search keywords from a natural language prompt.
+ * Use Gemini Flash to extract search keywords from a natural language prompt.
  */
 async function extractKeywords(prompt: string): Promise<string[]> {
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+  const url = `${CHAT_URL}:generateContent?key=${GEMINI_API_KEY}`;
+  const resp = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            'You extract music search keywords from user prompts. Return a JSON array of 3-6 search terms (artist names, genres, moods). Return ONLY the JSON array.',
-        },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.5,
-      max_tokens: 150,
+      contents: [{
+        parts: [{
+          text: `Extract music search keywords from this user prompt. Return a JSON array of 3-6 search terms (artist names, genres, moods). Return ONLY the JSON array, no other text.\n\nPrompt: "${prompt}"`,
+        }],
+      }],
+      generationConfig: {
+        temperature: 0.5,
+        maxOutputTokens: 150,
+      },
     }),
   });
 
   if (!resp.ok) return [];
 
   const data = await resp.json();
-  const text = data.choices?.[0]?.message?.content?.trim() || "[]";
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
   try {
-    return JSON.parse(text);
+    // Strip markdown code blocks if present
+    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    return JSON.parse(cleaned);
   } catch {
     return [prompt];
   }
