@@ -625,7 +625,7 @@ async def _fetch_europa() -> list[dict]:
     tracks = await _fetch_europaplus_site()
     if tracks:
         logger.info("Europa Plus: %d tracks from europaplus.ru", len(tracks))
-        return tracks
+        return tracks[:40]  # TOP 40
 
     logger.warning("Europa Plus: site scraping failed, trying iTunes RSS")
     # Fallback: iTunes RSS for European storefronts
@@ -633,7 +633,7 @@ async def _fetch_europa() -> list[dict]:
         tracks = await _fetch_apple_chart(storefront)
         if tracks:
             logger.info("Europa Plus fallback: %d tracks from iTunes %s", len(tracks), storefront)
-            return tracks
+            return tracks[:40]  # Cap to TOP 40
     return []
 
 
@@ -656,18 +656,29 @@ _CHART_LABELS = {
 
 # ── Cache helpers ────────────────────────────────────────────────────────
 
+# Minimum expected track count per source (for stale cache detection)
+_CHART_MIN_EXPECTED = {
+    "shazam": 80,
+    "youtube": 80,
+    "vk": 80,
+    "rusradio": 15,
+    "europa": 35,
+}
+
+
 async def _get_chart(source: str) -> list[dict]:
     """Get chart from Redis cache or fetch fresh.
-    Auto-refreshes if cached data has fewer than 50 tracks (stale limit).
+    Auto-refreshes if cached data is below the expected minimum for this source.
     """
     key = f"chart:{source}"
     raw = await cache.redis.get(key)
     if raw:
         tracks = json.loads(raw)
-        if len(tracks) >= 50:
+        min_expected = _CHART_MIN_EXPECTED.get(source, 80)
+        if len(tracks) >= min_expected:
             return tracks
         # Stale cache with old small limit — force re-fetch
-        logger.info("Chart %s has only %d tracks in cache, refreshing", source, len(tracks))
+        logger.info("Chart %s has only %d tracks (min %d), refreshing", source, len(tracks), min_expected)
         await cache.redis.delete(key)
 
     fetcher = _CHART_FETCHERS.get(source)
@@ -712,11 +723,10 @@ async def _prewarm_charts_once() -> None:
     for src in _CHART_FETCHERS:
         try:
             tracks = await _get_chart(src)
-            # If cached data is small (old limit), force re-fetch from source
-            if not tracks or len(tracks) < 50:
+            # _get_chart already handles stale cache refresh via _CHART_MIN_EXPECTED
+            if not tracks:
                 fetcher = _CHART_FETCHERS.get(src)
                 if fetcher:
-                    await cache.redis.delete(f"chart:{src}")
                     fresh = await fetcher()
                     if fresh:
                         tracks = fresh
