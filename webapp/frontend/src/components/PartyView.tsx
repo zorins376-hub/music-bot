@@ -13,13 +13,14 @@ interface Props {
   accentColor?: string;
   themeId?: string;
   initialCode?: string | null;
+  readOnlyMode?: boolean;
 }
 
 const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", initialCode }: Props) {
+export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", initialCode, readOnlyMode = false }: Props) {
   const warm = themeId === "tequila";
   const [party, setParty] = useState<Party | null>(null);
   const [myParties, setMyParties] = useState<Party[]>([]);
@@ -86,8 +87,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     marginBottom: 8,
   };
 
-  const isDJ = party ? party.viewer_role === "dj" : false;
-  const canControl = party ? ["dj", "cohost"].includes(party.viewer_role) : false;
+  const isDJ = !readOnlyMode && party ? party.viewer_role === "dj" : false;
+  const canControl = !readOnlyMode && party ? ["dj", "cohost"].includes(party.viewer_role) : false;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -123,6 +124,14 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
         }
         if (msg.event === "track_added") {
           showToast(`🎵 ${msg.data.added_by_name} добавил: ${msg.data.title}`);
+        }
+        if (msg.event === "reaction" && msg.data?.emoji) {
+          const burstId = reactionBurstIdRef.current + 1;
+          reactionBurstIdRef.current = burstId;
+          setReactionBursts((prev) => [...prev, { id: burstId, emoji: String(msg.data.emoji), left: 18 + Math.random() * 64 }]);
+          setTimeout(() => {
+            setReactionBursts((prev) => prev.filter((burst) => burst.id !== burstId));
+          }, 900);
         }
 
         fetchParty(code).then((updatedParty) => {
@@ -437,6 +446,14 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     window.open(shareUrl, "_blank");
   };
 
+  const handleShareTv = () => {
+    if (!party) return;
+    haptic("light");
+    const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?startapp=partytv_${party.invite_code}`)}&text=${encodeURIComponent(`📺 Смотри Party TV «${party.name}» в live-режиме`)}`;
+    window.open(shareUrl, "_blank");
+  };
+
   const handleShareRecap = async () => {
     if (!party || !recap) return;
     haptic("light");
@@ -569,12 +586,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               </div>
             </div>
             <div style={{ fontSize: 12, color: "rgba(24,13,0,0.7)", marginTop: 6, lineHeight: 1.45 }}>
-              {isDJ ? "🎧 Ты DJ — управляй очередью" : "Добавляй треки в общую очередь"}
+              {readOnlyMode ? "📺 Режим витрины — только просмотр live room" : (isDJ ? "🎧 Ты DJ — управляй очередью" : "Добавляй треки в общую очередь")}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.16)", color: "#fff", fontSize: 11, fontWeight: 700 }}>#{party.invite_code}</div>
               <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>🎶 {party.tracks.length} треков</div>
-              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>{isDJ ? "👑 DJ mode" : "✨ listener"}</div>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>{readOnlyMode ? "📺 read-only" : (isDJ ? "👑 DJ mode" : "✨ listener")}</div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={handleShare} style={{
@@ -582,6 +599,10 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 background: "rgba(0,0,0,0.22)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
               }}>📤 Поделиться</button>
+              <button onClick={handleShareTv} style={{
+                padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>📺 Share TV</button>
               {currentTrack && (
                 <button onClick={() => setShowStageMode(true)} style={{
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
@@ -600,10 +621,10 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>🤖 Auto-DJ</button>
               )}
-              <button onClick={handleSavePlaylist} style={{
+              {!readOnlyMode && <button onClick={handleSavePlaylist} style={{
                 padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
                 background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-              }}>💾 Save</button>
+              }}>💾 Save</button>}
               {isDJ && (
                 <button onClick={handleClose} style={{
                   padding: "10px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
@@ -818,9 +839,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 <div style={{ fontSize: 11, color: textColor, fontWeight: 700 }}>{event.actor_name || "Guest"}</div>
                 <div style={{ fontSize: 12, color: hintColor, marginTop: 2 }}>{String(event.payload?.message || event.message)}</div>
               </div>
-            )) : <div style={{ color: hintColor, fontSize: 12 }}>Чат пока тихий. Напиши первым.</div>}
+            )) : <div style={{ color: hintColor, fontSize: 12 }}>{readOnlyMode ? "Read-only screen. Сообщения только для просмотра." : "Чат пока тихий. Напиши первым."}</div>}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          {!readOnlyMode && <div style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
               placeholder="Написать в чат..."
@@ -830,10 +851,10 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 13, outline: "none" }}
             />
             <button onClick={handleSendChat} style={{ padding: "10px 12px", borderRadius: 12, border: "none", background: activeBg, color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Send</button>
-          </div>
+          </div>}
         </div>
 
-        <button onClick={() => { haptic("light"); setShowSearch(true); }} style={{
+        {!readOnlyMode && <button onClick={() => { haptic("light"); setShowSearch(true); }} style={{
           width: "100%", padding: "14px 0", borderRadius: 16, border: cardBorder,
           background: softBg, color: textColor, fontSize: 14, fontWeight: 700,
           cursor: "pointer", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -842,7 +863,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           boxShadow: panelShadow,
         }}>
           <IconPlus size={16} color={warm ? "#ffd54f" : accentColor} /> Добавить трек
-        </button>
+        </button>}
 
         {showSearch && (
           <div style={{ padding: 12, borderRadius: 16, marginBottom: 10, ...glassCard }}>

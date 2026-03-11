@@ -96,6 +96,7 @@ export function App() {
 
   const [view, setView] = useState<View>("player");
   const [partyCode, setPartyCode] = useState<string | null>(null);
+  const [partyReadonly, setPartyReadonly] = useState(false);
   const [state, setState] = useState<PlayerState>({
     current_track: null,
     queue: [],
@@ -778,6 +779,15 @@ export function App() {
     if (startParam && startParam.startsWith("party_")) {
       const code = startParam.slice(6);
       if (code) {
+        setPartyReadonly(false);
+        setPartyCode(code);
+        setView("party");
+      }
+    }
+    if (startParam && startParam.startsWith("partytv_")) {
+      const code = startParam.slice(8);
+      if (code) {
+        setPartyReadonly(true);
         setPartyCode(code);
         setView("party");
       }
@@ -1373,7 +1383,7 @@ export function App() {
         if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
         if (playbackAction === "pause") return action("pause");
         if (playbackAction === "seek") return action("seek", undefined, position);
-      }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} />}
+      }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />}
 
       {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
