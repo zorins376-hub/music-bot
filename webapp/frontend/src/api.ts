@@ -490,6 +490,24 @@ export async function sendPartyChat(code: string, message: string): Promise<Part
   return r.json();
 }
 
+export async function deletePartyChatMessage(code: string, messageId: number): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/chat/${messageId}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to delete party chat message");
+  return r.json();
+}
+
+export async function clearPartyChat(code: string): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/chat/clear`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to clear party chat");
+  return r.json();
+}
+
 export async function reactToPartyTrack(code: string, emoji: string): Promise<Party> {
   const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/react`, {
     method: "POST",

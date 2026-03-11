@@ -2332,6 +2332,71 @@ async def send_party_chat_message(code: str, body: PartyChatRequest, user: dict 
     return await _get_party_with_tracks(code, int(user["id"]))
 
 
+@app.delete("/api/party/{code}/chat/{message_id}", response_model=PartySchema)
+async def delete_party_chat_message(code: str, message_id: int, user: dict = Depends(get_current_user)):
+    """Delete one chat message from the party room."""
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        message = (
+            await session.execute(
+                select(PartyChatMessage).where(
+                    PartyChatMessage.party_id == party.id,
+                    PartyChatMessage.id == message_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if message is None:
+            raise HTTPException(status_code=404, detail="Chat message not found")
+        can_moderate = member.role in {"dj", "cohost"} or party.creator_id == user["id"]
+        if not can_moderate and message.user_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Not allowed to delete this message")
+
+        deleted_preview = message.message[:120]
+        await session.delete(message)
+        await _record_party_event(
+            session,
+            party.id,
+            "chat_delete",
+            f"{user.get('first_name', 'User')} удалил(а) сообщение из чата",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "User"),
+            payload={"message_id": message_id, "preview": deleted_preview},
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "chat_delete", {"message_id": message_id})
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.post("/api/party/{code}/chat/clear", response_model=PartySchema)
+async def clear_party_chat(code: str, user: dict = Depends(get_current_user)):
+    """Clear party chat history for moderators."""
+    async with async_session() as session:
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ/co-host can clear chat")
+
+        await session.execute(
+            PartyChatMessage.__table__.delete().where(PartyChatMessage.party_id == party.id)
+        )
+        await _record_party_event(
+            session,
+            party.id,
+            "chat_clear",
+            f"{user.get('first_name', 'User')} очистил(а) чат",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "User"),
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "chat_clear", {})
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
 @app.post("/api/party/{code}/react", response_model=PartySchema)
 async def react_to_party_track(code: str, body: PartyReactionRequest, user: dict = Depends(get_current_user)):
     """Add a live emoji reaction to the current party track."""
