@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
-declare const self: ServiceWorkerGlobalScope;
+/* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = "blackroom-v1";
+const CACHE_NAME = "blackroom-v2";
 const AUDIO_CACHE_NAME = "blackroom-audio-v1";
 
 // Static assets to precache
@@ -59,7 +59,7 @@ self.addEventListener("fetch", (event) => {
 });
 
 // Cache-first strategy for static assets
-async function cacheFirst(request: Request): Promise<Response> {
+async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) {
     return cached;
@@ -79,7 +79,7 @@ async function cacheFirst(request: Request): Promise<Response> {
 }
 
 // Network-first strategy for API
-async function networkFirst(request: Request): Promise<Response> {
+async function networkFirst(request) {
   try {
     const response = await fetch(request);
     return response;
@@ -96,7 +96,7 @@ async function networkFirst(request: Request): Promise<Response> {
 }
 
 // Audio handling with streaming cache
-async function handleAudioRequest(request: Request): Promise<Response> {
+async function handleAudioRequest(request) {
   // Check audio cache first
   const cached = await caches.match(request);
   if (cached) {

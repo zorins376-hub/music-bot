@@ -668,7 +668,8 @@ _CHART_MIN_EXPECTED = {
 
 async def _get_chart(source: str) -> list[dict]:
     """Get chart from Redis cache or fetch fresh.
-    Auto-refreshes if cached data is below the expected minimum for this source.
+    Auto-refreshes if cached data is below the expected minimum for this source,
+    or if too many tracks are missing cover_url or video_id (stale data).
     """
     key = f"chart:{source}"
     raw = await cache.redis.get(key)
@@ -676,9 +677,25 @@ async def _get_chart(source: str) -> list[dict]:
         tracks = json.loads(raw)
         min_expected = _CHART_MIN_EXPECTED.get(source, 80)
         if len(tracks) >= min_expected:
-            return tracks
-        # Stale cache with old small limit — force re-fetch
-        logger.info("Chart %s has only %d tracks (min %d), refreshing", source, len(tracks), min_expected)
+            # Quality check: if >30% of tracks with video_id lack cover_url, re-fetch
+            # (Apple chart tracks may not have video_id initially — that's OK)
+            tracks_with_vid = [t for t in tracks if t.get("video_id")]
+            if tracks_with_vid:
+                n_no_cover = sum(1 for t in tracks_with_vid if not t.get("cover_url"))
+                if n_no_cover > len(tracks_with_vid) * 0.3:
+                    logger.info("Chart %s: %d/%d tracks missing covers, refreshing",
+                                source, n_no_cover, len(tracks_with_vid))
+                else:
+                    return tracks
+            else:
+                # No tracks have video_id — either Apple chart (OK) or stale
+                n_no_cover = sum(1 for t in tracks if not t.get("cover_url"))
+                if n_no_cover <= len(tracks) * 0.3:
+                    return tracks
+                logger.info("Chart %s: %d/%d tracks missing covers, refreshing",
+                            source, n_no_cover, len(tracks))
+        else:
+            logger.info("Chart %s has only %d tracks (min %d), refreshing", source, len(tracks), min_expected)
         await cache.redis.delete(key)
 
     fetcher = _CHART_FETCHERS.get(source)

@@ -199,7 +199,12 @@ export function App() {
     audio.addEventListener("waiting", () => setBuffering(true));
     audio.addEventListener("playing", () => setBuffering(false));
     audio.addEventListener("canplay", () => setBuffering(false));
-    audio.addEventListener("error", () => setBuffering(false));
+    audio.addEventListener("error", () => {
+      setBuffering(false);
+      // Auto-skip to next track on playback error (e.g. unavailable stream)
+      console.warn("Audio error, auto-skipping to next track");
+      sendAction("next").then(setState).catch(() => {});
+    });
 
     audio.addEventListener("ended", () => {
       // Don't swap audio elements — it breaks AudioContext source connection.
