@@ -276,3 +276,132 @@ class TestBlockedTrackModel:
         assert hasattr(BlockedTrack, "blocked_by")
         assert hasattr(BlockedTrack, "created_at")
         assert BlockedTrack.__tablename__ == "blocked_tracks"
+
+
+# ═══════════════════════════════════ Supabase AI API Endpoints ════════════════
+
+class TestSupabaseAiEndpoints:
+    """Test webapp API endpoints that connect to Supabase AI."""
+
+    @pytest.mark.asyncio
+    async def test_trending_endpoint(self):
+        """Test /api/trending returns track list."""
+        trending_data = [
+            {"video_id": "t1", "title": "Trending Track", "artist": "Artist1",
+             "duration": 200, "duration_fmt": "3:20", "source": "youtube"},
+            {"video_id": "t2", "title": "Hot Hit", "artist": "Artist2",
+             "duration": 180, "duration_fmt": "3:00", "source": "youtube"},
+        ]
+        mock_ai = AsyncMock()
+        mock_ai.get_trending = AsyncMock(return_value=trending_data)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai):
+            from webapp.api import get_trending
+            result = await get_trending(hours=24, limit=20, genre=None, user={"id": 1})
+            assert result.total == 2
+            assert result.tracks[0].video_id == "t1"
+            assert result.tracks[1].title == "Hot Hit"
+            mock_ai.get_trending.assert_called_once_with(hours=24, limit=20, genre=None)
+
+    @pytest.mark.asyncio
+    async def test_trending_disabled(self):
+        """Test /api/trending returns empty when SUPABASE_AI_ENABLED is False."""
+        with patch("webapp.api.settings") as mock_settings:
+            mock_settings.SUPABASE_AI_ENABLED = False
+            from webapp.api import get_trending
+            result = await get_trending(hours=24, limit=20, genre=None, user={"id": 1})
+            assert result.total == 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_endpoint(self):
+        """Test /api/ingest fires event."""
+        mock_ai = AsyncMock()
+        mock_ai.ingest_event = AsyncMock(return_value=True)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai), \
+             patch("webapp.api.settings") as mock_settings:
+            mock_settings.SUPABASE_AI_ENABLED = True
+            from webapp.api import ingest_event, IngestEventRequest
+            req = IngestEventRequest(
+                event="play",
+                track={"video_id": "vid1", "title": "TestTrack", "artist": "TestArtist", "source": "youtube"},
+            )
+            result = await ingest_event(req, user={"id": 1})
+            assert result["ok"] is True
+            mock_ai.ingest_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_feedback_endpoint(self):
+        """Test /api/feedback sends feedback."""
+        mock_ai = AsyncMock()
+        mock_ai.send_feedback = AsyncMock(return_value=True)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai), \
+             patch("webapp.api.settings") as mock_settings:
+            mock_settings.SUPABASE_AI_ENABLED = True
+            from webapp.api import send_feedback, FeedbackRequest
+            req = FeedbackRequest(feedback="like", source_id="vid1", context="player")
+            result = await send_feedback(req, user={"id": 1})
+            assert result["ok"] is True
+            mock_ai.send_feedback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_similar_endpoint(self):
+        """Test /api/similar/{video_id} returns tracks."""
+        similar_data = [
+            {"video_id": "s1", "title": "Similar Song", "artist": "S-Artist",
+             "duration": 210, "duration_fmt": "3:30", "source": "youtube"},
+        ]
+        mock_ai = AsyncMock()
+        mock_ai.get_similar = AsyncMock(return_value=similar_data)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai), \
+             patch("webapp.api.settings") as mock_settings:
+            mock_settings.SUPABASE_AI_ENABLED = True
+            from webapp.api import get_similar
+            result = await get_similar(video_id="testVid", limit=10, user={"id": 1})
+            assert result.total == 1
+            assert result.tracks[0].title == "Similar Song"
+
+    @pytest.mark.asyncio
+    async def test_ai_playlist_endpoint(self):
+        """Test /api/ai-playlist generates playlist from prompt."""
+        playlist_data = [
+            {"video_id": "p1", "title": "Playlist Track", "artist": "P-Artist",
+             "duration": 240, "duration_fmt": "4:00", "source": "youtube"},
+        ]
+        mock_ai = AsyncMock()
+        mock_ai.generate_ai_playlist = AsyncMock(return_value=playlist_data)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai), \
+             patch("webapp.api.settings") as mock_settings:
+            mock_settings.SUPABASE_AI_ENABLED = True
+            from webapp.api import create_ai_playlist, AiPlaylistRequest
+            req = AiPlaylistRequest(prompt="chill jazz", limit=10)
+            result = await create_ai_playlist(req, user={"id": 1})
+            assert result.total == 1
+            assert result.tracks[0].artist == "P-Artist"
+
+    @pytest.mark.asyncio
+    async def test_trending_with_genre_filter(self):
+        """Test /api/trending with genre param."""
+        trending_data = [
+            {"video_id": "g1", "title": "Rock Hit", "artist": "RockBand",
+             "duration": 300, "duration_fmt": "5:00", "source": "youtube"},
+        ]
+        mock_ai = AsyncMock()
+        mock_ai.get_trending = AsyncMock(return_value=trending_data)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai):
+            from webapp.api import get_trending
+            result = await get_trending(hours=48, limit=5, genre="rock", user={"id": 1})
+            assert result.total == 1
+            mock_ai.get_trending.assert_called_once_with(hours=48, limit=5, genre="rock")
+
+    @pytest.mark.asyncio
+    async def test_trending_cover_url_fallback(self):
+        """Test that trending tracks get YouTube cover URL when cover_url is missing."""
+        trending_data = [
+            {"video_id": "yt1", "title": "No Cover", "artist": "Art",
+             "duration": 100, "duration_fmt": "1:40", "source": "youtube"},
+        ]
+        mock_ai = AsyncMock()
+        mock_ai.get_trending = AsyncMock(return_value=trending_data)
+        with patch("bot.services.supabase_ai.supabase_ai", mock_ai):
+            from webapp.api import get_trending
+            result = await get_trending(hours=24, limit=20, genre=None, user={"id": 1})
+            assert "i.ytimg.com" in result.tracks[0].cover_url

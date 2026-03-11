@@ -974,6 +974,35 @@ async def create_ai_playlist(body: AiPlaylistRequest, user: dict = Depends(get_c
     return SearchResult(tracks=tracks, total=len(tracks))
 
 
+@app.get("/api/trending", response_model=SearchResult)
+async def get_trending(
+    hours: int = 24, limit: int = 20, genre: str | None = None,
+    user: dict = Depends(get_current_user),
+):
+    """Get currently trending tracks."""
+    if not settings.SUPABASE_AI_ENABLED:
+        return SearchResult(tracks=[], total=0)
+    from bot.services.supabase_ai import supabase_ai
+    results = await supabase_ai.get_trending(hours=hours, limit=limit, genre=genre)
+    tracks = [
+        TrackSchema(
+            video_id=r.get("video_id", r.get("source_id", "")),
+            title=r.get("title", "Unknown"),
+            artist=r.get("artist", "Unknown"),
+            duration=r.get("duration", 0),
+            duration_fmt=r.get("duration_fmt", "0:00"),
+            source=r.get("source", "youtube"),
+            cover_url=r.get("cover_url") or (
+                f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg"
+                if r.get("source", "youtube") == "youtube" else None
+            ),
+        )
+        for r in results
+        if r.get("video_id") or r.get("source_id")
+    ]
+    return SearchResult(tracks=tracks, total=len(tracks))
+
+
 # ── Charts API ───────────────────────────────────────────────────────────
 
 @app.get("/api/charts")

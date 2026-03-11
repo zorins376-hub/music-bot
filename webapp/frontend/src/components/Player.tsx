@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
-import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, type Track } from "../api";
+import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
 import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus } from "./Icons";
 
@@ -43,6 +43,7 @@ interface Props {
   onBypassToggle?: (on: boolean) => void;
   onAddToPlaylist?: () => void;
   onPlayTrack?: (track: Track) => void;
+  onPlayAll?: (tracks: Track[]) => void;
 }
 
 const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
@@ -222,7 +223,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, onAddToPlaylist, onPlayTrack }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -239,6 +240,9 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   const [aiPlaylistTracks, setAiPlaylistTracks] = useState<Track[]>([]);
   const [showAiPlaylist, setShowAiPlaylist] = useState(false);
   const [isAiPlaylistLoading, setIsAiPlaylistLoading] = useState(false);
+  const [trendingTracks, setTrendingTracks] = useState<Track[]>([]);
+  const [showTrending, setShowTrending] = useState(false);
+  const [isTrendingLoading, setIsTrendingLoading] = useState(false);
 
   const handleSimilar = async () => {
     if (!track || isSimilarLoading) return;
@@ -263,6 +267,25 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       setShowAiPlaylist(true);
     } catch { setAiPlaylistTracks([]); }
     setIsAiPlaylistLoading(false);
+  };
+
+  const handleTrending = async () => {
+    if (isTrendingLoading) return;
+    if (showTrending) { setShowTrending(false); return; }
+    setIsTrendingLoading(true);
+    haptic("medium");
+    try {
+      const results = await fetchTrending(24, 20);
+      setTrendingTracks(results);
+      setShowTrending(true);
+    } catch { setTrendingTracks([]); }
+    setIsTrendingLoading(false);
+  };
+
+  const handlePlayAll = (tracks: Track[]) => {
+    if (!tracks.length) return;
+    haptic("medium");
+    onPlayAll?.(tracks);
   };
 
   // Reset similar/ai-playlist on track change
@@ -1084,6 +1107,35 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               )}
               Похожие
             </button>
+            {/* Trending — warm */}
+            <button
+              onClick={handleTrending}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${showTrending ? gold + "88" : borderGold}`,
+                background: showTrending ? "rgba(255,167,38,0.15)" : glassCard,
+                backdropFilter: "blur(12px)",
+                color: showTrending ? gold : "#fef0e0",
+                cursor: isTrendingLoading ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+              }}
+            >
+              {isTrendingLoading ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+                </svg>
+              )}
+              Тренды
+            </button>
             {/* Sleep — warm */}
             <button
               onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
@@ -1121,6 +1173,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             border: `1px solid ${borderGold}`,
           }}>
             <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold, marginBottom: 10 }}>Похожие треки</div>
+            <button onClick={() => handlePlayAll(similarTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${gold}55`, background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))", color: gold, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
             {similarTracks.map((t) => (
               <button
                 key={t.video_id}
@@ -1179,6 +1232,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           </div>
           {showAiPlaylist && aiPlaylistTracks.length > 0 && (
             <div style={{ marginTop: 10 }}>
+              <button onClick={() => handlePlayAll(aiPlaylistTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${gold}55`, background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))", color: gold, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
               {aiPlaylistTracks.map((t) => (
                 <button
                   key={t.video_id}
@@ -1203,6 +1257,40 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             <div style={{ marginTop: 10, textAlign: "center", color: "#c8a882", fontSize: 12 }}>Ничего не найдено</div>
           )}
         </div>
+
+        {/* Trending — warm */}
+        {showTrending && trendingTracks.length > 0 && (
+          <div style={{
+            marginTop: 14,
+            padding: 14,
+            borderRadius: 20,
+            background: "rgba(40, 25, 15, 0.75)",
+            backdropFilter: "blur(16px)",
+            border: `1px solid ${borderGold}`,
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold, marginBottom: 10 }}>🔥 Тренды</div>
+            <button onClick={() => handlePlayAll(trendingTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${gold}55`, background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))", color: gold, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
+            {trendingTracks.map((t, i) => (
+              <button
+                key={t.video_id}
+                onClick={() => { haptic("light"); onPlayTrack?.(t); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 6px",
+                  background: "none", border: "none", borderBottom: `1px solid ${borderGold}`,
+                  color: "#fef0e0", cursor: "pointer", textAlign: "left", fontSize: 13,
+                }}
+              >
+                <span style={{ fontSize: 14, fontWeight: 700, color: gold, minWidth: 20 }}>{i + 1}</span>
+                {t.cover_url && <img src={t.cover_url} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />}
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                  <div style={{ fontSize: 11, color: "#c8a882" }}>{t.artist}</div>
+                </div>
+                <div style={{ fontSize: 11, color: "#c8a882" }}>{t.duration_fmt}</div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {audioControlsPanel(true)}
         {luxuryPanel(true)}
@@ -1570,6 +1658,34 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             )}
             Похожие
           </button>
+          {/* Trending */}
+          <button
+            onClick={handleTrending}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 20,
+              border: `1px solid ${showTrending ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
+              background: showTrending ? `${accentColorAlpha}` : "transparent",
+              color: showTrending ? accentColor : "var(--tg-theme-text-color, #eee)",
+              cursor: isTrendingLoading ? "wait" : "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              transition: "all 0.3s ease",
+            }}
+          >
+            {isTrendingLoading ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+              </svg>
+            )}
+            Тренды
+          </button>
           {/* Sleep Timer */}
           <button
             onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
@@ -1663,6 +1779,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           border: `1px solid ${accentColorAlpha}`,
         }}>
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor, marginBottom: 10 }}>Похожие треки</div>
+          <button onClick={() => handlePlayAll(similarTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${accentColor}44`, background: `linear-gradient(135deg, ${accentColorAlpha}, rgba(124,77,255,0.08))`, color: accentColor, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
           {similarTracks.map((t) => (
             <button
               key={t.video_id}
@@ -1724,6 +1841,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
         </div>
         {showAiPlaylist && aiPlaylistTracks.length > 0 && (
           <div style={{ marginTop: 10 }}>
+            <button onClick={() => handlePlayAll(aiPlaylistTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${accentColor}44`, background: `linear-gradient(135deg, ${accentColorAlpha}, rgba(124,77,255,0.08))`, color: accentColor, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
             {aiPlaylistTracks.map((t) => (
               <button
                 key={t.video_id}
@@ -1748,6 +1866,40 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           <div style={{ marginTop: 10, textAlign: "center", color: "var(--tg-theme-hint-color, #888)", fontSize: 12 }}>Ничего не найдено</div>
         )}
       </div>
+
+      {/* Trending */}
+      {showTrending && trendingTracks.length > 0 && (
+        <div style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 18,
+          background: "rgba(30, 30, 50, 0.85)",
+          backdropFilter: "blur(16px)",
+          border: `1px solid ${accentColorAlpha}`,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor, marginBottom: 10 }}>🔥 Тренды</div>
+          <button onClick={() => handlePlayAll(trendingTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${accentColor}44`, background: `linear-gradient(135deg, ${accentColorAlpha}, rgba(124,77,255,0.08))`, color: accentColor, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
+          {trendingTracks.map((t, i) => (
+            <button
+              key={t.video_id}
+              onClick={() => { haptic("light"); onPlayTrack?.(t); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 6px",
+                background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                color: "var(--tg-theme-text-color, #eee)", cursor: "pointer", textAlign: "left", fontSize: 13,
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 700, color: accentColor, minWidth: 20 }}>{i + 1}</span>
+              {t.cover_url && <img src={t.cover_url} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />}
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>{t.artist}</div>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>{t.duration_fmt}</div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {audioControlsPanel(false)}
       {luxuryPanel(false)}

@@ -291,3 +291,10 @@ export async function generateAiPlaylist(prompt: string, limit = 10): Promise<Tr
   const data = await r.json();
   return data.tracks;
 }
+
+export async function fetchTrending(hours = 24, limit = 20): Promise<Track[]> {
+  const r = await fetch(`${API_BASE}/trending?hours=${hours}&limit=${limit}`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}
