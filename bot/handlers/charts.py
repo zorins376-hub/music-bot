@@ -657,11 +657,18 @@ _CHART_LABELS = {
 # ── Cache helpers ────────────────────────────────────────────────────────
 
 async def _get_chart(source: str) -> list[dict]:
-    """Get chart from Redis cache or fetch fresh."""
+    """Get chart from Redis cache or fetch fresh.
+    Auto-refreshes if cached data has fewer than 50 tracks (stale limit).
+    """
     key = f"chart:{source}"
     raw = await cache.redis.get(key)
     if raw:
-        return json.loads(raw)
+        tracks = json.loads(raw)
+        if len(tracks) >= 50:
+            return tracks
+        # Stale cache with old small limit — force re-fetch
+        logger.info("Chart %s has only %d tracks in cache, refreshing", source, len(tracks))
+        await cache.redis.delete(key)
 
     fetcher = _CHART_FETCHERS.get(source)
     if not fetcher:
@@ -776,7 +783,7 @@ def _chart_page_kb(
 
     rows.append([
         InlineKeyboardButton(
-            text="➕ Импорт 30 треков",
+            text="➕ Импорт 100 треков",
             callback_data=ChartBulk(src=source, sid=session_id, lim=_CHART_IMPORT_DEFAULT_LIMIT).pack(),
         )
     ])

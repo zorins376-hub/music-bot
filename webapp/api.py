@@ -78,6 +78,10 @@ async def get_current_user(x_telegram_init_data: str = Header(...)) -> dict:
 async def lifespan(app: FastAPI):
     await init_db()
 
+    # Chart cache prewarm (same as bot, ensures webapp has fresh charts)
+    from bot.handlers.charts import _prewarm_charts_once
+    asyncio.create_task(_prewarm_charts_once())
+
     # Periodic cleanup of expired stream URL cache entries
     async def _cleanup_url_cache():
         import time as _time
