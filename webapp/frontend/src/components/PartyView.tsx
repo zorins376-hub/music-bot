@@ -45,6 +45,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionBurstIdRef = useRef(0);
   const lastTrackIdRef = useRef<string | null>(null);
+  const onPlaybackActionRef = useRef(onPlaybackAction);
+  onPlaybackActionRef.current = onPlaybackAction;
 
   const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
   const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
@@ -141,17 +143,27 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             const seekPosition = Number(msg.data?.seek_position || 0);
             const syncedTrack = updatedParty.tracks.find((t) => t.position === Number(msg.data?.track_position ?? updatedParty.current_position));
             if (action === "play" && syncedTrack) {
-              void onPlaybackAction?.("play", syncedTrack, seekPosition);
+              void onPlaybackActionRef.current?.("play", syncedTrack, seekPosition);
             } else if (action === "pause") {
-              void onPlaybackAction?.("pause", undefined, seekPosition);
+              void onPlaybackActionRef.current?.("pause", undefined, seekPosition);
             } else if (action === "seek") {
-              void onPlaybackAction?.("seek", undefined, seekPosition);
+              void onPlaybackActionRef.current?.("seek", undefined, seekPosition);
             }
           }
         }).catch(() => {});
       } catch {}
     };
-  }, [onPlaybackAction]);
+
+    es.onerror = () => {
+      // Reconnect on error after 2s delay
+      es.close();
+      setTimeout(() => {
+        if (eventSourceRef.current === es) {
+          connectSSE(code);
+        }
+      }, 2000);
+    };
+  }, []);
 
   const handleSyncPlayback = async (action: "play" | "pause" | "seek", trackPosition: number, seekPosition = 0, track?: Track) => {
     if (!party) return;
