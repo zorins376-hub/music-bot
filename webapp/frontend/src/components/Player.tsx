@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, searchTracks, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
-import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus } from "./Icons";
+import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus, IconShare, IconImage, IconWave, IconSimilar, IconTrending, IconMoon, IconSpinner } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -930,237 +930,241 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           </button>
         </div>
 
-        {/* Action buttons — glass row with warm tones */}
+        {/* Action Buttons Carousel — warm tones */}
         {track && (
           <div style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 8,
             marginTop: 24,
-            padding: "0 12px",
-            flexWrap: "wrap",
+            position: "relative",
+            overflow: "hidden",
           }}>
-            {/* Lyrics */}
-            <button
-              onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
-              style={{
-                padding: "9px 18px",
-                borderRadius: 24,
-                border: `1px solid ${borderGold}`,
-                background: glassCard,
-                backdropFilter: "blur(12px)",
-                color: "#fef0e0",
-                fontSize: 13,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                letterSpacing: 0.5,
-                transition: "all 0.3s ease",
-              }}
-            >
-              <IconLyrics /> Текст
-            </button>
-            {/* Like — warm heart */}
-            <button
-              onClick={handleLikeToggle}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${isLiked ? "#ff6d00" : borderGold}`,
-                background: isLiked ? "rgba(255, 109, 0, 0.15)" : glassCard,
-                backdropFilter: "blur(12px)",
-                color: isLiked ? "#ffa726" : "#fef0e0",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                transition: "all 0.3s ease",
-              }}
-            >
-              <IconHeart filled={isLiked} />
-            </button>
-            {/* Add to playlist */}
-            <button
-              onClick={() => { haptic("light"); onAddToPlaylist?.(); }}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${borderGold}`,
-                background: glassCard,
-                backdropFilter: "blur(12px)",
-                color: "#fef0e0",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-              }}
-            >
-              <IconPlus size={16} /> В плейлист
-            </button>
-            {/* Share */}
-            <button
-              onClick={handleShare}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${borderGold}`,
-                background: glassCard,
-                backdropFilter: "blur(12px)",
-                color: "#fef0e0",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-              </svg>
-            </button>
-            {/* Story */}
-            <button
-              onClick={() => { haptic("medium"); setShowShareCard(true); }}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${borderGold}`,
-                background: "linear-gradient(135deg, rgba(255,109,0,0.12), rgba(255,213,79,0.08))",
-                backdropFilter: "blur(12px)",
-                color: "#fef0e0",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21 15 16 10 5 21"/>
-              </svg>
-              Story
-            </button>
-            {/* Wave — golden */}
-            <button
-              onClick={() => { haptic("medium"); onWave?.(); }}
-              disabled={isWaveLoading}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${gold}55`,
-                background: "linear-gradient(135deg, rgba(255,109,0,0.18), rgba(255,213,79,0.1))",
-                backdropFilter: "blur(12px)",
-                color: gold,
-                cursor: isWaveLoading ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-                opacity: isWaveLoading ? 0.6 : 1,
-              }}
-            >
-              {isWaveLoading ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2 12h4l3-9 4 18 3-9h4"/>
-                </svg>
-              )}
-              Волна
-            </button>
-            {/* Similar — warm */}
-            <button
-              onClick={handleSimilar}
-              disabled={!track || isSimilarLoading}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${showSimilar ? gold + "88" : borderGold}`,
-                background: showSimilar ? "rgba(255,167,38,0.15)" : glassCard,
-                backdropFilter: "blur(12px)",
-                color: showSimilar ? gold : "#fef0e0",
-                cursor: !track || isSimilarLoading ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-                opacity: !track ? 0.4 : 1,
-              }}
-            >
-              {isSimilarLoading ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>
-                </svg>
-              )}
-              Похожие
-            </button>
-            {/* Trending — warm */}
-            <button
-              onClick={handleTrending}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${showTrending ? gold + "88" : borderGold}`,
-                background: showTrending ? "rgba(255,167,38,0.15)" : glassCard,
-                backdropFilter: "blur(12px)",
-                color: showTrending ? gold : "#fef0e0",
-                cursor: isTrendingLoading ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-              }}
-            >
-              {isTrendingLoading ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
-                </svg>
-              )}
-              Тренды
-            </button>
-            {/* Sleep — warm */}
-            <button
-              onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
-              style={{
-                padding: "9px 16px",
-                borderRadius: 24,
-                border: `1px solid ${sleepTimerRemaining ? gold + "88" : borderGold}`,
-                background: sleepTimerRemaining ? "rgba(255,167,38,0.15)" : glassCard,
-                backdropFilter: "blur(12px)",
-                color: sleepTimerRemaining ? gold : "#fef0e0",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                transition: "all 0.3s ease",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-              </svg>
-              {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : ""}
-            </button>
+            <div style={{
+              display: "flex",
+              gap: 8,
+              overflowX: "auto",
+              scrollSnapType: "x mandatory",
+              WebkitOverflowScrolling: "touch",
+              paddingBottom: 8,
+              paddingLeft: 16,
+              paddingRight: 16,
+              msOverflowStyle: "none",
+              scrollbarWidth: "none",
+            }}>
+              {/* Текст */}
+              <button
+                onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: 24,
+                  border: `1px solid ${borderGold}`,
+                  background: glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: "#fef0e0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                  letterSpacing: 0.5,
+                }}
+              >
+                <IconLyrics /> Текст
+              </button>
+              {/* Like */}
+              <button
+                onClick={handleLikeToggle}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${isLiked ? "#ff6d00" : borderGold}`,
+                  background: isLiked ? "rgba(255, 109, 0, 0.18)" : glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: isLiked ? "#ffa726" : "#fef0e0",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                  transition: "all 0.3s ease",
+                }}
+              >
+                <IconHeart filled={isLiked} />
+              </button>
+              {/* В плейлист */}
+              <button
+                onClick={() => { haptic("light"); onAddToPlaylist?.(); }}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${borderGold}`,
+                  background: glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: "#fef0e0",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                }}
+              >
+                <IconPlus size={16} /> В плейлист
+              </button>
+              {/* Share */}
+              <button
+                onClick={handleShare}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${borderGold}`,
+                  background: glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: "#fef0e0",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                }}
+              >
+                <IconShare size={18} />
+              </button>
+              {/* Story */}
+              <button
+                onClick={() => { haptic("medium"); setShowShareCard(true); }}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${borderGold}`,
+                  background: "linear-gradient(135deg, rgba(255,109,0,0.15), rgba(255,213,79,0.1))",
+                  backdropFilter: "blur(12px)",
+                  color: "#fef0e0",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                }}
+              >
+                <IconImage size={18} /> Story
+              </button>
+              {/* Волна */}
+              <button
+                onClick={() => { haptic("medium"); onWave?.(); }}
+                disabled={isWaveLoading}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${gold}55`,
+                  background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))",
+                  backdropFilter: "blur(12px)",
+                  color: gold,
+                  cursor: isWaveLoading ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                  transition: "all 0.3s ease",
+                  opacity: isWaveLoading ? 0.6 : 1,
+                }}
+              >
+                {isWaveLoading ? <IconSpinner size={18} color={gold} /> : <IconWave size={18} />}
+                Волна
+              </button>
+              {/* Похожие */}
+              <button
+                onClick={handleSimilar}
+                disabled={!track || isSimilarLoading}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${showSimilar ? gold + "88" : borderGold}`,
+                  background: showSimilar ? "rgba(255,167,38,0.18)" : glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: showSimilar ? gold : "#fef0e0",
+                  cursor: !track || isSimilarLoading ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                  transition: "all 0.3s ease",
+                  opacity: !track ? 0.4 : 1,
+                }}
+              >
+                {isSimilarLoading ? <IconSpinner size={18} color={showSimilar ? gold : "#fef0e0"} /> : <IconSimilar size={18} />}
+                Похожие
+              </button>
+              {/* Тренды */}
+              <button
+                onClick={handleTrending}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${showTrending ? gold + "88" : borderGold}`,
+                  background: showTrending ? "rgba(255,167,38,0.18)" : glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: showTrending ? gold : "#fef0e0",
+                  cursor: isTrendingLoading ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                  transition: "all 0.3s ease",
+                }}
+              >
+                {isTrendingLoading ? <IconSpinner size={18} color={showTrending ? gold : "#fef0e0"} /> : <IconTrending size={18} />}
+                Тренды
+              </button>
+              {/* Сон */}
+              <button
+                onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 24,
+                  border: `1px solid ${sleepTimerRemaining ? gold + "88" : borderGold}`,
+                  background: sleepTimerRemaining ? "rgba(255,167,38,0.18)" : glassCard,
+                  backdropFilter: "blur(12px)",
+                  color: sleepTimerRemaining ? gold : "#fef0e0",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  scrollSnapAlign: "start",
+                  transition: "all 0.3s ease",
+                }}
+              >
+                <IconMoon size={18} />
+                {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
+              </button>
+            </div>
+            {/* Carousel fade edges — warm */}
+            <div style={{ position: "absolute", top: 0, left: 0, width: 20, height: "100%", background: "linear-gradient(90deg, rgba(28, 18, 12, 1), transparent)", pointerEvents: "none" }} />
+            <div style={{ position: "absolute", top: 0, right: 0, width: 20, height: "100%", background: "linear-gradient(270deg, rgba(28, 18, 12, 1), transparent)", pointerEvents: "none" }} />
           </div>
         )}
 
@@ -1520,217 +1524,240 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
         </button>
       </div>
 
-      {/* Lyrics, Like, Share, Sleep buttons */}
+      {/* Action Buttons Carousel */}
       {track && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 24, flexWrap: "wrap" }}>
-          <button
-            onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 20,
-              border: "1px solid var(--tg-theme-hint-color, #555)",
-              background: "transparent",
-              color: "var(--tg-theme-text-color, #eee)",
-              fontSize: 13,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-          >
-            <IconLyrics /> Текст
-          </button>
-          <button
-            onClick={handleLikeToggle}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: `1px solid ${isLiked ? "#ff4081" : "var(--tg-theme-hint-color, #555)"}`,
-              background: isLiked ? "rgba(255, 64, 129, 0.1)" : "transparent",
-              color: isLiked ? "#ff4081" : "var(--tg-theme-text-color, #eee)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              transition: "all 0.2s ease",
-            }}
-          >
-            <IconHeart filled={isLiked} />
-          </button>
-          {/* Add to playlist */}
-          <button
-            onClick={() => { haptic("light"); onAddToPlaylist?.(); }}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.06)",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
-              color: "var(--tg-theme-text-color, #eee)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-            }}
-          >
-            <IconPlus size={16} /> В плейлист
-          </button>
-          <button
-            onClick={handleShare}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: "1px solid var(--tg-theme-hint-color, #555)",
-              background: "transparent",
-              color: "var(--tg-theme-text-color, #eee)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-            }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-            </svg>
-          </button>
-          {/* Story Card */}
-          <button
-            onClick={() => { haptic("medium"); setShowShareCard(true); }}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: "1px solid var(--tg-theme-hint-color, #555)",
-              background: "linear-gradient(135deg, rgba(255,64,129,0.1), rgba(124,77,255,0.1))",
-              color: "var(--tg-theme-text-color, #eee)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-            }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <polyline points="21 15 16 10 5 21"/>
-            </svg>
-            Story
-          </button>
-          {/* AI DJ Волна */}
-          <button
-            onClick={() => { haptic("medium"); onWave?.(); }}
-            disabled={isWaveLoading}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.06)",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
-              color: "var(--tg-theme-text-color, #eee)",
-              cursor: isWaveLoading ? "wait" : "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              transition: "all 0.3s ease",
-              opacity: isWaveLoading ? 0.6 : 1,
-            }}
-          >
-            {isWaveLoading ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 12h4l3-9 4 18 3-9h4"/>
-              </svg>
-            )}
-            Волна
-          </button>
-          {/* Similar */}
-          <button
-            onClick={handleSimilar}
-            disabled={!track || isSimilarLoading}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: `1px solid ${showSimilar ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
-              background: showSimilar ? `${accentColorAlpha}` : "transparent",
-              color: showSimilar ? accentColor : "var(--tg-theme-text-color, #eee)",
-              cursor: !track || isSimilarLoading ? "wait" : "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              transition: "all 0.3s ease",
-              opacity: !track ? 0.4 : 1,
-            }}
-          >
-            {isSimilarLoading ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>
-              </svg>
-            )}
-            Похожие
-          </button>
-          {/* Trending */}
-          <button
-            onClick={handleTrending}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: `1px solid ${showTrending ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
-              background: showTrending ? `${accentColorAlpha}` : "transparent",
-              color: showTrending ? accentColor : "var(--tg-theme-text-color, #eee)",
-              cursor: isTrendingLoading ? "wait" : "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              transition: "all 0.3s ease",
-            }}
-          >
-            {isTrendingLoading ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
-              </svg>
-            )}
-            Тренды
-          </button>
-          {/* Sleep Timer */}
-          <button
-            onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 20,
-              border: `1px solid ${sleepTimerRemaining ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
-              background: sleepTimerRemaining ? `${accentColorAlpha}` : "transparent",
-              color: sleepTimerRemaining ? accentColor : "var(--tg-theme-text-color, #eee)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              transition: "all 0.3s ease",
-            }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-            </svg>
-            {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : ""}
-          </button>
+        <div style={{
+          marginTop: 24,
+          position: "relative",
+          overflow: "hidden",
+        }}>
+          <div style={{
+            display: "flex",
+            gap: 10,
+            overflowX: "auto",
+            scrollSnapType: "x mandatory",
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: 8,
+            paddingLeft: 16,
+            paddingRight: 16,
+            msOverflowStyle: "none",
+            scrollbarWidth: "none",
+          }}>
+            {/* Текст */}
+            <button
+              onClick={() => { haptic("light"); onShowLyrics(track.video_id); }}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 20,
+                border: "1px solid var(--tg-theme-hint-color, #555)",
+                background: "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: "var(--tg-theme-text-color, #eee)",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+              }}
+            >
+              <IconLyrics /> Текст
+            </button>
+            {/* Like */}
+            <button
+              onClick={handleLikeToggle}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: `1px solid ${isLiked ? "#ff4081" : "var(--tg-theme-hint-color, #555)"}`,
+                background: isLiked ? "rgba(255, 64, 129, 0.15)" : "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: isLiked ? "#ff4081" : "var(--tg-theme-text-color, #eee)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+                transition: "all 0.2s ease",
+              }}
+            >
+              <IconHeart filled={isLiked} />
+            </button>
+            {/* В плейлист */}
+            <button
+              onClick={() => { haptic("light"); onAddToPlaylist?.(); }}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: "var(--tg-theme-text-color, #eee)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+              }}
+            >
+              <IconPlus size={16} /> В плейлист
+            </button>
+            {/* Share */}
+            <button
+              onClick={handleShare}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: "1px solid var(--tg-theme-hint-color, #555)",
+                background: "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: "var(--tg-theme-text-color, #eee)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+              }}
+            >
+              <IconShare size={18} />
+            </button>
+            {/* Story */}
+            <button
+              onClick={() => { haptic("medium"); setShowShareCard(true); }}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: "1px solid var(--tg-theme-hint-color, #555)",
+                background: "linear-gradient(135deg, rgba(255,64,129,0.12), rgba(124,77,255,0.12))",
+                backdropFilter: "blur(12px)",
+                color: "var(--tg-theme-text-color, #eee)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+              }}
+            >
+              <IconImage size={18} /> Story
+            </button>
+            {/* Волна */}
+            <button
+              onClick={() => { haptic("medium"); onWave?.(); }}
+              disabled={isWaveLoading}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "linear-gradient(135deg, rgba(124,77,255,0.15), rgba(224,64,251,0.12))",
+                backdropFilter: "blur(12px)",
+                color: "var(--tg-theme-text-color, #eee)",
+                cursor: isWaveLoading ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+                transition: "all 0.3s ease",
+                opacity: isWaveLoading ? 0.6 : 1,
+              }}
+            >
+              {isWaveLoading ? <IconSpinner size={18} /> : <IconWave size={18} />}
+              Волна
+            </button>
+            {/* Похожие */}
+            <button
+              onClick={handleSimilar}
+              disabled={!track || isSimilarLoading}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: `1px solid ${showSimilar ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
+                background: showSimilar ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: showSimilar ? accentColor : "var(--tg-theme-text-color, #eee)",
+                cursor: !track || isSimilarLoading ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+                transition: "all 0.3s ease",
+                opacity: !track ? 0.4 : 1,
+              }}
+            >
+              {isSimilarLoading ? <IconSpinner size={18} /> : <IconSimilar size={18} />}
+              Похожие
+            </button>
+            {/* Тренды */}
+            <button
+              onClick={handleTrending}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: `1px solid ${showTrending ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
+                background: showTrending ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: showTrending ? accentColor : "var(--tg-theme-text-color, #eee)",
+                cursor: isTrendingLoading ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+                transition: "all 0.3s ease",
+              }}
+            >
+              {isTrendingLoading ? <IconSpinner size={18} /> : <IconTrending size={18} />}
+              Тренды
+            </button>
+            {/* Sleep */}
+            <button
+              onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 20,
+                border: `1px solid ${sleepTimerRemaining ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
+                background: sleepTimerRemaining ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
+                backdropFilter: "blur(12px)",
+                color: sleepTimerRemaining ? accentColor : "var(--tg-theme-text-color, #eee)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                flexShrink: 0,
+                scrollSnapAlign: "start",
+                transition: "all 0.3s ease",
+              }}
+            >
+              <IconMoon size={18} />
+              {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
+            </button>
+          </div>
+          {/* Carousel fade edges */}
+          <div style={{ position: "absolute", top: 0, left: 0, width: 20, height: "100%", background: "linear-gradient(90deg, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", top: 0, right: 0, width: 20, height: "100%", background: "linear-gradient(270deg, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none" }} />
         </div>
       )}
 
