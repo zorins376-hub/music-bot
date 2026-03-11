@@ -696,6 +696,13 @@ async def _prewarm_charts_once() -> None:
     for src in _CHART_FETCHERS:
         try:
             tracks = await _get_chart(src)
+            # If cached data is small (old limit), force re-fetch
+            if tracks and len(tracks) < 50:
+                fetcher = _CHART_FETCHERS.get(src)
+                if fetcher:
+                    fresh = await fetcher()
+                    if fresh and len(fresh) > len(tracks):
+                        tracks = fresh
             if not tracks:
                 continue
             prepared = await _prepare_chart_tracks(tracks)

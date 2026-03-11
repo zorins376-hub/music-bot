@@ -301,6 +301,11 @@ async def stream_audio(
             elif video_id.startswith("vk_"):
                 # VK Music — need to re-fetch URL (temporary links)
                 raise HTTPException(status_code=501, detail="VK streaming not supported in TMA yet")
+            elif video_id.isdigit():
+                # Pure digit ID — legacy Yandex Music track stored without ym_ prefix
+                from bot.services.yandex_provider import download_yandex
+                track_id = int(video_id)
+                mp3_path = await download_yandex(track_id, mp3_path)
             elif not _is_likely_youtube_id(video_id):
                 # Unknown source — reject early instead of sending junk to YouTube
                 raise HTTPException(status_code=400, detail=f"Unsupported track source: {video_id}")

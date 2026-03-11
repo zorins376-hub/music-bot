@@ -453,3 +453,16 @@ class TestStreamRouting:
         from webapp.api import _prefetch_stream_url
         result = await _prefetch_stream_url("sp_3iVKcXe4ziRBNZ00NuXkqM")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_stream_url_skips_pure_digits(self):
+        """Pure digit IDs (legacy Yandex) should not hit YouTube resolver."""
+        from webapp.api import _resolve_stream_url_cached
+        result = await _resolve_stream_url_cached("2225694983")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_prefetch_skips_pure_digits(self):
+        from webapp.api import _prefetch_stream_url
+        result = await _prefetch_stream_url("1575091720")
+        assert result is None
