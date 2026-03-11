@@ -4,7 +4,7 @@ import {
   renamePlaylist, removeTrackFromPlaylist,
   type Playlist, type Track,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit } from "./Icons";
 
 interface Props {
   userId: number;
@@ -219,7 +219,7 @@ export function PlaylistView({ userId, onPlayTrack, accentColor = "var(--tg-them
             onKeyDown={(e: any) => { if (e.key === "Enter") handleCreate(); }}
             style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "transparent", color: textColor, fontSize: 14, outline: "none" }} />
           <button onClick={handleCreate} style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>OK</button>
-          <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "8px 12px", borderRadius: 10, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}>✕</button>
+          <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "8px 12px", borderRadius: 10, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}><IconClose size={14} /></button>
         </div>
       )}
 
@@ -241,7 +241,7 @@ export function PlaylistView({ userId, onPlayTrack, accentColor = "var(--tg-them
                   onKeyDown={(e: any) => { if (e.key === "Enter") handleRename(p.id); }}
                   style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "transparent", color: textColor, fontSize: 14, outline: "none" }} />
                 <button onClick={() => handleRename(p.id)} style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✓</button>
-                <button onClick={() => setEditingId(null)} style={{ padding: "8px 10px", borderRadius: 10, border: cardBorder, background: "transparent", color: hintColor, fontSize: 12, cursor: "pointer" }}>✕</button>
+                <button onClick={() => setEditingId(null)} style={{ padding: "8px 10px", borderRadius: 10, border: cardBorder, background: "transparent", color: hintColor, fontSize: 12, cursor: "pointer" }}><IconClose size={14} /></button>
               </div>
             ) : (
               <div onClick={() => { haptic("light"); setSelectedId(p.id); setSelectedName(p.name); }}
@@ -255,9 +255,9 @@ export function PlaylistView({ userId, onPlayTrack, accentColor = "var(--tg-them
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button onClick={(e) => { e.stopPropagation(); haptic("light"); setEditingId(p.id); setEditName(p.name); }}
-                    style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: hintColor, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✎</button>
+                    style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: hintColor, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><IconEdit size={14} /></button>
                   <button onClick={(e) => { e.stopPropagation(); haptic("light"); setConfirmDeleteId(p.id); }}
-                    style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: "#ef5350", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                    style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", color: "#ef5350", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><IconClose size={14} /></button>
                 </div>
               </div>
             )}
@@ -266,8 +266,8 @@ export function PlaylistView({ userId, onPlayTrack, accentColor = "var(--tg-them
       )}
 
       {currentTrack && playlists.length > 0 && (
-        <div style={{ marginTop: 16, padding: 12, borderRadius: 14, background: warm ? "rgba(255, 213, 79, 0.06)" : "rgba(124, 77, 255, 0.06)", border: warm ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(124,77,255,0.1)", fontSize: 12, color: hintColor, textAlign: "center" }}>
-          Чтобы добавить трек в плейлист — нажми ➕ в плеере
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 14, background: warm ? "rgba(255, 213, 79, 0.06)" : "rgba(124, 77, 255, 0.06)", border: warm ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(124,77,255,0.1)", fontSize: 12, color: hintColor, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+          Чтобы добавить трек в плейлист — нажми <IconPlus size={12} /> в плеере
         </div>
       )}
     </div>

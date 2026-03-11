@@ -8,7 +8,7 @@ import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic } from "./components/Icons";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
@@ -1449,7 +1449,11 @@ export function App() {
                 letterSpacing: 2,
                 textTransform: "uppercase",
                 textAlign: "center",
-              }}>🚀 Скоро запуск!</div>
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}><IconRocket size={16} /> Скоро запуск!</div>
               {/* Tagline */}
               <p style={{
                 fontSize: 15,
@@ -1482,7 +1486,7 @@ export function App() {
                 padding: "18px 14px",
                 backdropFilter: "blur(16px)",
               }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>🎧</div>
+                <div style={{ marginBottom: 8, color: isTequila ? "#ffd54f" : "#a78bfa" }}><IconHeadphones size={28} /></div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Синхрон</div>
                 <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
                   Все слышат одну музыку в один момент. Идеальная синхронизация.
@@ -1498,7 +1502,7 @@ export function App() {
                 padding: "18px 14px",
                 backdropFilter: "blur(16px)",
               }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>🏠</div>
+                <div style={{ marginBottom: 8, color: isTequila ? "#ffd54f" : "#a78bfa" }}><IconHome size={28} /></div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Комнаты</div>
                 <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
                   Создай свою или присоединись по коду. До 50 человек.
@@ -1514,7 +1518,7 @@ export function App() {
                 padding: "18px 14px",
                 backdropFilter: "blur(16px)",
               }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>📊</div>
+                <div style={{ marginBottom: 8, color: isTequila ? "#ffd54f" : "#a78bfa" }}><IconChart size={28} /></div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Голосование</div>
                 <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
                   Голосуй за следующий трек. Демократия в действии!
@@ -1530,7 +1534,7 @@ export function App() {
                 padding: "18px 14px",
                 backdropFilter: "blur(16px)",
               }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>💬</div>
+                <div style={{ marginBottom: 8, color: isTequila ? "#ffd54f" : "#a78bfa" }}><IconChat size={28} /></div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Живой чат</div>
                 <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
                   Общайся с участниками в реальном времени.
@@ -1561,18 +1565,17 @@ export function App() {
               }}>Расширенные возможности</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {[
-                  { icon: "🎤", title: "DJ Mode", desc: "Управляй очередью как диджей. Микшируй треки, используй переходы." },
-                  { icon: "🤖", title: "AI Auto-DJ", desc: "Умный подбор следующих треков на основе вкусов участников." },
-                  { icon: "🔥", title: "Реакции", desc: "Отправляй огонь, сердечки и другие эмоции прямо во время трека." },
-                  { icon: "📺", title: "TV Mode", desc: "Выведи пати на большой экран. Идеально для вечеринок." },
-                  { icon: "🎭", title: "Stage Mode", desc: "Полноэкранный режим с визуализацией и текстом песен." },
-                  { icon: "👑", title: "Co-host", desc: "Назначай соведущих с правами управления плейлистом." },
-                  { icon: "📋", title: "История", desc: "Сохраняй плейлисты пати и смотри статистику после." },
-                  { icon: "🔗", title: "Шеринг", desc: "Приглашай друзей одной ссылкой или QR-кодом." },
+                  { icon: <IconMic size={18} />, title: "DJ Mode", desc: "Управляй очередью как диджей. Микшируй треки, используй переходы." },
+                  { icon: <IconRobot size={18} />, title: "AI Auto-DJ", desc: "Умный подбор следующих треков на основе вкусов участников." },
+                  { icon: <IconFire size={18} />, title: "Реакции", desc: "Отправляй огонь, сердечки и другие эмоции прямо во время трека." },
+                  { icon: <IconTV size={18} />, title: "TV Mode", desc: "Выведи пати на большой экран. Идеально для вечеринок." },
+                  { icon: <IconStage size={18} />, title: "Stage Mode", desc: "Полноэкранный режим с визуализацией и текстом песен." },
+                  { icon: <IconCrown size={18} />, title: "Co-host", desc: "Назначай соведущих с правами управления плейлистом." },
+                  { icon: <IconClipboard size={18} />, title: "История", desc: "Сохраняй плейлисты пати и смотри статистику после." },
+                  { icon: <IconLink size={18} />, title: "Шеринг", desc: "Приглашай друзей одной ссылкой или QR-кодом." },
                 ].map((f, i) => (
                   <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                     <div style={{
-                      fontSize: 20,
                       width: 32,
                       height: 32,
                       borderRadius: 10,
@@ -1583,6 +1586,7 @@ export function App() {
                       alignItems: "center",
                       justifyContent: "center",
                       flexShrink: 0,
+                      color: isTequila ? "#ffd54f" : "#a78bfa",
                     }}>{f.icon}</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 2 }}>{f.title}</div>
@@ -1604,8 +1608,8 @@ export function App() {
               maxWidth: 400,
               width: "100%",
             }}>
-              <div style={{ fontSize: 13, color: isTequila ? "#fef0e0" : "rgba(255,255,255,0.85)", marginBottom: 4 }}>
-                🔔 Следи за обновлениями!
+              <div style={{ fontSize: 13, color: isTequila ? "#fef0e0" : "rgba(255,255,255,0.85)", marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                <IconBell size={14} /> Следи за обновлениями!
               </div>
               <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.5)" }}>
                 Party Mode уже на финальном этапе тестирования

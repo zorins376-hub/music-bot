@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, searchTracks, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
-import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus, IconShare, IconImage, IconWave, IconSimilar, IconTrending, IconMoon, IconSpinner } from "./Icons";
+import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus, IconShare, IconImage, IconWave, IconSimilar, IconTrending, IconMoon, IconSpinner, IconFire } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -1275,7 +1275,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             border: `1px solid ${borderGold}`,
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold }}>🔥 Тренды</div>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold, display: "flex", alignItems: "center", gap: 4 }}><IconFire size={14} /> Тренды</div>
               <button
                 onClick={() => setShowTrending(false)}
                 style={{
@@ -1928,7 +1928,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           border: `1px solid ${accentColorAlpha}`,
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor }}>🔥 Тренды</div>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor, display: "flex", alignItems: "center", gap: 4 }}><IconFire size={14} /> Тренды</div>
             <button
               onClick={() => setShowTrending(false)}
               style={{

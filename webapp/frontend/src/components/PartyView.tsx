@@ -4,7 +4,7 @@ import {
   clearPartyChat, createParty, deletePartyChatMessage, fetchLyrics, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, sendPartyChat, syncPartyPlayback, updatePartyMemberRole,
   type Party, type PartyRecap, type Track,
 } from "../api";
-import { IconMusic, IconSpinner, IconSearch, IconPlus } from "./Icons";
+import { IconMusic, IconSpinner, IconSearch, IconPlus, IconUsers, IconTV, IconHeadphones, IconUpload, IconSparkles, IconRobot, IconSave, IconFlag, IconTrophy, IconFire, IconHeartFilled, IconBolt, IconDisco, IconPicture, IconClipboard, IconClock, IconClose, IconParty, IconSync } from "./Icons";
 
 interface Props {
   userId: number;
@@ -617,54 +617,54 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 padding: "6px 11px", borderRadius: 12, fontSize: 11, fontWeight: 800,
                 background: "rgba(0,0,0,0.22)", color: "#fff", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14)",
               }}>
-                👥 {party.member_count} online
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><IconUsers size={13} /> {party.member_count} online</span>
               </div>
             </div>
             <div style={{ fontSize: 12, color: "rgba(24,13,0,0.7)", marginTop: 6, lineHeight: 1.45 }}>
-              {readOnlyMode ? "📺 Режим витрины — только просмотр live room" : (isDJ ? "🎧 Ты DJ — управляй очередью" : "Добавляй треки в общую очередь")}
+<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{readOnlyMode ? <><IconTV size={13} /> Режим витрины — только просмотр live room</> : (isDJ ? <><IconHeadphones size={13} /> Ты DJ — управляй очередью</> : "Добавляй треки в общую очередь")}</span>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.16)", color: "#fff", fontSize: 11, fontWeight: 700 }}>#{party.invite_code}</div>
-              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>🎶 {party.tracks.length} треков</div>
-              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>{readOnlyMode ? "📺 read-only" : (isDJ ? "👑 DJ mode" : "✨ listener")}</div>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconMusic size={13} /> {party.tracks.length} треков</div>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}>{readOnlyMode ? <><IconTV size={12} /> read-only</> : (isDJ ? <><IconTrophy size={12} /> DJ mode</> : <><IconSparkles size={12} /> listener</>)}</div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={handleShare} style={{
                 flex: 1, padding: "10px 0", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
                 background: "rgba(0,0,0,0.22)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
-              }}>📤 Поделиться</button>
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6
+              }}><IconUpload size={14} /> Поделиться</button>
               <button onClick={handleShareTv} style={{
                 padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-              }}>📺 Share TV</button>
+                background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+              }}><IconTV size={14} /> Share TV</button>
               {currentTrack && (
                 <button onClick={() => setShowStageMode(true)} style={{
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>✨ Stage</button>
+                  background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+                }}><IconSparkles size={14} /> Stage</button>
               )}
               {currentTrack && (
                 <button onClick={() => setShowTvMode(true)} style={{
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>📺 TV</button>
+                  background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+                }}><IconTV size={14} /> TV</button>
               )}
               {canControl && (
                 <button onClick={handleAutoDj} style={{
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>🤖 Auto-DJ</button>
+                  background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+                }}><IconRobot size={14} /> Auto-DJ</button>
               )}
               {!readOnlyMode && <button onClick={handleSavePlaylist} style={{
                 padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-              }}>💾 Save</button>}
+                background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+              }}><IconSave size={14} /> Save</button>}
               {isDJ && (
                 <button onClick={handleClose} style={{
                   padding: "10px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(229,57,53,0.82)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>🏁 Закрыть</button>
+                  background: "rgba(229,57,53,0.82)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
+                }}><IconFlag size={14} /> Закрыть</button>
               )}
             </div>
           </div>
@@ -926,7 +926,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               <button onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }} style={{
                 padding: "8px 12px", borderRadius: 10, border: cardBorder,
                 background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer",
-              }}>✕</button>
+              }}><IconClose size={16} /></button>
             </div>
             {searching && <div style={{ textAlign: "center", padding: 12 }}><IconSpinner size={18} color={hintColor} /></div>}
             {!searching && !searchResults.length && searchQuery.trim() && (
@@ -980,7 +980,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                       width: 28, height: 28, borderRadius: 8, border: "none",
                       background: "transparent", color: "#ef5350", fontSize: 14, cursor: "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>✕</button>
+                    }}><IconClose size={14} /></button>
                   </div>
                 )}
               </div>
@@ -1010,7 +1010,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
 
         {party.tracks.length === 0 && (
           <div style={{ ...glassCard, textAlign: "center", color: hintColor, padding: 32, fontSize: 14, borderRadius: 18 }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>🎵</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}><IconMusic size={32} /></div>
             <div style={{ color: textColor, fontWeight: 700, marginBottom: 4 }}>Очередь пока пустая</div>
             Очередь пуста — добавь первый трек!
           </div>
@@ -1035,8 +1035,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span>Party recap</span>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button onClick={handleDownloadRecapPoster} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>🖼 Poster</button>
-                <button onClick={handleShareRecap} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📤 Share recap</button>
+                <button onClick={handleDownloadRecapPoster} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" , display: "flex", alignItems: "center", gap: 4 }}><IconPicture size={12} /> Poster</button>
+                <button onClick={handleShareRecap} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" , display: "flex", alignItems: "center", gap: 4 }}><IconUpload size={12} /> Share recap</button>
               </div>
             </div>
             <div style={{
@@ -1059,9 +1059,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 11, fontWeight: 800 }}>#{party.invite_code}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 }}>🎶 {recap.total_tracks} tracks</div>
-                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 }}>👥 {recap.total_members} members</div>
-                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 }}>⏱ {formatDuration(recap.total_duration)}</div>
+                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconMusic size={14} /> {recap.total_tracks} tracks</div>
+                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconUsers size={14} /> {recap.total_members} members</div>
+                  <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: textColor, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}><IconClock size={14} /> {formatDuration(recap.total_duration)}</div>
                 </div>
                 <div style={{ color: hintColor, fontSize: 12, lineHeight: 1.5 }}>
                   {recap.top_artists[0] ? <>Главный вайб вечера — <span style={{ color: textColor, fontWeight: 700 }}>{recap.top_artists[0].label}</span>.</> : "Вечеринка собрала свой особый вайб."} {recap.top_contributors[0] ? <>Главный куратор — <span style={{ color: textColor, fontWeight: 700 }}>{recap.top_contributors[0].label}</span>.</> : null}
@@ -1074,12 +1074,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
               {recap.top_artists[0] && (
-                <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 }}>🏆 {recap.top_artists[0].label}</div>
+                <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconTrophy size={12} /> {recap.top_artists[0].label}</div>
               )}
               {recap.top_contributors[0] && (
-                <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 }}>👑 {recap.top_contributors[0].label}</div>
+                <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconTrophy size={12} /> {recap.top_contributors[0].label}</div>
               )}
-              <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 }}>🔥 {recap.events_count} событий</div>
+              <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconFire size={12} /> {recap.events_count} событий</div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 10 }}>
               <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Tracks</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_tracks}</div></div>
@@ -1149,7 +1149,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             <div style={{ position: "relative", zIndex: 1, minHeight: "100vh", padding: "18px 16px 28px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
                 <div style={{ color: hintColor, fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase" }}>Party Stage</div>
-                <button onClick={() => setShowStageMode(false)} style={{ padding: "9px 12px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕ Close</button>
+                <button onClick={() => setShowStageMode(false)} style={{ padding: "9px 12px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><IconClose size={14} /> Close</button>
               </div>
 
               <div>
@@ -1261,7 +1261,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   <div style={{ color: hintColor, fontSize: 11, fontWeight: 800, letterSpacing: 1.6, textTransform: "uppercase" }}>Party TV</div>
                   <div style={{ color: textColor, fontSize: 24, fontWeight: 800 }}>{party.name}</div>
                 </div>
-                <button onClick={() => setShowTvMode(false)} style={{ padding: "10px 14px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕ Close</button>
+                <button onClick={() => setShowTvMode(false)} style={{ padding: "10px 14px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><IconClose size={14} /> Close</button>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)", gap: 24 }}>
                 <div style={{ ...glassCard, borderRadius: 28, padding: 20 }}>
@@ -1356,14 +1356,14 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             onInput={(e: any) => setNewName(e.target.value)}
             onKeyDown={(e: any) => { if (e.key === "Enter") handleCreate(); }}
             style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none" }} />
-          <button onClick={handleCreate} style={{ padding: "10px 16px", borderRadius: 12, border: "none", background: partyGradient, color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>🎉 Go</button>
-          <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}>✕</button>
+          <button onClick={handleCreate} style={{ padding: "10px 16px", borderRadius: 12, border: "none", background: partyGradient, color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><IconParty size={14} /> Go</button>
+          <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}><IconClose size={14} /></button>
         </div>
       )}
 
       {myParties.length === 0 && !showCreate ? (
         <div style={{ ...glassCard, textAlign: "center", padding: 32, borderRadius: 20 }}>
-          <div style={{ width: 68, height: 68, borderRadius: 20, margin: "0 auto 14px", background: partyGradient, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, boxShadow: "0 14px 28px rgba(255,145,0,0.18)" }}>🎉</div>
+          <div style={{ width: 68, height: 68, borderRadius: 20, margin: "0 auto 14px", background: partyGradient, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 14px 28px rgba(255,145,0,0.18)" }}><IconParty size={32} color="#000" /></div>
           <div style={{ fontSize: 16, color: textColor, fontWeight: 700, marginBottom: 8 }}>У тебя пока нет пати</div>
           <div style={{ fontSize: 12, color: hintColor }}>Создай пати и слушай музыку вместе с друзьями!</div>
         </div>
@@ -1376,12 +1376,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             <div style={{
               width: 42, height: 42, borderRadius: 12, marginRight: 12, flexShrink: 0,
               background: partyGradient, display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 20, boxShadow: "0 10px 22px rgba(255,145,0,0.18)",
-            }}>🎉</div>
+              boxShadow: "0 10px 22px rgba(255,145,0,0.18)",
+            }}><IconParty size={20} color="#000" /></div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: textColor }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: hintColor }}>
-                {p.tracks.length} треков · 👥 {p.member_count} online
+              <div style={{ fontSize: 12, color: hintColor, display: "flex", alignItems: "center", gap: 4 }}>
+                {p.tracks.length} треков · <IconUsers size={12} /> {p.member_count} online
               </div>
             </div>
             <div style={{ fontSize: 12, color: hintColor }}>
@@ -1391,8 +1391,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
         ))
       )}
 
-      <div style={{ marginTop: 16, padding: 14, borderRadius: 16, ...softCard, fontSize: 12, color: hintColor, textAlign: "center" }}>
-        Или присоединись по ссылке от друга — треки синхронизируются в реальном времени 🔄
+      <div style={{ marginTop: 16, padding: 14, borderRadius: 16, ...softCard, fontSize: 12, color: hintColor, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        Или присоединись по ссылке от друга — треки синхронизируются в реальном времени <IconSync size={12} />
       </div>
     </div>
   );
