@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
-import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, type Track } from "../api";
+import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, searchTracks, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
 import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus } from "./Icons";
 
@@ -262,8 +262,10 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
     setIsAiPlaylistLoading(true);
     haptic("medium");
     try {
-      const results = await generateAiPlaylist(aiPrompt.trim(), 10);
-      setAiPlaylistTracks(results);
+      const prompt = aiPrompt.trim();
+      const results = await generateAiPlaylist(prompt, 10);
+      const safeResults = results.length > 0 ? results : await searchTracks(prompt, 10);
+      setAiPlaylistTracks(safeResults);
       setShowAiPlaylist(true);
     } catch { setAiPlaylistTracks([]); }
     setIsAiPlaylistLoading(false);
@@ -1268,7 +1270,24 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             backdropFilter: "blur(16px)",
             border: `1px solid ${borderGold}`,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold, marginBottom: 10 }}>🔥 Тренды</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold }}>🔥 Тренды</div>
+              <button
+                onClick={() => setShowTrending(false)}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 12,
+                  border: `1px solid ${gold}55`,
+                  background: "rgba(255,213,79,0.08)",
+                  color: gold,
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                Скрыть
+              </button>
+            </div>
             <button onClick={() => handlePlayAll(trendingTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${gold}55`, background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))", color: gold, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
             {trendingTracks.map((t, i) => (
               <button
@@ -1877,7 +1896,24 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           backdropFilter: "blur(16px)",
           border: `1px solid ${accentColorAlpha}`,
         }}>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor, marginBottom: 10 }}>🔥 Тренды</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor }}>🔥 Тренды</div>
+            <button
+              onClick={() => setShowTrending(false)}
+              style={{
+                padding: "5px 10px",
+                borderRadius: 12,
+                border: `1px solid ${accentColor}66`,
+                background: `linear-gradient(135deg, ${accentColorAlpha}, rgba(124,77,255,0.08))`,
+                color: accentColor,
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Скрыть
+            </button>
+          </div>
           <button onClick={() => handlePlayAll(trendingTracks)} style={{ marginBottom: 8, padding: "6px 14px", borderRadius: 14, border: `1px solid ${accentColor}44`, background: `linear-gradient(135deg, ${accentColorAlpha}, rgba(124,77,255,0.08))`, color: accentColor, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Играть все</button>
           {trendingTracks.map((t, i) => (
             <button
