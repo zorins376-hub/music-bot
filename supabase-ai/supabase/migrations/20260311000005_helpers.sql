@@ -2,6 +2,8 @@
 -- Migration 005: Helper functions for Edge Functions
 -- ═══════════════════════════════════════════════════════════════════════════════
 
+set search_path to public, extensions;
+
 -- ── Increment downloads atomically ──────────────────────────────────────────────
 create or replace function increment_downloads(p_track_id bigint)
 returns void
@@ -13,7 +15,7 @@ $$;
 
 -- ── Match tracks by embedding vector (for AI playlist) ─────────────────────────
 create or replace function match_tracks_by_embedding(
-    query_embedding extensions.vector(1536),
+    query_embedding vector(1536),
     match_threshold double precision default 0.3,
     match_count int default 10
 )
@@ -28,6 +30,7 @@ returns table (
     similarity  double precision
 )
 language sql stable
+set search_path = public, extensions
 as $$
     select
         t.id,
@@ -37,12 +40,12 @@ as $$
         t.genre,
         t.duration,
         t.cover_url,
-        1.0 - (t.embedding extensions.<=> query_embedding) as similarity
+        1.0 - (t.embedding <=> query_embedding) as similarity
     from tracks t
     where t.embedding is not null
       and t.file_id is not null
-      and 1.0 - (t.embedding extensions.<=> query_embedding) > match_threshold
-    order by t.embedding extensions.<=> query_embedding
+      and 1.0 - (t.embedding <=> query_embedding) > match_threshold
+    order by t.embedding <=> query_embedding
     limit match_count;
 $$;
 

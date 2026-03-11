@@ -5,9 +5,8 @@
 -- All computation happens in PostgreSQL — fast, no external ML runtime needed
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- ── Helper: cosine similarity between two vectors ───────────────────────────────
--- pgvector provides <=> (cosine distance), we convert to similarity = 1 - distance
--- This is used internally by the scoring functions.
+-- Make vector type and <=> operator available without schema prefix
+set search_path to public, extensions;
 
 
 -- ═════════════════════════════════════════════════════════════════════════════════
@@ -52,9 +51,10 @@ returns table (
     algo          text
 )
 language plpgsql stable
+set search_path = public, extensions
 as $$
 declare
-    v_taste      extensions.vector(1536);
+    v_taste      vector(1536);
     v_genres     text[];
     v_hours      smallint[];
     v_hour       smallint;
@@ -111,7 +111,7 @@ begin
           )
         order by
             case when v_has_embed and t.embedding is not null
-                 then 1.0 - (t.embedding extensions.<=> v_taste)
+                 then 1.0 - (t.embedding <=> v_taste)
                  else t.downloads::double precision / v_max_dl
             end desc
         limit 200
@@ -129,7 +129,7 @@ begin
 
             -- Embedding similarity (0..1)
             case when v_has_embed and c.embedding is not null
-                 then greatest(0, 1.0 - (c.embedding extensions.<=> v_taste))
+                 then greatest(0, 1.0 - (c.embedding <=> v_taste))
                  else 0.5
             end as s_embed,
 
@@ -204,13 +204,14 @@ $$;
 create or replace function update_user_profile(p_user_id bigint)
 returns void
 language plpgsql
+set search_path = public, extensions
 as $$
 declare
     v_genres      text[];
     v_artists     text[];
     v_avg_bpm     smallint;
     v_hours       smallint[];
-    v_taste       extensions.vector(1536);
+    v_taste       vector(1536);
     v_play_count  int;
     v_like_count  int;
     v_skip_count  int;
@@ -278,7 +279,7 @@ begin
     ) sub;
 
     -- ── Taste embedding: avg of embeddings of liked/played tracks ───────
-    select avg(t.embedding)::extensions.vector(1536)
+    select avg(t.embedding)::vector(1536)
     into v_taste
     from listening_history lh
     join tracks t on t.id = lh.track_id
@@ -360,6 +361,7 @@ returns table (
     similarity    double precision
 )
 language sql stable
+set search_path = public, extensions
 as $$
     with src as (
         select embedding from tracks where id = p_track_id
@@ -370,13 +372,13 @@ as $$
         t.title,
         t.artist,
         t.genre,
-        1.0 - (t.embedding extensions.<=> src.embedding) as similarity
+        1.0 - (t.embedding <=> src.embedding) as similarity
     from tracks t, src
     where t.id != p_track_id
       and t.embedding is not null
       and src.embedding is not null
       and t.file_id is not null
-    order by t.embedding extensions.<=> src.embedding
+    order by t.embedding <=> src.embedding
     limit p_limit;
 $$;
 

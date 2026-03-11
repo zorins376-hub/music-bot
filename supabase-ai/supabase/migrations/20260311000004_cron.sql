@@ -3,7 +3,7 @@
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- Recalculate profiles for active users every 4 hours
-select extensions.cron_schedule(
+select cron.schedule(
     'update-active-profiles',
     '0 */4 * * *',  -- every 4 hours
     $$
@@ -15,11 +15,11 @@ select extensions.cron_schedule(
 
 -- Trigger embedding generation for tracks without embeddings (every 10 min)
 -- This calls the Edge Function via pg_net
-select extensions.cron_schedule(
+select cron.schedule(
     'embed-new-tracks',
     '*/10 * * * *',  -- every 10 minutes
     $$
-    select extensions.http_post(
+    select net.http_post(
         url := current_setting('app.supabase_url') || '/functions/v1/embed-tracks',
         headers := jsonb_build_object(
             'Authorization', 'Bearer ' || current_setting('app.service_role_key'),
@@ -31,7 +31,7 @@ select extensions.cron_schedule(
 );
 
 -- Clean old recommendation logs (older than 30 days)
-select extensions.cron_schedule(
+select cron.schedule(
     'cleanup-reclog',
     '0 3 * * *',  -- daily at 3 AM UTC
     $$
