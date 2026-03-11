@@ -1047,8 +1047,13 @@ export function App() {
         display: "flex",
         gap: isTequila ? 5 : 8,
         marginBottom: isTequila ? 4 : 12,
-        justifyContent: "center",
         alignItems: "center",
+        overflowX: "auto",
+        overflowY: "hidden",
+        WebkitOverflowScrolling: "touch",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
+        whiteSpace: "nowrap",
         ...(isTequila ? {
           padding: "6px 8px",
           borderRadius: 22,
@@ -1056,10 +1061,11 @@ export function App() {
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
           border: "1px solid rgba(255, 213, 79, 0.12)",
-          maxWidth: 460,
+          maxWidth: "100%",
           margin: "0 auto 4px",
-          flexWrap: "wrap" as const,
-        } : {}),
+        } : {
+          padding: "0 8px",
+        }),
       }}>
         {(["player", "playlists", "party", "charts", "search"] as View[]).map((v) => (
           <button
@@ -1080,6 +1086,8 @@ export function App() {
               letterSpacing: isTequila ? 0.5 : 0,
               cursor: "pointer",
               transition: "all 0.4s ease",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
             }}
           >
             {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : v === "party" ? "🎉 Party" : v === "charts" ? (<><IconChart size={12} color="currentColor" /> Чарты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
@@ -1103,6 +1111,7 @@ export function App() {
             alignItems: "center",
             gap: 4,
             letterSpacing: 0.3,
+            flexShrink: 0,
           }}
         >
           {theme.id === "tequila" ? <IconLime size={14} /> :
