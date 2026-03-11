@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchParty, addPartyTrack, removePartyTrack, skipPartyTrack, closeParty,
   createParty, fetchMyParties, searchTracks,
-  type Party, type PartyTrack, type Track,
+  type Party, type Track,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner, IconSearch, IconPlus } from "./Icons";
+import { IconMusic, IconSpinner, IconSearch, IconPlus } from "./Icons";
 
 interface Props {
   userId: number;
@@ -35,12 +35,44 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
 
   const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
   const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
-  const cardBg = warm ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)";
-  const cardBorder = warm ? "1px solid rgba(255, 213, 79, 0.1)" : "1px solid rgba(255,255,255,0.06)";
+  const cardBorder = warm ? "1px solid rgba(255, 213, 79, 0.12)" : "1px solid rgba(255,255,255,0.07)";
   const activeBg = warm
-    ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))"
-    : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.3))`;
+    ? "linear-gradient(135deg, rgba(255,109,0,0.42), rgba(255,193,7,0.24))"
+    : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.34))`;
   const partyGradient = "linear-gradient(135deg, #ff6d00, #ff9100, #ffd600)";
+  const shellBg = warm
+    ? "linear-gradient(180deg, rgba(255,193,7,0.06), rgba(255,109,0,0.02) 26%, transparent 55%)"
+    : `linear-gradient(180deg, ${accentColor}18, rgba(255,255,255,0.01) 26%, transparent 55%)`;
+  const glassBg = warm
+    ? "linear-gradient(135deg, rgba(56, 34, 18, 0.84), rgba(26, 16, 10, 0.70))"
+    : "linear-gradient(135deg, rgba(36, 28, 58, 0.74), rgba(15, 18, 35, 0.72))";
+  const softBg = warm
+    ? "linear-gradient(135deg, rgba(70, 40, 22, 0.54), rgba(27, 18, 11, 0.44))"
+    : "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.025))";
+  const panelShadow = warm
+    ? "0 16px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,224,178,0.06)"
+    : "0 16px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08)";
+  const glassCard = {
+    background: glassBg,
+    border: cardBorder,
+    boxShadow: panelShadow,
+    backdropFilter: "blur(16px) saturate(135%)",
+    WebkitBackdropFilter: "blur(16px) saturate(135%)",
+  } as const;
+  const softCard = {
+    background: softBg,
+    border: cardBorder,
+    backdropFilter: "blur(14px) saturate(130%)",
+    WebkitBackdropFilter: "blur(14px) saturate(130%)",
+  } as const;
+  const sectionLabel = {
+    fontSize: 11,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: 1.6,
+    color: hintColor,
+    marginBottom: 8,
+  };
 
   const isDJ = party ? party.creator_id === userId : false;
 
@@ -49,7 +81,6 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
     setTimeout(() => setToast(null), 2500);
   };
 
-  // SSE connection for real-time updates
   const connectSSE = useCallback((code: string) => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -77,13 +108,8 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
         }
       } catch {}
     };
-
-    es.onerror = () => {
-      // Auto-reconnect handled by EventSource spec
-    };
   }, []);
 
-  // Load initial party or list
   useEffect(() => {
     if (initialCode) {
       setLoading(true);
@@ -106,7 +132,6 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
     };
   }, [initialCode, connectSSE]);
 
-  // Search with debounce
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -200,20 +225,18 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
     if (!party) return;
     haptic("light");
     const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
-    // Use Telegram's share functionality
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(`🎉 Заходи на пати «${party.name}»! Добавляй свои треки 🎶`)}`;
     window.open(shareUrl, "_blank");
   };
 
-  // Toast notification
   const Toast = toast ? (
     <div style={{
       position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
-      padding: "10px 20px", borderRadius: 14, fontSize: 13, fontWeight: 600,
-      background: warm ? "rgba(40, 25, 15, 0.9)" : "rgba(0,0,0,0.85)",
+      padding: "10px 20px", borderRadius: 14, fontSize: 13, fontWeight: 700,
+      background: warm ? "rgba(40, 25, 15, 0.92)" : "rgba(0,0,0,0.88)",
       color: "#fff", zIndex: 99999, backdropFilter: "blur(12px)",
       border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(255,255,255,0.1)",
-      animation: "fadeIn 0.3s ease",
+      boxShadow: "0 12px 28px rgba(0,0,0,0.24)",
     }}>
       {toast}
     </div>
@@ -223,77 +246,98 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
     return <div style={{ textAlign: "center", padding: 32 }}><IconSpinner size={24} color={hintColor} /></div>;
   }
 
-  // ── Party Room ──
   if (party) {
     const currentTrack = party.tracks.find(t => t.position === party.current_position);
     const upNext = party.tracks.filter(t => t.position > party.current_position).sort((a, b) => a.position - b.position);
     const played = party.tracks.filter(t => t.position < party.current_position).sort((a, b) => a.position - b.position);
 
     return (
-      <div>
+      <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
         {Toast}
 
-        {/* Party Header */}
         <div style={{
-          padding: "14px 16px", borderRadius: 18, marginBottom: 12,
+          padding: "18px 16px 16px", borderRadius: 22, marginBottom: 12,
           background: partyGradient, position: "relative", overflow: "hidden",
+          boxShadow: "0 18px 40px rgba(255,145,0,0.22)",
         }}>
+          <div style={{ position: "absolute", width: 120, height: 120, borderRadius: "50%", right: -28, top: -24, background: "rgba(255,255,255,0.18)", filter: "blur(10px)" }} />
+          <div style={{ position: "absolute", width: 96, height: 96, borderRadius: "50%", left: -20, bottom: -34, background: "rgba(255,255,255,0.12)", filter: "blur(8px)" }} />
           <div style={{ position: "relative", zIndex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#000" }}>{party.name}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, marginBottom: 8, background: "rgba(0,0,0,0.16)", color: "rgba(255,255,255,0.92)", fontSize: 10, fontWeight: 800, letterSpacing: 1.1, textTransform: "uppercase" }}>Luxury Party</div>
+                <div style={{ fontSize: 21, fontWeight: 800, color: "#180d00", lineHeight: 1.1 }}>{party.name}</div>
+              </div>
               <div style={{
-                padding: "4px 10px", borderRadius: 10, fontSize: 11, fontWeight: 700,
-                background: "rgba(0,0,0,0.2)", color: "#fff",
+                padding: "6px 11px", borderRadius: 12, fontSize: 11, fontWeight: 800,
+                background: "rgba(0,0,0,0.22)", color: "#fff", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14)",
               }}>
                 👥 {party.member_count} online
               </div>
             </div>
-            <div style={{ fontSize: 12, color: "rgba(0,0,0,0.6)", marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: "rgba(24,13,0,0.7)", marginTop: 6, lineHeight: 1.45 }}>
               {isDJ ? "🎧 Ты DJ — управляй очередью" : "Добавляй треки в общую очередь"}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.16)", color: "#fff", fontSize: 11, fontWeight: 700 }}>#{party.invite_code}</div>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>🎶 {party.tracks.length} треков</div>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 }}>{isDJ ? "👑 DJ mode" : "✨ listener"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={handleShare} style={{
-                flex: 1, padding: "8px 0", borderRadius: 12, border: "none",
-                background: "rgba(0,0,0,0.2)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                flex: 1, padding: "10px 0", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(0,0,0,0.22)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
               }}>📤 Поделиться</button>
               {isDJ && (
                 <button onClick={handleClose} style={{
-                  padding: "8px 14px", borderRadius: 12, border: "none",
-                  background: "rgba(229,57,53,0.8)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  padding: "10px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(229,57,53,0.82)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>🏁 Закрыть</button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Now Playing */}
         {currentTrack && (
           <div style={{
-            padding: "12px 14px", borderRadius: 16, marginBottom: 10,
+            padding: "14px 14px", borderRadius: 18, marginBottom: 12,
             background: warm ? "rgba(255, 109, 0, 0.15)" : "rgba(124, 77, 255, 0.12)",
             border: warm ? "1px solid rgba(255,109,0,0.25)" : "1px solid rgba(124,77,255,0.2)",
+            boxShadow: warm ? "0 14px 34px rgba(255,109,0,0.12)" : "0 14px 34px rgba(124,77,255,0.12)",
+            backdropFilter: "blur(16px) saturate(135%)",
+            WebkitBackdropFilter: "blur(16px) saturate(135%)",
           }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: hintColor, marginBottom: 6 }}>▶ Сейчас играет</div>
+            <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <span>▶ Сейчас играет</span>
+              <span style={{ color: warm ? "#ffd54f" : accentColor, fontSize: 10 }}>{isDJ ? "DJ control" : "Live sync"}</span>
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{
-                width: 50, height: 50, borderRadius: 12, overflow: "hidden", flexShrink: 0,
+                width: 62, height: 62, borderRadius: 16, overflow: "hidden", flexShrink: 0,
                 background: warm ? "rgba(255,213,79,0.08)" : "rgba(124,77,255,0.08)",
+                boxShadow: "0 10px 20px rgba(0,0,0,0.18)",
               }}>
                 {currentTrack.cover_url ? <img src={currentTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={24} color={hintColor} /></div>}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{currentTrack.title}</div>
-                <div style={{ fontSize: 12, color: hintColor }}>{currentTrack.artist} · {currentTrack.added_by_name || "?"}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{currentTrack.title}</div>
+                <div style={{ fontSize: 12, color: hintColor, marginTop: 2 }}>{currentTrack.artist} · {currentTrack.added_by_name || "?"}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 7, flexWrap: "wrap" }}>
+                  <span style={{ padding: "4px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: hintColor, fontSize: 10, fontWeight: 700 }}>{currentTrack.duration_fmt}</span>
+                  <span style={{ padding: "4px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: hintColor, fontSize: 10, fontWeight: 700 }}>{currentTrack.source || "music"}</span>
+                </div>
               </div>
               <button onClick={() => { haptic("light"); onPlayTrack(currentTrack); }} style={{
-                padding: "8px 14px", borderRadius: 12, border: "none",
-                background: activeBg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                padding: "10px 14px", borderRadius: 14, border: "none",
+                background: activeBg, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                boxShadow: warm ? "0 10px 24px rgba(255,109,0,0.2)" : `0 10px 24px ${accentColor}33`,
               }}>▶</button>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button onClick={handleSkip} style={{
-                flex: 1, padding: "7px 0", borderRadius: 10, border: cardBorder,
-                background: "transparent", color: hintColor, fontSize: 12, cursor: "pointer",
+                flex: 1, padding: "9px 0", borderRadius: 12, border: cardBorder,
+                background: "rgba(255,255,255,0.03)", color: hintColor, fontSize: 12, cursor: "pointer", fontWeight: 700,
               }}>
                 {isDJ ? "⏭ Пропустить" : `⏭ Vote Skip (${currentTrack.skip_votes}/3)`}
               </button>
@@ -301,32 +345,28 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
           </div>
         )}
 
-        {/* Add Track button */}
         <button onClick={() => { haptic("light"); setShowSearch(true); }} style={{
-          width: "100%", padding: "12px 0", borderRadius: 14, border: cardBorder,
-          background: cardBg, color: textColor, fontSize: 14, fontWeight: 600,
+          width: "100%", padding: "14px 0", borderRadius: 16, border: cardBorder,
+          background: softBg, color: textColor, fontSize: 14, fontWeight: 700,
           cursor: "pointer", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          backdropFilter: warm ? "blur(12px)" : undefined,
+          backdropFilter: "blur(14px) saturate(130%)",
+          WebkitBackdropFilter: "blur(14px) saturate(130%)",
+          boxShadow: panelShadow,
         }}>
           <IconPlus size={16} color={warm ? "#ffd54f" : accentColor} /> Добавить трек
         </button>
 
-        {/* Search overlay */}
         {showSearch && (
-          <div style={{
-            padding: 12, borderRadius: 16, marginBottom: 10,
-            background: cardBg, border: cardBorder,
-            backdropFilter: warm ? "blur(12px)" : undefined,
-          }}>
+          <div style={{ padding: 12, borderRadius: 16, marginBottom: 10, ...glassCard }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <input
                 type="text" placeholder="Поиск треков..." value={searchQuery}
                 onInput={(e: any) => setSearchQuery(e.target.value)}
                 autoFocus
                 style={{
-                  flex: 1, padding: "8px 12px", borderRadius: 10,
+                  flex: 1, padding: "10px 12px", borderRadius: 12,
                   border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)",
-                  background: "transparent", color: textColor, fontSize: 14, outline: "none",
+                  background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none",
                 }}
               />
               <button onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }} style={{
@@ -335,16 +375,19 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
               }}>✕</button>
             </div>
             {searching && <div style={{ textAlign: "center", padding: 12 }}><IconSpinner size={18} color={hintColor} /></div>}
+            {!searching && !searchResults.length && searchQuery.trim() && (
+              <div style={{ textAlign: "center", padding: "14px 8px", color: hintColor, fontSize: 12 }}><IconSearch size={16} color={hintColor} /> <div style={{ marginTop: 6 }}>Ничего не найдено</div></div>
+            )}
             {searchResults.map((t) => (
               <div key={t.video_id} onClick={() => handleAddTrack(t)} style={{
-                display: "flex", alignItems: "center", padding: "8px 10px", borderRadius: 12, cursor: "pointer",
-                marginBottom: 4, background: "transparent",
+                display: "flex", alignItems: "center", padding: "10px 10px", borderRadius: 14, cursor: "pointer",
+                marginBottom: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)",
               }}>
-                <div style={{ width: 38, height: 38, borderRadius: 8, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)" }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={18} color={hintColor} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                  <div style={{ fontSize: 13, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{t.title}</div>
                   <div style={{ fontSize: 11, color: hintColor }}>{t.artist}</div>
                 </div>
                 <IconPlus size={16} color={warm ? "#ffd54f" : accentColor} />
@@ -353,26 +396,23 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
           </div>
         )}
 
-        {/* Up Next */}
         {upNext.length > 0 && (
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: hintColor, marginBottom: 6 }}>
-              Далее · {upNext.length} треков
-            </div>
-            {upNext.map((t) => (
+            <div style={sectionLabel}>Далее · {upNext.length} треков</div>
+            {upNext.map((t, idx) => (
               <div key={t.video_id} style={{
-                display: "flex", alignItems: "center", padding: "10px 12px", borderRadius: 14,
-                background: cardBg, border: cardBorder, marginBottom: 4, cursor: "pointer",
-                backdropFilter: warm ? "blur(12px)" : undefined,
+                display: "flex", alignItems: "center", padding: "12px 12px", borderRadius: 16,
+                ...softCard, marginBottom: 6, cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
               }} onClick={() => { haptic("light"); onPlayTrack(t); }}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)" }}>
-                  {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={18} color={hintColor} /></div>}
+                <div style={{ width: 28, flexShrink: 0, marginRight: 8, color: hintColor, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{String(idx + 1).padStart(2, "0")}</div>
+                <div style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={18} color={hintColor} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                  <div style={{ fontSize: 13, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{t.title}</div>
                   <div style={{ fontSize: 11, color: hintColor }}>{t.artist} · {t.added_by_name || "?"}</div>
                 </div>
-                <div style={{ fontSize: 11, color: hintColor, flexShrink: 0 }}>{t.duration_fmt}</div>
+                <div style={{ fontSize: 11, color: hintColor, flexShrink: 0, padding: "4px 8px", borderRadius: 999, background: "rgba(255,255,255,0.05)" }}>{t.duration_fmt}</div>
                 {isDJ && (
                   <button onClick={(e: any) => { e.stopPropagation(); handleRemoveTrack(t.video_id); }} style={{
                     marginLeft: 8, width: 28, height: 28, borderRadius: 8, border: "none",
@@ -385,18 +425,15 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
           </div>
         )}
 
-        {/* Already played */}
         {played.length > 0 && (
-          <div style={{ opacity: 0.5 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: hintColor, marginBottom: 6 }}>
-              Уже играло · {played.length}
-            </div>
+          <div style={{ opacity: 0.58 }}>
+            <div style={sectionLabel}>Уже играло · {played.length}</div>
             {played.map((t) => (
               <div key={t.video_id} style={{
                 display: "flex", alignItems: "center", padding: "8px 10px", borderRadius: 12,
-                marginBottom: 4,
+                marginBottom: 4, background: "rgba(255,255,255,0.02)",
               }}>
-                <div style={{ width: 34, height: 34, borderRadius: 8, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.04)" : "rgba(124,77,255,0.04)" }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.04)" : "rgba(124,77,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={16} color={hintColor} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -409,58 +446,73 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
         )}
 
         {party.tracks.length === 0 && (
-          <div style={{ textAlign: "center", color: hintColor, padding: 32, fontSize: 14 }}>
-            Очередь пуста — добавь первый трек! 🎵
+          <div style={{ ...glassCard, textAlign: "center", color: hintColor, padding: 32, fontSize: 14, borderRadius: 18 }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>🎵</div>
+            <div style={{ color: textColor, fontWeight: 700, marginBottom: 4 }}>Очередь пока пустая</div>
+            Очередь пуста — добавь первый трек!
           </div>
         )}
       </div>
     );
   }
 
-  // ── Party List (no active party) ──
   return (
-    <div>
+    <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
       {Toast}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: textColor, letterSpacing: 0.4 }}>🎉 Party Playlists</div>
-        <button onClick={() => { haptic("light"); setShowCreate(true); }} style={{
-          padding: "6px 14px", borderRadius: 14, border: "none",
-          background: partyGradient, color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer",
-        }}>+ Создать</button>
+      <div style={{
+        ...glassCard,
+        borderRadius: 22,
+        padding: "18px 16px",
+        marginBottom: 12,
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        <div style={{ position: "absolute", width: 120, height: 120, borderRadius: "50%", right: -34, top: -40, background: warm ? "rgba(255,193,7,0.08)" : `${accentColor}22`, filter: "blur(10px)" }} />
+        <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: hintColor, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 8 }}>Party playlists</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: textColor, lineHeight: 1.1, marginBottom: 6 }}>Слушайте вместе. Выглядит дорого.</div>
+            <div style={{ fontSize: 13, color: hintColor, lineHeight: 1.45, maxWidth: 260 }}>Общая очередь, live-sync, приглашения друзьям и контроль DJ в одном люксовом экране.</div>
+          </div>
+          <button onClick={() => { haptic("light"); setShowCreate(true); }} style={{
+            padding: "9px 14px", borderRadius: 14, border: "none",
+            background: partyGradient, color: "#000", fontSize: 12, fontWeight: 800, cursor: "pointer",
+            boxShadow: "0 12px 24px rgba(255,145,0,0.18)", flexShrink: 0,
+          }}>+ Создать</button>
+        </div>
       </div>
 
       {showCreate && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, padding: 12, borderRadius: 16, background: cardBg, border: cardBorder }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, padding: 12, borderRadius: 18, ...glassCard }}>
           <input type="text" placeholder="Название пати" maxLength={100} value={newName}
             onInput={(e: any) => setNewName(e.target.value)}
             onKeyDown={(e: any) => { if (e.key === "Enter") handleCreate(); }}
-            style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "transparent", color: textColor, fontSize: 14, outline: "none" }} />
-          <button onClick={handleCreate} style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: partyGradient, color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>🎉 Go</button>
-          <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "8px 12px", borderRadius: 10, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}>✕</button>
+            style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none" }} />
+          <button onClick={handleCreate} style={{ padding: "10px 16px", borderRadius: 12, border: "none", background: partyGradient, color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>🎉 Go</button>
+          <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}>✕</button>
         </div>
       )}
 
       {myParties.length === 0 && !showCreate ? (
-        <div style={{ textAlign: "center", padding: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>🎉</div>
-          <div style={{ fontSize: 14, color: hintColor, marginBottom: 8 }}>У тебя пока нет пати</div>
+        <div style={{ ...glassCard, textAlign: "center", padding: 32, borderRadius: 20 }}>
+          <div style={{ width: 68, height: 68, borderRadius: 20, margin: "0 auto 14px", background: partyGradient, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, boxShadow: "0 14px 28px rgba(255,145,0,0.18)" }}>🎉</div>
+          <div style={{ fontSize: 16, color: textColor, fontWeight: 700, marginBottom: 8 }}>У тебя пока нет пати</div>
           <div style={{ fontSize: 12, color: hintColor }}>Создай пати и слушай музыку вместе с друзьями!</div>
         </div>
       ) : (
         myParties.map((p) => (
           <div key={p.id} onClick={() => handleJoinParty(p.invite_code)} style={{
-            display: "flex", alignItems: "center", padding: "12px 14px", borderRadius: 14, cursor: "pointer",
-            background: cardBg, border: cardBorder, marginBottom: 6,
-            backdropFilter: warm ? "blur(12px)" : undefined,
+            display: "flex", alignItems: "center", padding: "14px 14px", borderRadius: 18, cursor: "pointer",
+            ...softCard, marginBottom: 8, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
           }}>
             <div style={{
               width: 42, height: 42, borderRadius: 12, marginRight: 12, flexShrink: 0,
               background: partyGradient, display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 20,
+              fontSize: 20, boxShadow: "0 10px 22px rgba(255,145,0,0.18)",
             }}>🎉</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: textColor }}>{p.name}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: textColor }}>{p.name}</div>
               <div style={{ fontSize: 12, color: hintColor }}>
                 {p.tracks.length} треков · 👥 {p.member_count} online
               </div>
@@ -472,7 +524,7 @@ export function PartyView({ userId, onPlayTrack, accentColor = "var(--tg-theme-b
         ))
       )}
 
-      <div style={{ marginTop: 16, padding: 12, borderRadius: 14, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)", border: warm ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(124,77,255,0.1)", fontSize: 12, color: hintColor, textAlign: "center" }}>
+      <div style={{ marginTop: 16, padding: 14, borderRadius: 16, ...softCard, fontSize: 12, color: hintColor, textAlign: "center" }}>
         Или присоединись по ссылке от друга — треки синхронизируются в реальном времени 🔄
       </div>
     </div>
