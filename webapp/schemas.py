@@ -111,6 +111,26 @@ class PartyPlaybackStateSchema(BaseModel):
     updated_at: Optional[str] = None
 
 
+class PartyRecapStatSchema(BaseModel):
+    label: str
+    value: int = 0
+
+
+class PartyRecapSchema(BaseModel):
+    total_tracks: int = 0
+    total_members: int = 0
+    online_members: int = 0
+    total_duration: int = 0
+    total_skip_votes: int = 0
+    top_contributors: list[PartyRecapStatSchema] = []
+    top_artists: list[PartyRecapStatSchema] = []
+    events_count: int = 0
+
+
+class PartyReactionRequest(BaseModel):
+    emoji: str = "🔥"
+
+
 class PartySchema(BaseModel):
     id: int
     invite_code: str
@@ -125,6 +145,7 @@ class PartySchema(BaseModel):
     members: list[PartyMemberSchema] = []
     events: list[PartyEventSchema] = []
     playback: PartyPlaybackStateSchema = PartyPlaybackStateSchema()
+    current_reactions: dict[str, int] = {}
 
 
 class PartyAddTrackRequest(BaseModel):

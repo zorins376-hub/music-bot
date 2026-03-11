@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchParty, addPartyTrack, removePartyTrack, skipPartyTrack, closeParty,
-  createParty, fetchMyParties, playNextPartyTrack, reorderPartyTrack, savePartyAsPlaylist, searchTracks, syncPartyPlayback, updatePartyMemberRole,
-  type Party, type Track,
+  createParty, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, syncPartyPlayback, updatePartyMemberRole,
+  type Party, type PartyRecap, type Track,
 } from "../api";
 import { IconMusic, IconSpinner, IconSearch, IconPlus } from "./Icons";
 
@@ -31,6 +31,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  const [recap, setRecap] = useState<PartyRecap | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -182,6 +183,35 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       showToast("❌ Не удалось сохранить пати");
     }
   };
+
+  const handleReaction = async (emoji: string) => {
+    if (!party) return;
+    try {
+      const updated = await reactToPartyTrack(party.invite_code, emoji);
+      setParty(updated);
+    } catch {
+      showToast("❌ Не удалось отправить реакцию");
+    }
+  };
+
+  const handleAutoDj = async () => {
+    if (!party) return;
+    try {
+      const updated = await runPartyAutoDj(party.invite_code, 5);
+      setParty(updated);
+      showToast("🤖 AI Auto-DJ добавил новые треки");
+    } catch {
+      showToast("❌ Auto-DJ не смог подобрать треки");
+    }
+  };
+
+  useEffect(() => {
+    if (!party) {
+      setRecap(null);
+      return;
+    }
+    fetchPartyRecap(party.invite_code).then(setRecap).catch(() => {});
+  }, [party?.invite_code, party?.tracks.length, party?.events.length, party?.member_count]);
 
   useEffect(() => {
     if (initialCode) {
@@ -362,6 +392,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 background: "rgba(0,0,0,0.22)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
               }}>📤 Поделиться</button>
+              {canControl && (
+                <button onClick={handleAutoDj} style={{
+                  padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                }}>🤖 Auto-DJ</button>
+              )}
               <button onClick={handleSavePlaylist} style={{
                 padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
                 background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
@@ -448,6 +484,13 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   <button onClick={() => handleSyncPlayback("pause", currentTrack.position, 0)} style={{ padding: "9px 12px", borderRadius: 12, border: cardBorder, background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⏸ Пауза</button>
                 </>
               )}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+              {(["🔥", "❤️", "⚡", "🪩"] as const).map((emoji) => (
+                <button key={emoji} onClick={() => handleReaction(emoji)} style={{ padding: "7px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  {emoji} {party.current_reactions?.[emoji] || 0}
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -579,6 +622,28 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   <div style={{ fontSize: 10, color: hintColor, marginTop: 3 }}>{event.event_type}</div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {recap && (
+          <div style={{ ...glassCard, padding: 12, borderRadius: 18, marginTop: 12 }}>
+            <div style={sectionLabel}>Party recap</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 10 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Tracks</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_tracks}</div></div>
+              <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Members</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_members}</div></div>
+              <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Skips</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_skip_votes}</div></div>
+              <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Events</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.events_count}</div></div>
+            </div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <div style={{ fontSize: 11, color: hintColor, marginBottom: 6 }}>Top contributors</div>
+                {recap.top_contributors.map((item) => <div key={item.label} style={{ fontSize: 12, color: textColor, marginBottom: 4 }}>{item.label} · {item.value}</div>)}
+              </div>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <div style={{ fontSize: 11, color: hintColor, marginBottom: 6 }}>Top artists</div>
+                {recap.top_artists.map((item) => <div key={item.label} style={{ fontSize: 12, color: textColor, marginBottom: 4 }}>{item.label} · {item.value}</div>)}
+              </div>
             </div>
           </div>
         )}

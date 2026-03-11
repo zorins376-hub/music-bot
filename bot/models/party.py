@@ -125,3 +125,23 @@ class PartyPlaybackState(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class PartyReaction(Base):
+    """Emoji reactions for party tracks."""
+    __tablename__ = "party_reactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    party_id: Mapped[int] = mapped_column(Integer, ForeignKey("party_sessions.id", ondelete="CASCADE"), index=True)
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("party_tracks.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    emoji: Mapped[str] = mapped_column(String(16), default="🔥")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("track_id", "user_id", "emoji", name="uq_party_reactions_unique"),
+        Index("ix_party_reactions_track_emoji", "track_id", "emoji"),
+    )

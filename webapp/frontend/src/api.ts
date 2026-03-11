@@ -333,6 +333,22 @@ export interface PartyPlaybackState {
   updated_at?: string;
 }
 
+export interface PartyRecapStat {
+  label: string;
+  value: number;
+}
+
+export interface PartyRecap {
+  total_tracks: number;
+  total_members: number;
+  online_members: number;
+  total_duration: number;
+  total_skip_votes: number;
+  events_count: number;
+  top_contributors: PartyRecapStat[];
+  top_artists: PartyRecapStat[];
+}
+
 export interface Party {
   id: number;
   invite_code: string;
@@ -347,6 +363,7 @@ export interface Party {
   members: PartyMember[];
   events: PartyEvent[];
   playback: PartyPlaybackState;
+  current_reactions: Record<string, number>;
 }
 
 export async function createParty(name = "Party 🎉"): Promise<Party> {
@@ -451,6 +468,31 @@ export async function savePartyAsPlaylist(code: string): Promise<Playlist> {
     headers: getHeaders(),
   });
   if (!r.ok) throw new Error("Failed to save party as playlist");
+  return r.json();
+}
+
+export async function reactToPartyTrack(code: string, emoji: string): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/react`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ emoji }),
+  });
+  if (!r.ok) throw new Error("Failed to react");
+  return r.json();
+}
+
+export async function runPartyAutoDj(code: string, limit = 5): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/auto-dj?limit=${limit}`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to run Auto-DJ");
+  return r.json();
+}
+
+export async function fetchPartyRecap(code: string): Promise<PartyRecap> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/recap`, { headers: getHeaders() });
+  if (!r.ok) throw new Error("Failed to fetch recap");
   return r.json();
 }
 

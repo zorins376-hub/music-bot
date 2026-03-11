@@ -43,6 +43,9 @@ from webapp.schemas import (
     PartyMemberSchema,
     PartyPlaybackRequest,
     PartyPlaybackStateSchema,
+    PartyReactionRequest,
+    PartyRecapSchema,
+    PartyRecapStatSchema,
     PartyReorderRequest,
     PartyRoleUpdateRequest,
     PartySchema,
@@ -1495,7 +1498,7 @@ import time
 from datetime import datetime, timezone
 
 from bot.models.base import async_session
-from bot.models.party import PartyEvent, PartyMember, PartyPlaybackState, PartySession, PartyTrack, PartyTrackVote
+from bot.models.party import PartyEvent, PartyMember, PartyPlaybackState, PartyReaction, PartySession, PartyTrack, PartyTrackVote
 
 # In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
 _party_subscribers: dict[str, list[asyncio.Queue]] = {}
@@ -1627,6 +1630,7 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
     ).scalars().all()
     track_ids = [t.id for t in tracks]
     vote_counts: dict[int, int] = {}
+    reaction_counts: dict[str, int] = {}
     if track_ids:
         rows = await session.execute(
             select(PartyTrackVote.track_id, func.count())
@@ -1637,6 +1641,15 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
             .group_by(PartyTrackVote.track_id)
         )
         vote_counts = {track_id: count for track_id, count in rows.all()}
+
+    current_track = next((t for t in tracks if t.position == party.current_position), None)
+    if current_track is not None:
+        reaction_rows = await session.execute(
+            select(PartyReaction.emoji, func.count())
+            .where(PartyReaction.track_id == current_track.id)
+            .group_by(PartyReaction.emoji)
+        )
+        reaction_counts = {emoji: count for emoji, count in reaction_rows.all()}
 
     members = (
         await session.execute(
@@ -1704,6 +1717,7 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
             updated_by=playback.updated_by,
             updated_at=_iso_dt(playback.updated_at),
         ),
+        current_reactions=reaction_counts,
         tracks=[
             PartyTrackSchema(
                 video_id=t.video_id,
@@ -2263,6 +2277,189 @@ async def save_party_as_playlist(code: str, user: dict = Depends(get_current_use
 
     await _notify_party_state(code, "playlist_saved", {"playlist_name": f"Party • {party.name}"[:100]})
     return PlaylistSchema(id=playlist.id, name=playlist.name, track_count=cnt)
+
+
+@app.post("/api/party/{code}/react", response_model=PartySchema)
+async def react_to_party_track(code: str, body: PartyReactionRequest, user: dict = Depends(get_current_user)):
+    """Add a live emoji reaction to the current party track."""
+    emoji = (body.emoji or "🔥")[:8]
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        party = await _get_party_or_404(session, code)
+        await _ensure_party_member(session, party, user, mark_online=False)
+        current_track = (
+            await session.execute(
+                select(PartyTrack).where(
+                    PartyTrack.party_id == party.id,
+                    PartyTrack.position == party.current_position,
+                )
+            )
+        ).scalar_one_or_none()
+        if current_track is None:
+            raise HTTPException(status_code=400, detail="No active track")
+
+        existing = (
+            await session.execute(
+                select(PartyReaction).where(
+                    PartyReaction.track_id == current_track.id,
+                    PartyReaction.user_id == user["id"],
+                    PartyReaction.emoji == emoji,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                PartyReaction(
+                    party_id=party.id,
+                    track_id=current_track.id,
+                    user_id=user["id"],
+                    emoji=emoji,
+                )
+            )
+            await _record_party_event(
+                session,
+                party.id,
+                "reaction",
+                f"{user.get('first_name', 'User')} отреагировал(а) {emoji}",
+                actor_id=user["id"],
+                actor_name=user.get("first_name", "User"),
+                payload={"emoji": emoji, "video_id": current_track.video_id},
+            )
+            await session.commit()
+
+    await _notify_party_state(code, "reaction", {"emoji": emoji, "user_id": user["id"]})
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.post("/api/party/{code}/auto-dj", response_model=PartySchema)
+async def auto_dj_fill_party(code: str, limit: int = Query(default=5, ge=1, le=10), user: dict = Depends(get_current_user)):
+    """Auto-fill the party queue with AI recommendations based on the room vibe."""
+    async with async_session() as session:
+        from sqlalchemy import func, select
+
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ/co-host can run Auto-DJ")
+
+        tracks = (
+            await session.execute(
+                select(PartyTrack)
+                .where(PartyTrack.party_id == party.id)
+                .order_by(PartyTrack.position.desc())
+            )
+        ).scalars().all()
+        existing_ids = {t.video_id for t in tracks}
+        seed_track = next((t for t in tracks if t.position == party.current_position), None) or (tracks[0] if tracks else None)
+
+        suggestions: list[TrackSchema] = []
+        if seed_track is not None and settings.SUPABASE_AI_ENABLED:
+            suggestions = (await get_similar(seed_track.video_id, limit=limit * 2, user=user)).tracks
+        if not suggestions:
+            suggestions = (await get_wave(int(user["id"]), limit=limit * 2, mood=None, user=user)).tracks
+        if not suggestions and seed_track is not None:
+            from bot.services.downloader import search_tracks
+
+            raw_results = await search_tracks(f"{seed_track.artist} similar", max_results=limit * 2, source="youtube")
+            suggestions = [
+                TrackSchema(
+                    video_id=r.get("video_id", ""),
+                    title=r.get("title", "Unknown"),
+                    artist=r.get("artist", r.get("uploader", "Unknown")),
+                    duration=r.get("duration", 0),
+                    duration_fmt=r.get("duration_fmt", "0:00"),
+                    source=r.get("source", "youtube"),
+                    cover_url=r.get("cover_url"),
+                )
+                for r in raw_results
+                if r.get("video_id")
+            ]
+
+        max_pos = (await session.execute(select(func.coalesce(func.max(PartyTrack.position), -1)).where(PartyTrack.party_id == party.id))).scalar() or -1
+        added = 0
+        for suggestion in suggestions:
+            if suggestion.video_id in existing_ids:
+                continue
+            max_pos += 1
+            session.add(
+                PartyTrack(
+                    party_id=party.id,
+                    video_id=suggestion.video_id,
+                    title=suggestion.title,
+                    artist=suggestion.artist,
+                    duration=suggestion.duration,
+                    duration_fmt=suggestion.duration_fmt,
+                    source=suggestion.source,
+                    cover_url=suggestion.cover_url,
+                    added_by=user["id"],
+                    added_by_name="AI Auto-DJ",
+                    position=max_pos,
+                )
+            )
+            existing_ids.add(suggestion.video_id)
+            added += 1
+            if added >= limit:
+                break
+
+        if added == 0:
+            raise HTTPException(status_code=400, detail="Auto-DJ found no new tracks")
+
+        await _record_party_event(
+            session,
+            party.id,
+            "auto_dj",
+            f"{user.get('first_name', 'DJ')} включил(а) AI Auto-DJ (+{added} треков)",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+            payload={"added": added},
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "auto_dj", {"added": added})
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.get("/api/party/{code}/recap", response_model=PartyRecapSchema)
+async def get_party_recap(code: str, user: dict = Depends(get_current_user)):
+    """Return summary stats for a party session."""
+    async with async_session() as session:
+        from collections import Counter
+        from sqlalchemy import func, select
+
+        party = await _get_party_or_404(session, code)
+        await _ensure_party_member(session, party, user, mark_online=False)
+        tracks = (
+            await session.execute(
+                select(PartyTrack).where(PartyTrack.party_id == party.id)
+            )
+        ).scalars().all()
+        members = (
+            await session.execute(
+                select(PartyMember).where(PartyMember.party_id == party.id)
+            )
+        ).scalars().all()
+        events_count = (
+            await session.execute(select(func.count(PartyEvent.id)).where(PartyEvent.party_id == party.id))
+        ).scalar() or 0
+        skip_votes = (
+            await session.execute(select(func.count(PartyTrackVote.id)).where(PartyTrackVote.party_id == party.id, PartyTrackVote.vote_type == "skip"))
+        ).scalar() or 0
+
+        contributor_counter = Counter(t.added_by_name or "Unknown" for t in tracks)
+        artist_counter = Counter(t.artist or "Unknown" for t in tracks)
+        total_duration = sum(t.duration or 0 for t in tracks)
+
+        return PartyRecapSchema(
+            total_tracks=len(tracks),
+            total_members=len(members),
+            online_members=sum(1 for m in members if m.is_online),
+            total_duration=total_duration,
+            total_skip_votes=skip_votes,
+            events_count=events_count,
+            top_contributors=[PartyRecapStatSchema(label=label, value=value) for label, value in contributor_counter.most_common(3)],
+            top_artists=[PartyRecapStatSchema(label=label, value=value) for label, value in artist_counter.most_common(3)],
+        )
 
 
 @app.get("/api/party/{code}/events")

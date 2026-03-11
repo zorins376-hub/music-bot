@@ -985,9 +985,9 @@ rapidfuzz>=3.0.0
 | Invite / onboarding | ✅ DONE | invite_code + share link + luxury Party entry UI |
 | Member management UI | ✅ DONE | список участников + роль + promote/demote co-host из PartyView |
 | Save party as playlist | ✅ DONE | экспорт текущей очереди Party в обычный playlist пользователя |
-| Reactions on current track | ⏳ TODO | 🔥 ❤️ ⚡ live reactions на текущий трек |
-| AI Auto-DJ for Party | ⏳ TODO | auto-fill queue по вайбу комнаты и истории участников |
-| Party recap / shareable stats | ⏳ TODO | best tracks, joins, skips, total duration, shareable summary |
+| Reactions on current track | ✅ DONE | 🔥 ❤️ ⚡ 🪩 live reactions на текущий трек с live count в PartyView |
+| AI Auto-DJ for Party | ✅ DONE | auto-fill queue по current track / wave-reco / fallback search для DJ и co-host |
+| Party recap / shareable stats | ✅ DONE | summary stats: tracks, members, skips, events, top contributors и artists |
 
 ## 11.2 Реализуемые фичи
 

@@ -52,7 +52,7 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
     from bot.models.share_link import ShareLink  # noqa: F401
     from bot.models.artist_watchlist import ArtistWatchlist  # noqa: F401
     from bot.models.family_plan import FamilyPlan, FamilyMember, FamilyInvite  # noqa: F401
-    from bot.models.party import PartyEvent, PartyMember, PartyPlaybackState, PartySession, PartyTrack, PartyTrackVote  # noqa: F401
+    from bot.models.party import PartyEvent, PartyMember, PartyPlaybackState, PartyReaction, PartySession, PartyTrack, PartyTrackVote  # noqa: F401
 
     _text = __import__("sqlalchemy").text
 
