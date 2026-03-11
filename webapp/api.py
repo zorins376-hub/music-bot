@@ -37,6 +37,10 @@ _stream_url_resolve_semaphore = asyncio.Semaphore(1)
 from webapp.auth import verify_init_data
 from webapp.schemas import (
     LyricsResponse,
+    PartyAddTrackRequest,
+    PartyCreateRequest,
+    PartySchema,
+    PartyTrackSchema,
     PlayerAction,
     PlayerState,
     PlaylistSchema,
@@ -1475,6 +1479,369 @@ async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_u
     
     await _save_state(user_id, state)
     return state
+
+
+# ── Party Playlists ──────────────────────────────────────────────────────
+
+import secrets
+import time
+
+from bot.models.party import PartySession, PartyTrack
+
+# In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
+_party_subscribers: dict[str, list[asyncio.Queue]] = {}
+
+
+async def _get_party_with_tracks(code: str) -> PartySchema:
+    """Load party session by invite code with all tracks."""
+    async with async_session() as session:
+        from sqlalchemy import select
+        result = await session.execute(
+            select(PartySession).where(
+                PartySession.invite_code == code,
+                PartySession.is_active == True,
+            )
+        )
+        party = result.scalar_one_or_none()
+        if not party:
+            raise HTTPException(status_code=404, detail="Party not found")
+
+        tracks_result = await session.execute(
+            select(PartyTrack)
+            .where(PartyTrack.party_id == party.id)
+            .order_by(PartyTrack.position)
+        )
+        tracks = tracks_result.scalars().all()
+
+        subs = _party_subscribers.get(code, [])
+
+        return PartySchema(
+            id=party.id,
+            invite_code=party.invite_code,
+            creator_id=party.creator_id,
+            name=party.name,
+            is_active=party.is_active,
+            current_position=party.current_position,
+            member_count=len(subs),
+            tracks=[
+                PartyTrackSchema(
+                    video_id=t.video_id,
+                    title=t.title,
+                    artist=t.artist,
+                    duration=t.duration,
+                    duration_fmt=t.duration_fmt,
+                    source=t.source,
+                    cover_url=t.cover_url,
+                    added_by=t.added_by,
+                    added_by_name=t.added_by_name,
+                    skip_votes=t.skip_votes,
+                    position=t.position,
+                ) for t in tracks
+            ],
+        )
+
+
+async def _notify_party(code: str, event: str, data: dict | None = None):
+    """Send SSE event to all subscribers of a party."""
+    subs = _party_subscribers.get(code, [])
+    payload = json.dumps({"event": event, "data": data or {}}, ensure_ascii=False)
+    dead: list[asyncio.Queue] = []
+    for q in subs:
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        try:
+            subs.remove(q)
+        except ValueError:
+            pass
+
+
+@app.post("/api/party", response_model=PartySchema)
+async def create_party(body: PartyCreateRequest, user: dict = Depends(get_current_user)):
+    """Create a new party session."""
+    code = secrets.token_urlsafe(8)[:10]
+    async with async_session() as session:
+        from sqlalchemy import select, func
+        # Limit active parties per user to 3
+        count_result = await session.execute(
+            select(func.count()).where(
+                PartySession.creator_id == user["id"],
+                PartySession.is_active == True,
+            )
+        )
+        if (count_result.scalar() or 0) >= 3:
+            raise HTTPException(status_code=400, detail="Max 3 active parties")
+
+        party = PartySession(
+            invite_code=code,
+            creator_id=user["id"],
+            name=body.name[:100],
+        )
+        session.add(party)
+        await session.commit()
+        await session.refresh(party)
+
+    return PartySchema(
+        id=party.id,
+        invite_code=party.invite_code,
+        creator_id=party.creator_id,
+        name=party.name,
+        is_active=True,
+        current_position=0,
+        tracks=[],
+        member_count=0,
+    )
+
+
+@app.get("/api/party/{code}", response_model=PartySchema)
+async def get_party(code: str, user: dict = Depends(get_current_user)):
+    """Get party state with tracks."""
+    return await _get_party_with_tracks(code)
+
+
+@app.post("/api/party/{code}/tracks", response_model=PartySchema)
+async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = Depends(get_current_user)):
+    """Add a track to party queue."""
+    async with async_session() as session:
+        from sqlalchemy import select, func
+        result = await session.execute(
+            select(PartySession).where(
+                PartySession.invite_code == code,
+                PartySession.is_active == True,
+            )
+        )
+        party = result.scalar_one_or_none()
+        if not party:
+            raise HTTPException(status_code=404, detail="Party not found")
+
+        # Get max position
+        max_pos_result = await session.execute(
+            select(func.coalesce(func.max(PartyTrack.position), -1))
+            .where(PartyTrack.party_id == party.id)
+        )
+        max_pos = max_pos_result.scalar() or 0
+
+        track = PartyTrack(
+            party_id=party.id,
+            video_id=body.video_id,
+            title=body.title,
+            artist=body.artist,
+            duration=body.duration,
+            duration_fmt=body.duration_fmt,
+            source=body.source,
+            cover_url=body.cover_url,
+            added_by=user["id"],
+            added_by_name=user.get("first_name", "User"),
+            position=max_pos + 1,
+        )
+        session.add(track)
+        await session.commit()
+
+    await _notify_party(code, "track_added", {
+        "video_id": body.video_id,
+        "title": body.title,
+        "artist": body.artist,
+        "added_by_name": user.get("first_name", "User"),
+    })
+    return await _get_party_with_tracks(code)
+
+
+@app.delete("/api/party/{code}/tracks/{video_id}")
+async def remove_party_track(code: str, video_id: str, user: dict = Depends(get_current_user)):
+    """Remove a track from party queue (creator only)."""
+    async with async_session() as session:
+        from sqlalchemy import select, delete
+        result = await session.execute(
+            select(PartySession).where(
+                PartySession.invite_code == code,
+                PartySession.is_active == True,
+            )
+        )
+        party = result.scalar_one_or_none()
+        if not party:
+            raise HTTPException(status_code=404, detail="Party not found")
+        if party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ can remove tracks")
+
+        await session.execute(
+            delete(PartyTrack).where(
+                PartyTrack.party_id == party.id,
+                PartyTrack.video_id == video_id,
+            )
+        )
+        await session.commit()
+
+    await _notify_party(code, "track_removed", {"video_id": video_id})
+    return {"ok": True}
+
+
+@app.post("/api/party/{code}/skip")
+async def skip_party_track(code: str, user: dict = Depends(get_current_user)):
+    """Vote to skip or force-skip (DJ). Auto-skips at 3 votes."""
+    async with async_session() as session:
+        from sqlalchemy import select, update
+        result = await session.execute(
+            select(PartySession).where(
+                PartySession.invite_code == code,
+                PartySession.is_active == True,
+            )
+        )
+        party = result.scalar_one_or_none()
+        if not party:
+            raise HTTPException(status_code=404, detail="Party not found")
+
+        is_dj = party.creator_id == user["id"]
+
+        # Get current track
+        track_result = await session.execute(
+            select(PartyTrack).where(
+                PartyTrack.party_id == party.id,
+                PartyTrack.position == party.current_position,
+            )
+        )
+        current_track = track_result.scalar_one_or_none()
+
+        skip = is_dj  # DJ can always skip
+        if current_track and not is_dj:
+            current_track.skip_votes += 1
+            if current_track.skip_votes >= 3:
+                skip = True
+            await session.commit()
+
+        if skip:
+            party.current_position += 1
+            await session.commit()
+            await _notify_party(code, "next", {"position": party.current_position})
+
+    return await _get_party_with_tracks(code)
+
+
+@app.post("/api/party/{code}/close")
+async def close_party(code: str, user: dict = Depends(get_current_user)):
+    """Close party session (creator only)."""
+    async with async_session() as session:
+        from sqlalchemy import select
+        result = await session.execute(
+            select(PartySession).where(
+                PartySession.invite_code == code,
+                PartySession.is_active == True,
+            )
+        )
+        party = result.scalar_one_or_none()
+        if not party:
+            raise HTTPException(status_code=404, detail="Party not found")
+        if party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ can close")
+
+        party.is_active = False
+        await session.commit()
+
+    await _notify_party(code, "closed", {})
+    # Clean up subscribers
+    _party_subscribers.pop(code, None)
+    return {"ok": True}
+
+
+@app.get("/api/party/{code}/events")
+async def party_events(
+    code: str,
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """SSE stream for real-time party updates."""
+    # Auth: accept header or query param (EventSource can't send headers)
+    init_data = x_telegram_init_data or token
+    if not init_data:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    user = verify_init_data(init_data)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid initData")
+    # Verify party exists
+    async with async_session() as session:
+        from sqlalchemy import select
+        result = await session.execute(
+            select(PartySession.id).where(
+                PartySession.invite_code == code,
+                PartySession.is_active == True,
+            )
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Party not found")
+
+    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
+    if code not in _party_subscribers:
+        _party_subscribers[code] = []
+    _party_subscribers[code].append(queue)
+
+    # Notify others that someone joined
+    await _notify_party(code, "member_joined", {
+        "user_id": user["id"],
+        "name": user.get("first_name", "User"),
+        "member_count": len(_party_subscribers.get(code, [])),
+    })
+
+    async def event_generator():
+        try:
+            yield f"data: {json.dumps({'event': 'connected'})}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            subs = _party_subscribers.get(code, [])
+            try:
+                subs.remove(queue)
+            except ValueError:
+                pass
+            # Notify others that someone left
+            await _notify_party(code, "member_left", {
+                "member_count": len(_party_subscribers.get(code, [])),
+            })
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/my-parties", response_model=list[PartySchema])
+async def my_parties(user: dict = Depends(get_current_user)):
+    """List user's active parties."""
+    async with async_session() as session:
+        from sqlalchemy import select
+        result = await session.execute(
+            select(PartySession).where(
+                PartySession.creator_id == user["id"],
+                PartySession.is_active == True,
+            ).order_by(PartySession.created_at.desc())
+        )
+        parties = result.scalars().all()
+
+    schemas = []
+    for p in parties:
+        schemas.append(PartySchema(
+            id=p.id,
+            invite_code=p.invite_code,
+            creator_id=p.creator_id,
+            name=p.name,
+            is_active=True,
+            current_position=p.current_position,
+            tracks=[],
+            member_count=len(_party_subscribers.get(p.invite_code, [])),
+        ))
+    return schemas
 
 
 # ── Frontend SPA serving ────────────────────────────────────────────────

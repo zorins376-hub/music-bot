@@ -967,7 +967,7 @@ rapidfuzz>=3.0.0
 | Share Track Deeplink | ✅ DONE | startapp=play_ + inline share via Telegram |
 | Offline Cache (IndexedDB) | ✅ DONE | 100MB LRU, audio blob storage, background prefetch |
 | Glassmorphic UI | ✅ DONE | Кнопки Волна / В плейлист — glass blur + rgba(255,255,255,0.06) |
-| Party Playlists (чаты) | ❌ TODO | Совместное добавление треков из группового чата |
+| Party Playlists (чаты) | ✅ DONE | DB модели + REST API + SSE real-time sync + bot /party + frontend PartyView |
 | Aggressive Pre-fetch (70%) | ✅ DONE | prefetchTracks при 70% прослушивания + preload при 30s до конца |
 
 ## 11.2 Реализуемые фичи

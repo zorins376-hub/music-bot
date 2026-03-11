@@ -68,3 +68,44 @@ class UserProfileSchema(BaseModel):
 
 class UserAudioSettingsSchema(BaseModel):
     quality: str
+
+
+# ── Party Playlists ──────────────────────────────────────────────────────
+
+class PartyTrackSchema(BaseModel):
+    video_id: str
+    title: str
+    artist: str = "Unknown"
+    duration: int = 0
+    duration_fmt: str = "0:00"
+    source: str = "youtube"
+    cover_url: Optional[str] = None
+    added_by: int = 0
+    added_by_name: Optional[str] = None
+    skip_votes: int = 0
+    position: int = 0
+
+
+class PartySchema(BaseModel):
+    id: int
+    invite_code: str
+    creator_id: int
+    name: str = "Party 🎉"
+    is_active: bool = True
+    current_position: int = 0
+    tracks: list[PartyTrackSchema] = []
+    member_count: int = 0
+
+
+class PartyAddTrackRequest(BaseModel):
+    video_id: str
+    title: str
+    artist: str = "Unknown"
+    duration: int = 0
+    duration_fmt: str = "0:00"
+    source: str = "youtube"
+    cover_url: Optional[str] = None
+
+
+class PartyCreateRequest(BaseModel):
+    name: str = "Party 🎉"

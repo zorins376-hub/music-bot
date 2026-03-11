@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { Player } from "./components/Player";
 import { TrackList } from "./components/TrackList";
 import { PlaylistView } from "./components/PlaylistView";
+import { PartyView } from "./components/PartyView";
 import { ChartsView } from "./components/ChartsView";
 import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
@@ -13,7 +14,7 @@ import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./c
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 
-type View = "player" | "playlists" | "charts" | "search" | "lyrics";
+type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -94,6 +95,7 @@ export function App() {
   const userId = user?.id ?? 0;
 
   const [view, setView] = useState<View>("player");
+  const [partyCode, setPartyCode] = useState<string | null>(null);
   const [state, setState] = useState<PlayerState>({
     current_track: null,
     queue: [],
@@ -761,6 +763,13 @@ export function App() {
         sendAction("play", videoId).then(setState).catch(() => {});
       }
     }
+    if (startParam && startParam.startsWith("party_")) {
+      const code = startParam.slice(6);
+      if (code) {
+        setPartyCode(code);
+        setView("party");
+      }
+    }
   }, [userId]);
   useEffect(() => {
     elapsedRef.current = 0;
@@ -1052,7 +1061,7 @@ export function App() {
           flexWrap: "wrap" as const,
         } : {}),
       }}>
-        {(["player", "playlists", "charts", "search"] as View[]).map((v) => (
+        {(["player", "playlists", "party", "charts", "search"] as View[]).map((v) => (
           <button
             key={v}
             onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView(v); }}
@@ -1061,7 +1070,7 @@ export function App() {
               borderRadius: isTequila ? 18 : 16,
               border: isTequila && view === v ? "1px solid rgba(255,213,79,0.3)" : "none",
               background: view === v
-                ? (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))" : accentColor)
+                ? (v === "party" ? "linear-gradient(135deg, #ff6d00, #ff9100)" : (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))" : accentColor))
                 : theme.navInactiveBg,
               color: view === v
                 ? (isTequila ? "#ffd54f" : "#fff")
@@ -1073,7 +1082,7 @@ export function App() {
               transition: "all 0.4s ease",
             }}
           >
-            {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : v === "charts" ? (<><IconChart size={12} color="currentColor" /> Чарты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
+            {v === "player" ? (<><IconMusicNote size={12} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={12} color="currentColor" /> Плейлисты</>) : v === "party" ? "🎉 Party" : v === "charts" ? (<><IconChart size={12} color="currentColor" /> Чарты</>) : (<><IconSearch size={12} color="currentColor" /> Поиск</>)}
           </button>
         ))}
         {/* Theme switcher */}
@@ -1275,6 +1284,8 @@ export function App() {
       )}
 
       {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
+
+      {view === "party" && <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} />}
 
       {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 

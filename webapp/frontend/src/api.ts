@@ -298,3 +298,91 @@ export async function fetchTrending(hours = 24, limit = 20): Promise<Track[]> {
   const data = await r.json();
   return data.tracks;
 }
+
+// ── Party Playlists ─────────────────────────────────────────────────────
+
+export interface PartyTrack extends Track {
+  added_by: number;
+  added_by_name?: string;
+  skip_votes: number;
+  position: number;
+}
+
+export interface Party {
+  id: number;
+  invite_code: string;
+  creator_id: number;
+  name: string;
+  is_active: boolean;
+  current_position: number;
+  tracks: PartyTrack[];
+  member_count: number;
+}
+
+export async function createParty(name = "Party 🎉"): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) throw new Error("Failed to create party");
+  return r.json();
+}
+
+export async function fetchParty(code: string): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}`, { headers: getHeaders() });
+  if (!r.ok) throw new Error("Party not found");
+  return r.json();
+}
+
+export async function addPartyTrack(code: string, track: Track): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/tracks`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({
+      video_id: track.video_id,
+      title: track.title,
+      artist: track.artist,
+      duration: track.duration,
+      duration_fmt: track.duration_fmt,
+      source: track.source,
+      cover_url: track.cover_url,
+    }),
+  });
+  if (!r.ok) throw new Error("Failed to add track");
+  return r.json();
+}
+
+export async function removePartyTrack(code: string, videoId: string): Promise<void> {
+  await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/tracks/${encodeURIComponent(videoId)}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+}
+
+export async function skipPartyTrack(code: string): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/skip`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to skip");
+  return r.json();
+}
+
+export async function closeParty(code: string): Promise<void> {
+  await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/close`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+}
+
+export async function fetchMyParties(): Promise<Party[]> {
+  const r = await fetch(`${API_BASE}/my-parties`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  return r.json();
+}
+
+export function partyEventsUrl(code: string): string {
+  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  return `${API_BASE}/party/${encodeURIComponent(code)}/events?token=${initData}`;
+}
