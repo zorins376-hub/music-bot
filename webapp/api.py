@@ -1071,6 +1071,28 @@ async def get_trending(
 
 # ── Charts API ───────────────────────────────────────────────────────────
 
+@app.post("/api/charts/refresh")
+async def refresh_charts(user: dict = Depends(get_current_user)):
+    """Force refresh all chart caches."""
+    from bot.handlers.charts import _CHART_FETCHERS, _CHART_TTL
+    from bot.services.cache import cache
+    refreshed = {}
+    for src, fetcher in _CHART_FETCHERS.items():
+        await cache.redis.delete(f"chart:{src}")
+        try:
+            tracks = await fetcher()
+            if tracks:
+                await cache.redis.setex(
+                    f"chart:{src}",
+                    _CHART_TTL,
+                    json.dumps(tracks, ensure_ascii=False),
+                )
+            refreshed[src] = len(tracks) if tracks else 0
+        except Exception as e:
+            refreshed[src] = f"error: {e}"
+    return refreshed
+
+
 @app.get("/api/charts")
 async def list_charts(user: dict = Depends(get_current_user)):
     """List available chart sources."""

@@ -705,12 +705,13 @@ async def _prewarm_charts_once() -> None:
     for src in _CHART_FETCHERS:
         try:
             tracks = await _get_chart(src)
-            # If cached data is small (old limit), force re-fetch
-            if tracks and len(tracks) < 50:
+            # If cached data is small (old limit), force re-fetch from source
+            if not tracks or len(tracks) < 50:
                 fetcher = _CHART_FETCHERS.get(src)
                 if fetcher:
+                    await cache.redis.delete(f"chart:{src}")
                     fresh = await fetcher()
-                    if fresh and len(fresh) > len(tracks):
+                    if fresh:
                         tracks = fresh
             if not tracks:
                 continue
@@ -720,7 +721,7 @@ async def _prewarm_charts_once() -> None:
                 _CHART_TTL,
                 json.dumps(prepared, ensure_ascii=False),
             )
-            logger.info("Chart prewarm: %s prepared=%d", src, min(_CHART_PREPARE_TOP_N, len(prepared)))
+            logger.info("Chart prewarm: %s prepared=%d", src, len(prepared))
         except Exception as e:
             logger.warning("Chart prewarm failed for %s: %s", src, e)
 
