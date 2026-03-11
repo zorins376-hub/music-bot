@@ -109,6 +109,14 @@ async def on_startup(bot: Bot) -> None:
     from bot.handlers.charts import start_chart_cache_prewarm_scheduler
     await start_chart_cache_prewarm_scheduler()
 
+    # Background track indexer (harvests metadata from charts & APIs)
+    from bot.services.track_indexer import start_indexer_scheduler
+    await start_indexer_scheduler()
+
+    # Deep crawler — continuously indexes entire Yandex & Spotify catalogs
+    from bot.services.deep_crawler import start_deep_crawler
+    await start_deep_crawler()
+
     # Weekly recap scheduler (Monday 10:00 UTC)
     from bot.services.weekly_recap import start_weekly_recap_scheduler
     await start_weekly_recap_scheduler(bot)

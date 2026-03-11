@@ -1,25 +1,33 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.models.base import Base
 
 
 class Track(Base):
-    """Единая таблица треков: из каналов + YouTube + SoundCloud."""
+    """Единая таблица треков — полная метадата как у Spotify / Яндекс Музыка."""
     __tablename__ = "tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source_id: Mapped[str] = mapped_column(String(100), index=True, unique=True)
-    source: Mapped[str] = mapped_column(String(20), default="youtube")  # youtube/soundcloud/channel
+    source: Mapped[str] = mapped_column(String(20), default="youtube")  # youtube/yandex/spotify/channel
     channel: Mapped[str | None] = mapped_column(String(50))  # tequila/fullmoon/external
     title: Mapped[str | None] = mapped_column(String(500))
     artist: Mapped[str | None] = mapped_column(String(255))
-    genre: Mapped[str | None] = mapped_column(String(50))
+    album: Mapped[str | None] = mapped_column(String(500))
+    genre: Mapped[str | None] = mapped_column(String(100))
+    release_year: Mapped[int | None] = mapped_column(Integer)
+    label: Mapped[str | None] = mapped_column(String(255))
+    isrc: Mapped[str | None] = mapped_column(String(20))
+    explicit: Mapped[bool | None] = mapped_column(Boolean)
+    popularity: Mapped[int | None] = mapped_column(Integer)
+    language: Mapped[str | None] = mapped_column(String(10))
     bpm: Mapped[int | None] = mapped_column(Integer)
     duration: Mapped[int | None] = mapped_column(Integer)
     file_id: Mapped[str | None] = mapped_column(String(255))
+    cover_url: Mapped[str | None] = mapped_column(String(500))
     downloads: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -28,6 +36,9 @@ class Track(Base):
 
     __table_args__ = (
         Index("ix_tracks_downloads", "downloads"),
+        Index("ix_tracks_genre", "genre"),
+        Index("ix_tracks_release_year", "release_year"),
+        Index("ix_tracks_artist", "artist"),
     )
 
 

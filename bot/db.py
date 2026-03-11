@@ -276,6 +276,14 @@ async def upsert_track(
     channel: str | None = None,
     genre: str | None = None,
     bpm: int | None = None,
+    cover_url: str | None = None,
+    album: str | None = None,
+    release_year: int | None = None,
+    label: str | None = None,
+    isrc: str | None = None,
+    explicit: bool | None = None,
+    popularity: int | None = None,
+    language: str | None = None,
 ) -> Track:
     async with async_session() as session:
         result = await session.execute(
@@ -294,17 +302,46 @@ async def upsert_track(
                 channel=channel,
                 genre=genre,
                 bpm=bpm,
+                cover_url=cover_url,
+                album=album,
+                release_year=release_year,
+                label=label,
+                isrc=isrc,
+                explicit=explicit,
+                popularity=popularity,
+                language=language,
                 downloads=1,
             )
             session.add(track)
         else:
+            update_vals: dict = {
+                "file_id": file_id or track.file_id,
+                "downloads": Track.downloads + 1,
+            }
+            # Fill in missing metadata from richer sources
+            _fill = {
+                "cover_url": cover_url,
+                "title": title,
+                "artist": artist,
+                "duration": duration,
+                "genre": genre,
+                "album": album,
+                "release_year": release_year,
+                "label": label,
+                "isrc": isrc,
+                "language": language,
+            }
+            for field, value in _fill.items():
+                if value and not getattr(track, field, None):
+                    update_vals[field] = value
+            if explicit is not None and track.explicit is None:
+                update_vals["explicit"] = explicit
+            if popularity is not None and (track.popularity is None or popularity > (track.popularity or 0)):
+                update_vals["popularity"] = popularity
             await session.execute(
                 update(Track)
                 .where(Track.source_id == source_id)
-                .values(
-                    file_id=file_id or track.file_id,
-                    downloads=Track.downloads + 1,
-                )
+                .values(**update_vals)
             )
         await session.commit()
         await session.refresh(track)

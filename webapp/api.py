@@ -82,6 +82,14 @@ async def lifespan(app: FastAPI):
     from bot.handlers.charts import _prewarm_charts_once
     asyncio.create_task(_prewarm_charts_once())
 
+    # Background track indexer — harvests metadata from charts & APIs into DB
+    from bot.services.track_indexer import start_indexer_scheduler
+    await start_indexer_scheduler()
+
+    # Deep crawler — continuously indexes entire Yandex & Spotify catalogs
+    from bot.services.deep_crawler import start_deep_crawler
+    await start_deep_crawler()
+
     # Periodic cleanup of expired stream URL cache entries
     async def _cleanup_url_cache():
         import time as _time
@@ -616,6 +624,20 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
     if current_cover:
         return current_cover
 
+    # Check DB for cached cover_url
+    try:
+        from sqlalchemy import select
+        from bot.models.base import async_session as _as
+        from bot.models.track import Track as _Track
+        async with _as() as _sess:
+            row = (await _sess.execute(
+                select(_Track.cover_url).where(_Track.source_id == source_id)
+            )).scalar_one_or_none()
+            if row:
+                return row
+    except Exception:
+        pass
+
     normalized_source = (source or "youtube").lower()
     if normalized_source == "youtube" and source_id:
         return f"https://i.ytimg.com/vi/{source_id}/hqdefault.jpg"
@@ -1097,6 +1119,29 @@ async def refresh_charts(user: dict = Depends(get_current_user)):
     return refreshed
 
 
+@app.post("/api/indexer/run")
+async def run_indexer_now(user: dict = Depends(get_current_user)):
+    """Trigger a manual track indexing run (harvests metadata from all sources)."""
+    from bot.services.track_indexer import run_indexer
+    results = await run_indexer()
+    return {"status": "ok", "indexed": results}
+
+
+@app.get("/api/crawler/stats")
+async def crawler_stats(user: dict = Depends(get_current_user)):
+    """Get deep crawler progress stats."""
+    from bot.services.deep_crawler import get_crawler_stats
+    return await get_crawler_stats()
+
+
+@app.post("/api/crawler/run")
+async def run_crawler_now(user: dict = Depends(get_current_user)):
+    """Trigger a manual deep crawl cycle."""
+    from bot.services.deep_crawler import run_deep_crawl
+    results = await run_deep_crawl()
+    return {"status": "ok", "crawled": results}
+
+
 @app.get("/api/charts")
 async def list_charts(user: dict = Depends(get_current_user)):
     """List available chart sources."""
@@ -1197,7 +1242,7 @@ async def add_track_to_playlist(
             "artist": body.artist,
             "duration": body.duration,
         }
-        db_track = await upsert_track(track_data)
+        db_track = await upsert_track(**track_data)
 
         # Check if already in playlist
         existing = (await session.execute(
