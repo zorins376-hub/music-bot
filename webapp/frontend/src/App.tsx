@@ -7,8 +7,8 @@ import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart } from "./components/Icons";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, type EqPreset, type PlayerState, type Track, type UserProfile } from "./api";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner } from "./components/Icons";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
@@ -134,6 +134,9 @@ export function App() {
   const [partyMode, setPartyMode] = useState(false);
   const [moodFilter, setMoodFilter] = useState<string | null>(null);
   const [bypassProcessing, setBypassProcessing] = useState(false);
+  const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
+  const [a2pPlaylists, setA2pPlaylists] = useState<Playlist[]>([]);
+  const [a2pAdding, setA2pAdding] = useState<number | null>(null);
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
 
@@ -1064,7 +1067,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
@@ -1149,6 +1152,56 @@ export function App() {
         <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} />
       )}
       </div>
+
+      {/* Add to Playlist — bottom sheet modal */}
+      {showAddToPlaylist && state.current_track && (
+        <div onClick={() => setShowAddToPlaylist(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={(e: any) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 420, maxHeight: "60vh", overflowY: "auto", padding: "16px 16px 24px",
+              borderRadius: "20px 20px 0 0",
+              background: isTequila ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
+              border: isTequila ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(255,255,255,0.08)",
+              backdropFilter: "blur(20px)",
+            }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: theme.hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 13, color: theme.hintColor, marginBottom: 4 }}>Добавить в плейлист</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: isTequila ? "#fef0e0" : "var(--tg-theme-text-color, #eee)", marginBottom: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {state.current_track.artist} — {state.current_track.title}
+            </div>
+            {a2pPlaylists.length === 0 ? (
+              <div style={{ textAlign: "center", color: theme.hintColor, padding: 20 }}>Нет плейлистов</div>
+            ) : (
+              a2pPlaylists.map((p) => (
+                <button key={p.id} onClick={async () => {
+                    if (!state.current_track) return;
+                    setA2pAdding(p.id);
+                    try { await addTrackToPlaylist(p.id, state.current_track); } catch {}
+                    setA2pAdding(null);
+                    setShowAddToPlaylist(false);
+                  }} disabled={a2pAdding === p.id}
+                  style={{
+                    display: "flex", alignItems: "center", width: "100%", padding: "10px 14px",
+                    borderRadius: 12, border: isTequila ? "1px solid rgba(255,213,79,0.1)" : "1px solid rgba(255,255,255,0.06)",
+                    background: isTequila ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
+                    marginBottom: 6, cursor: "pointer", textAlign: "left",
+                    opacity: a2pAdding === p.id ? 0.5 : 1,
+                  }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))" : `linear-gradient(135deg, ${accentColor}, rgba(124,77,255,0.3))`, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, flexShrink: 0 }}>
+                    <IconMusic size={16} color="#fff" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, color: isTequila ? "#fef0e0" : "var(--tg-theme-text-color, #eee)" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: theme.hintColor }}>{p.track_count} треков</div>
+                  </div>
+                  {a2pAdding === p.id ? <IconSpinner size={16} color={theme.hintColor} /> : <IconPlus size={16} color={isTequila ? "#ffd54f" : accentColor} />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Floating Mini-Player (visible when NOT on Player view) */}
       {view !== "player" && state.current_track && (

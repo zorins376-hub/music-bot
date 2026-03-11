@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite } from "../api";
 import { ShareCard } from "./ShareCard";
-import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty } from "./Icons";
+import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus } from "./Icons";
 
 interface Props {
   state: PlayerState;
@@ -41,6 +41,7 @@ interface Props {
   onMoodChange?: (mood: string | null) => void;
   bypassProcessing?: boolean;
   onBypassToggle?: (on: boolean) => void;
+  onAddToPlaylist?: () => void;
 }
 
 const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
@@ -220,7 +221,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, onAddToPlaylist }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -911,6 +912,26 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             >
               <IconHeart filled={isLiked} />
             </button>
+            {/* Add to playlist */}
+            <button
+              onClick={() => { haptic("light"); onAddToPlaylist?.(); }}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${borderGold}`,
+                background: glassCard,
+                backdropFilter: "blur(12px)",
+                color: "#fef0e0",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+              }}
+            >
+              <IconPlus size={16} /> В плейлист
+            </button>
             {/* Share */}
             <button
               onClick={handleShare}
@@ -1260,6 +1281,24 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             }}
           >
             <IconHeart filled={isLiked} />
+          </button>
+          {/* Add to playlist */}
+          <button
+            onClick={() => { haptic("light"); onAddToPlaylist?.(); }}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 20,
+              border: `1px solid ${accentColor}`,
+              background: `linear-gradient(135deg, ${accentColorAlpha}, transparent)`,
+              color: accentColor,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+            }}
+          >
+            <IconPlus size={16} /> В плейлист
           </button>
           <button
             onClick={handleShare}
