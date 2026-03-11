@@ -53,6 +53,22 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
     from bot.models.artist_watchlist import ArtistWatchlist  # noqa: F401
     from bot.models.family_plan import FamilyPlan, FamilyMember, FamilyInvite  # noqa: F401
 
+    _text = __import__("sqlalchemy").text
+
+    async def _run_migration(conn, stmt: str) -> bool:
+        """Run a single migration inside a savepoint. Returns True on success."""
+        try:
+            await conn.execute(_text("SAVEPOINT mig"))
+            await conn.execute(_text(stmt))
+            await conn.execute(_text("RELEASE SAVEPOINT mig"))
+            return True
+        except Exception:
+            try:
+                await conn.execute(_text("ROLLBACK TO SAVEPOINT mig"))
+            except Exception:
+                pass
+            return False
+
     last_exc: BaseException | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -107,43 +123,37 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         # BlockedTrack columns
                         "ALTER TABLE blocked_tracks ADD COLUMN IF NOT EXISTS alternative_source_id VARCHAR(100)",
                     ]
-                    _text = __import__("sqlalchemy").text
                     for stmt in _alter_stmts:
-                        try:
-                            async with conn.begin_nested():
-                                await conn.execute(_text(stmt))
-                        except Exception:
-                            pass  # Column already exists or table doesn't exist yet
+                        await _run_migration(conn, stmt)
                 # Create pg_trgm extension and trigram indexes for PostgreSQL
                 if _is_pg:
-                    _text = __import__("sqlalchemy").text
-                    try:
-                        async with conn.begin_nested():
-                            await conn.execute(
-                                _text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                    # Check if pg_trgm is available
+                    result = await conn.execute(
+                        _text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'")
+                    )
+                    has_trgm = result.scalar() is not None
+                    if not has_trgm:
+                        # Try to create it (requires superuser or extension owner)
+                        has_trgm = await _run_migration(
+                            conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+                        )
+                        if not has_trgm:
+                            _logger.warning(
+                                "pg_trgm extension not available — trigram indexes skipped"
                             )
-                    except Exception:
-                        _logger.warning("pg_trgm extension not available — trigram indexes skipped")
-                    else:
+                    if has_trgm:
                         for stmt in (
                             "CREATE INDEX IF NOT EXISTS ix_tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
                             "CREATE INDEX IF NOT EXISTS ix_tracks_artist_trgm ON tracks USING gin (artist gin_trgm_ops)",
                         ):
-                            try:
-                                async with conn.begin_nested():
-                                    await conn.execute(_text(stmt))
-                            except Exception:
-                                pass
+                            await _run_migration(conn, stmt)
+                    # Regular btree indexes (don't need pg_trgm)
                     for stmt in (
                         "CREATE INDEX IF NOT EXISTS ix_tracks_genre ON tracks (genre)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_release_year ON tracks (release_year)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_artist ON tracks (artist)",
                     ):
-                        try:
-                            async with conn.begin_nested():
-                                await conn.execute(_text(stmt))
-                        except Exception:
-                            pass
+                        await _run_migration(conn, stmt)
             return
         except Exception as exc:
             last_exc = exc
