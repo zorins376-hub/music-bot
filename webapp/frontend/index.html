@@ -54,6 +54,16 @@
       45% { opacity: 0.18; }
       100% { transform: translateX(240%) skewX(-18deg); opacity: 0; }
     }
+    @keyframes tequilaLogoReveal {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.84); filter: blur(10px); }
+      18% { opacity: 0.92; transform: translate(-50%, -50%) scale(1); filter: blur(0px); }
+      58% { opacity: 0.86; transform: translate(-50%, -50%) scale(1.02); filter: blur(0px); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1.08); filter: blur(8px); }
+    }
+    @keyframes tequilaLogoHalo {
+      0%, 100% { opacity: 0.18; transform: translate(-50%, -50%) scale(0.92); }
+      50% { opacity: 0.34; transform: translate(-50%, -50%) scale(1.06); }
+    }
     @keyframes tequilaLoaderPulse {
       0%, 100% { opacity: 0.45; transform: scale(1); }
       50% { opacity: 0.82; transform: scale(1.08); }
@@ -141,6 +151,20 @@
       height: 100vh;
       text-align: center;
     }
+    .boot-loader-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        radial-gradient(rgba(255, 218, 121, 0.14) 0.7px, transparent 0.7px),
+        radial-gradient(rgba(255, 171, 64, 0.10) 0.7px, transparent 0.7px);
+      background-position: 0 0, 14px 14px;
+      background-size: 28px 28px;
+      mix-blend-mode: soft-light;
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 1;
+    }
     .boot-loader-image-wrap {
       position: absolute;
       inset: 0;
@@ -185,10 +209,10 @@
       transform: translateX(-50%);
       width: min(96vw, 980px);
       padding: 0 8px;
-      font-size: clamp(18px, 4.2vw, 28px);
-      line-height: 1.14;
+      font-size: clamp(20px, 5vw, 34px);
+      line-height: 1.02;
       font-weight: 900;
-      letter-spacing: 0.18em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
       background: linear-gradient(90deg, #8f5a00 0%, #f4cf68 20%, #fff1b2 36%, #d79d27 52%, #fff7ce 68%, #b87710 84%, #f4cf68 100%);
       background-size: 220% 220%;
@@ -203,7 +227,8 @@
       display: block;
     }
     .boot-loader-caption-line + .boot-loader-caption-line {
-      margin-top: 6px;
+      margin-top: 8px;
+      font-size: 1.26em;
     }
     .boot-loader-caption .spark {
       color: rgba(255, 229, 159, 0.95);
@@ -220,6 +245,36 @@
       text-transform: uppercase;
       color: rgba(255, 233, 180, 0.54);
       z-index: 2;
+    }
+    .boot-loader-logo {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: min(26vw, 128px);
+      transform: translate(-50%, -50%);
+      opacity: 0;
+      z-index: 3;
+      filter: drop-shadow(0 0 24px rgba(255, 210, 92, 0.32));
+      animation: tequilaLogoReveal 1.6s cubic-bezier(.22,.8,.24,1) forwards;
+    }
+    .boot-loader-logo::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 160%;
+      height: 160%;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(255, 214, 102, 0.26), transparent 62%);
+      transform: translate(-50%, -50%);
+      animation: tequilaLogoHalo 1.8s ease-in-out infinite;
+      z-index: -1;
+    }
+    .boot-loader-logo img {
+      width: 100%;
+      height: auto;
+      display: block;
+      opacity: 0.92;
     }
     .boot-loader-sparkles {
       position: absolute;
@@ -245,6 +300,7 @@
 <body>
   <div id="boot-loader" class="boot-loader" aria-hidden="true">
     <div class="boot-loader-card">
+      <div class="boot-loader-logo"><img src="/icon.svg" alt="Logo" /></div>
       <div class="boot-loader-sparkles">
         <span class="boot-loader-sparkle s1">✦</span>
         <span class="boot-loader-sparkle s2">✦</span>
