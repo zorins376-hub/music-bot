@@ -88,10 +88,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background:
-        radial-gradient(circle at top, rgba(255, 206, 84, 0.16), transparent 36%),
-        radial-gradient(circle at bottom, rgba(255, 145, 0, 0.18), transparent 34%),
-        linear-gradient(180deg, #140d07 0%, #090608 52%, #050406 100%);
+      background: #050406;
       transition: opacity 820ms ease, visibility 820ms ease;
       overflow: hidden;
     }
@@ -110,6 +107,7 @@
       border-radius: 999px;
       filter: blur(26px);
       animation: tequilaLoaderPulse 4.2s ease-in-out infinite;
+      z-index: 1;
     }
     .boot-loader::before {
       width: 220px;
@@ -128,41 +126,40 @@
     }
     .boot-loader-card {
       position: relative;
-      width: min(88vw, 430px);
-      padding: 20px 18px 26px;
-      border-radius: 30px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-      border: 1px solid rgba(255, 214, 102, 0.18);
-      box-shadow: 0 24px 80px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12);
-      backdrop-filter: blur(20px) saturate(140%);
-      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      width: 100vw;
+      height: 100vh;
       text-align: center;
     }
     .boot-loader-image-wrap {
-      position: relative;
-      width: min(72vw, 290px);
-      margin: 0 auto;
-      border-radius: 28px;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
       overflow: hidden;
-      box-shadow: 0 20px 56px rgba(255, 145, 0, 0.22);
       animation: tequilaLoaderFloat 5s ease-in-out infinite;
     }
     .boot-loader-image-wrap::after {
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(135deg, rgba(255,255,255,0.08), transparent 38%, rgba(255,193,7,0.08));
+      background:
+        linear-gradient(180deg, rgba(8,6,6,0.10) 0%, rgba(8,6,6,0.22) 58%, rgba(8,6,6,0.82) 100%),
+        linear-gradient(135deg, rgba(255,255,255,0.06), transparent 38%, rgba(255,193,7,0.06));
       pointer-events: none;
     }
     .boot-loader-image {
       display: block;
       width: 100%;
-      height: auto;
-      aspect-ratio: 1 / 1;
+      height: 100%;
       object-fit: cover;
+      object-position: center;
     }
     .boot-loader-caption {
-      margin-top: 18px;
+      position: absolute;
+      left: 50%;
+      bottom: max(42px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      width: min(92vw, 760px);
       padding: 0 8px;
       font-size: clamp(16px, 4vw, 24px);
       line-height: 1.28;
@@ -176,22 +173,29 @@
       color: transparent;
       text-shadow: 0 0 22px rgba(255, 202, 40, 0.18);
       animation: tequilaGoldSweep 4.6s linear infinite;
+      z-index: 2;
     }
     .boot-loader-caption .spark {
       color: rgba(255, 229, 159, 0.95);
       text-shadow: 0 0 12px rgba(255, 214, 102, 0.4);
     }
     .boot-loader-subline {
-      margin-top: 10px;
+      position: absolute;
+      left: 50%;
+      bottom: max(18px, calc(env(safe-area-inset-bottom) * 0.5));
+      transform: translateX(-50%);
+      width: min(92vw, 760px);
       font-size: 11px;
       letter-spacing: 0.38em;
       text-transform: uppercase;
       color: rgba(255, 233, 180, 0.54);
+      z-index: 2;
     }
     .boot-loader-sparkles {
       position: absolute;
       inset: 0;
       pointer-events: none;
+      z-index: 2;
     }
     .boot-loader-sparkle {
       position: absolute;
@@ -207,7 +211,7 @@
     .boot-loader-sparkle.s5 { left: 49%; top: 10%; animation-delay: 1.8s; }
     .boot-loader-sparkle.s6 { left: 52%; bottom: 12%; animation-delay: 2.2s; }
   </style>
-  <script type="module" crossorigin src="/assets/index-DqWCsO6b.js"></script>
+  <script type="module" crossorigin src="/assets/index-CQcXfBz6.js"></script>
 </head>
 <body>
   <div id="boot-loader" class="boot-loader" aria-hidden="true">

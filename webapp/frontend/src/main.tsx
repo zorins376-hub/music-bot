@@ -104,5 +104,5 @@ if (bootLoader) {
     bootLoader.classList.add("is-exiting");
     bootLoader.classList.add("is-hidden");
     window.setTimeout(() => bootLoader.remove(), 600);
-  }, 1900);
+  }, 4000);
 }
