@@ -107,26 +107,43 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         # BlockedTrack columns
                         "ALTER TABLE blocked_tracks ADD COLUMN IF NOT EXISTS alternative_source_id VARCHAR(100)",
                     ]
+                    _text = __import__("sqlalchemy").text
                     for stmt in _alter_stmts:
                         try:
-                            await conn.execute(__import__("sqlalchemy").text(stmt))
+                            async with conn.begin_nested():
+                                await conn.execute(_text(stmt))
                         except Exception:
                             pass  # Column already exists or table doesn't exist yet
                 # Create pg_trgm extension and trigram indexes for PostgreSQL
                 if _is_pg:
-                    await conn.execute(
-                        __import__("sqlalchemy").text(
-                            "CREATE EXTENSION IF NOT EXISTS pg_trgm"
-                        )
-                    )
+                    _text = __import__("sqlalchemy").text
+                    try:
+                        async with conn.begin_nested():
+                            await conn.execute(
+                                _text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                            )
+                    except Exception:
+                        _logger.warning("pg_trgm extension not available — trigram indexes skipped")
+                    else:
+                        for stmt in (
+                            "CREATE INDEX IF NOT EXISTS ix_tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
+                            "CREATE INDEX IF NOT EXISTS ix_tracks_artist_trgm ON tracks USING gin (artist gin_trgm_ops)",
+                        ):
+                            try:
+                                async with conn.begin_nested():
+                                    await conn.execute(_text(stmt))
+                            except Exception:
+                                pass
                     for stmt in (
-                        "CREATE INDEX IF NOT EXISTS ix_tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
-                        "CREATE INDEX IF NOT EXISTS ix_tracks_artist_trgm ON tracks USING gin (artist gin_trgm_ops)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_genre ON tracks (genre)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_release_year ON tracks (release_year)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_artist ON tracks (artist)",
                     ):
-                        await conn.execute(__import__("sqlalchemy").text(stmt))
+                        try:
+                            async with conn.begin_nested():
+                                await conn.execute(_text(stmt))
+                        except Exception:
+                            pass
             return
         except Exception as exc:
             last_exc = exc
