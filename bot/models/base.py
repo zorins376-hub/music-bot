@@ -95,6 +95,15 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS bpm INTEGER",
                         "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS duration INTEGER",
                         "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS downloads INTEGER DEFAULT 0",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS cover_url VARCHAR(500)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS album VARCHAR(500)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS release_year INTEGER",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS label VARCHAR(255)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS isrc VARCHAR(20)",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS explicit BOOLEAN",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS popularity INTEGER",
+                        "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS language VARCHAR(10)",
+                        "ALTER TABLE tracks ALTER COLUMN genre TYPE VARCHAR(100)",
                         # BlockedTrack columns
                         "ALTER TABLE blocked_tracks ADD COLUMN IF NOT EXISTS alternative_source_id VARCHAR(100)",
                     ]
@@ -113,6 +122,9 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                     for stmt in (
                         "CREATE INDEX IF NOT EXISTS ix_tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_artist_trgm ON tracks USING gin (artist gin_trgm_ops)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_genre ON tracks (genre)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_release_year ON tracks (release_year)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_artist ON tracks (artist)",
                     ):
                         await conn.execute(__import__("sqlalchemy").text(stmt))
             return
