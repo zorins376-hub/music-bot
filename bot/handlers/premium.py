@@ -16,7 +16,7 @@ from aiogram.types import (
     Message,
     PreCheckoutQuery,
 )
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from bot.config import settings
 from bot.db import get_or_create_user
@@ -26,6 +26,15 @@ from bot.models.track import Payment
 from bot.models.user import User
 
 logger = logging.getLogger(__name__)
+
+
+async def _award_premium_badge(session, user_id: int) -> None:
+    """Add 'premium' badge if not already present."""
+    db_user = await session.get(User, user_id)
+    if db_user:
+        badges = db_user.badges or []
+        if "premium" not in badges:
+            db_user.badges = badges + ["premium"]
 
 router = Router()
 
@@ -194,6 +203,7 @@ async def handle_successful_payment(message: Message) -> None:
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
             )
+            await _award_premium_badge(session, user.id)
             await session.commit()
             logger.info("Premium 30d activated for user %s until %s", user.id, premium_until.isoformat())
             await message.answer(t(lang, "premium_pay_success"), parse_mode="HTML")
@@ -204,6 +214,7 @@ async def handle_successful_payment(message: Message) -> None:
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
             )
+            await _award_premium_badge(session, user.id)
             await session.commit()
             logger.info("Premium trial 7d for user %s until %s", user.id, premium_until.isoformat())
             await message.answer(t(lang, "micro_trial_success"), parse_mode="HTML")
@@ -242,6 +253,7 @@ async def handle_successful_payment(message: Message) -> None:
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
             )
+            await _award_premium_badge(session, user.id)
             await session.commit()
             logger.info("Premium 90d activated for user %s", user.id)
             await message.answer(t(lang, "premium_90d_success"), parse_mode="HTML")
@@ -252,6 +264,7 @@ async def handle_successful_payment(message: Message) -> None:
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
             )
+            await _award_premium_badge(session, user.id)
             await session.commit()
             logger.info("Premium 365d activated for user %s", user.id)
             await message.answer(t(lang, "premium_365d_success"), parse_mode="HTML")
@@ -269,6 +282,7 @@ async def handle_successful_payment(message: Message) -> None:
                 update(User).where(User.id == target_id)
                 .values(is_premium=True, premium_until=premium_until)
             )
+            await _award_premium_badge(session, target_id)
             await session.commit()
             logger.info("Gift Premium 30d for user %s from %s", target_id, user.id)
             await message.answer(t(lang, "gift_success", target=target_id), parse_mode="HTML")

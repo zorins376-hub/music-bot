@@ -183,14 +183,9 @@ async def _get_or_create_webapp_user(tg_user: dict):
             and db_user.premium_until is not None
             and db_user.premium_until < now
         )
-        orphaned_premium = (
-            not admin
-            and db_user.is_premium
-            and db_user.premium_until is None
-        )
         if admin and not db_user.is_premium:
             update_values["is_premium"] = True
-        if expired_premium or orphaned_premium:
+        if expired_premium:
             update_values["is_premium"] = False
 
         await session.execute(update(User).where(User.id == user_id).values(**update_values))

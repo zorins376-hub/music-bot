@@ -1180,9 +1180,12 @@ async def handle_grant_premium(callback: CallbackQuery, callback_data: AdmUserCb
         await callback.answer()
         return
     async with async_session() as session:
-        await session.execute(
-            update(User).where(User.id == callback_data.uid).values(is_premium=True)
-        )
+        user = await session.get(User, callback_data.uid)
+        if user:
+            user.is_premium = True
+            badges = user.badges or []
+            if "premium" not in badges:
+                user.badges = badges + ["premium"]
         await session.commit()
     await log_admin_action(callback.from_user.id, "premium", callback_data.uid)
     await callback.answer("\u25c7 Premium \u0432\u044b\u0434\u0430\u043d", show_alert=False)

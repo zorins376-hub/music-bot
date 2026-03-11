@@ -98,6 +98,14 @@ BADGES = {
             "kg": "3 досуңду чакырдың",
         },
     },
+    "premium": {
+        "name": {"ru": "◇ VIP", "en": "◇ VIP", "kg": "◇ VIP"},
+        "desc": {
+            "ru": "Активировал Premium-подписку",
+            "en": "Activated Premium subscription",
+            "kg": "Premium жазылууну активдештирди",
+        },
+    },
 }
 
 
