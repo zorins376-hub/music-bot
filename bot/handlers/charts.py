@@ -203,7 +203,8 @@ def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 100, cyr
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(playlist_url, download=False)
-                entries = info.get("entries", []) if info else []
+                # Convert to list inside context to avoid I/O errors
+                entries = list(info.get("entries", [])) if info else []
                 tracks = _parse_yt_entries(entries, cyrillic_only=cyrillic_only)
                 if tracks:
                     return tracks[:max_tracks]

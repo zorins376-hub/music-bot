@@ -299,7 +299,8 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
-            entries = info.get("entries", []) if info else []
+            # Convert to list INSIDE context to avoid I/O errors after close
+            entries = list(info.get("entries", [])) if info else []
 
         tracks = []
         for entry in entries:
