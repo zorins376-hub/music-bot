@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchParty, addPartyTrack, removePartyTrack, skipPartyTrack, closeParty,
-  createParty, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, syncPartyPlayback, updatePartyMemberRole,
+  createParty, fetchLyrics, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, syncPartyPlayback, updatePartyMemberRole,
   type Party, type PartyRecap, type Track,
 } from "../api";
 import { IconMusic, IconSpinner, IconSearch, IconPlus } from "./Icons";
@@ -35,9 +35,13 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [reactionBursts, setReactionBursts] = useState<Array<{ id: number; emoji: string; left: number }>>([]);
   const [livePosition, setLivePosition] = useState(0);
   const [showStageMode, setShowStageMode] = useState(false);
+  const [lyrics, setLyrics] = useState<string[]>([]);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [transitionFx, setTransitionFx] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionBurstIdRef = useRef(0);
+  const lastTrackIdRef = useRef<string | null>(null);
 
   const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
   const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
@@ -253,6 +257,41 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     }, 1000);
     return () => clearInterval(timer);
   }, [party?.current_position, party?.playback.action, party?.tracks]);
+
+  useEffect(() => {
+    const currentTrack = party?.tracks.find((t) => t.position === party.current_position);
+    if (!currentTrack?.video_id) {
+      setLyrics([]);
+      setLyricsLoading(false);
+      return;
+    }
+    setLyricsLoading(true);
+    fetchLyrics(currentTrack.video_id)
+      .then((text) => {
+        const lines = (text || "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(0, 24);
+        setLyrics(lines);
+      })
+      .catch(() => setLyrics([]))
+      .finally(() => setLyricsLoading(false));
+  }, [party?.current_position, party?.tracks]);
+
+  useEffect(() => {
+    const currentTrack = party?.tracks.find((t) => t.position === party.current_position);
+    const trackId = currentTrack?.video_id || null;
+    if (!trackId) {
+      lastTrackIdRef.current = null;
+      return;
+    }
+    if (lastTrackIdRef.current && lastTrackIdRef.current !== trackId) {
+      setTransitionFx(true);
+      setTimeout(() => setTransitionFx(false), 850);
+    }
+    lastTrackIdRef.current = trackId;
+  }, [party?.current_position, party?.tracks]);
 
   useEffect(() => {
     if (!showStageMode) {
@@ -487,6 +526,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
     const orbitMembers = party.members.slice(0, 6);
     const recentReactionEvents = party.events.filter((event) => event.event_type === "reaction").slice(-5).reverse();
+    const activeLyricIndex = currentTrack && lyrics.length > 0 && currentTrack.duration > 0
+      ? Math.min(lyrics.length - 1, Math.floor((livePosition / currentTrack.duration) * lyrics.length))
+      : -1;
 
     return (
       <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
@@ -683,6 +725,64 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   </div>
                 ))}
               </div>
+            )}
+            {party.members.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {party.members.slice(0, 5).map((member, index) => (
+                  <div key={`pulse-${member.user_id}`} style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "6px 9px",
+                    borderRadius: 999,
+                    background: "rgba(255,255,255,0.04)",
+                    color: textColor,
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}>
+                    <span style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: member.is_online ? (warm ? "#ffd54f" : accentColor) : "rgba(255,255,255,0.24)",
+                      boxShadow: member.is_online ? (warm ? "0 0 12px rgba(255,213,79,0.42)" : `0 0 12px ${accentColor}66`) : "none",
+                      animation: member.is_online && party.playback.action === "play" ? `partyCrowdPulse 1.4s ${index * 0.1}s ease-in-out infinite` : "none",
+                    }} />
+                    {member.display_name || `User ${member.user_id}`}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(lyricsLoading || lyrics.length > 0) && currentTrack && (
+          <div style={{ ...glassCard, padding: 12, borderRadius: 18, marginBottom: 12 }}>
+            <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>Lyrics wall</span>
+              <span style={{ fontSize: 10, color: hintColor }}>{lyricsLoading ? "loading" : `${lyrics.length} lines`}</span>
+            </div>
+            {lyricsLoading ? (
+              <div style={{ textAlign: "center", padding: 16 }}><IconSpinner size={18} color={hintColor} /></div>
+            ) : lyrics.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto", paddingRight: 4 }}>
+                {lyrics.map((line, index) => (
+                  <div key={`${index}-${line}`} style={{
+                    padding: "8px 10px",
+                    borderRadius: 12,
+                    background: index === activeLyricIndex ? (warm ? "rgba(255,193,7,0.12)" : `${accentColor}22`) : "rgba(255,255,255,0.03)",
+                    color: index === activeLyricIndex ? textColor : hintColor,
+                    fontSize: index === activeLyricIndex ? 13 : 12,
+                    fontWeight: index === activeLyricIndex ? 700 : 500,
+                    transform: index === activeLyricIndex ? "scale(1.01)" : "scale(1)",
+                    transition: "all 180ms ease",
+                  }}>
+                    {line}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: hintColor, fontSize: 12, padding: "8px 2px" }}>Для этого трека текст пока не найден.</div>
             )}
           </div>
         )}
@@ -901,6 +1001,16 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             WebkitBackdropFilter: "blur(18px) saturate(145%)",
             overflow: "auto",
           }}>
+            {transitionFx && (
+              <div style={{
+                position: "absolute",
+                inset: 0,
+                background: warm ? "radial-gradient(circle at center, rgba(255,193,7,0.26), rgba(255,109,0,0.12), transparent 68%)" : `radial-gradient(circle at center, ${accentColor}55, rgba(124,77,255,0.12), transparent 68%)`,
+                animation: "partyTransitionFlash 0.85s ease-out forwards",
+                pointerEvents: "none",
+                zIndex: 2,
+              }} />
+            )}
             {[0, 1, 2, 3, 4, 5].map((particle) => (
               <div key={`particle-${particle}`} style={{
                 position: "absolute",
@@ -1002,6 +1112,17 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                     <button key={`stage-${emoji}`} onClick={() => handleReaction(emoji)} style={{ padding: "10px 14px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.07)", color: textColor, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{emoji} {party.current_reactions?.[emoji] || 0}</button>
                   ))}
                 </div>
+
+                {lyrics.length > 0 && (
+                  <div style={{ marginTop: 20, padding: "14px 14px", borderRadius: 18, background: "rgba(255,255,255,0.05)", border: cardBorder, maxHeight: 220, overflowY: "auto" }}>
+                    <div style={{ fontSize: 10, color: hintColor, fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 10 }}>Synced lyrics</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {lyrics.map((line, index) => (
+                        <div key={`stage-lyric-${index}`} style={{ color: index === activeLyricIndex ? textColor : hintColor, fontSize: index === activeLyricIndex ? 15 : 13, fontWeight: index === activeLyricIndex ? 700 : 500, transition: "all 160ms ease" }}>{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div style={{ marginTop: 22, display: "flex", gap: 10 }}>
@@ -1014,7 +1135,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           </div>
         )}
 
-        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } } @keyframes partyOrbitPulse { 0%, 100% { transform: scale(0.96); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } } @keyframes partyParticleFloat { 0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.4; } 50% { transform: translate3d(0, -18px, 0) scale(1.08); opacity: 0.75; } }`}</style>
+        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } } @keyframes partyOrbitPulse { 0%, 100% { transform: scale(0.96); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } } @keyframes partyParticleFloat { 0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.4; } 50% { transform: translate3d(0, -18px, 0) scale(1.08); opacity: 0.75; } } @keyframes partyTransitionFlash { 0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; } } @keyframes partyCrowdPulse { 0%, 100% { transform: scale(0.9); opacity: 0.72; } 50% { transform: scale(1.18); opacity: 1; } }`}</style>
       </div>
     );
   }
