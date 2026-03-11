@@ -9,6 +9,7 @@ interface Props {
   onPlay: (track: Track) => void;
   onReorder?: (fromIndex: number, toIndex: number) => void;
   onRemove?: (track: Track) => void;
+  onClearQueue?: () => void;
   accentColor?: string;
   accentColorAlpha?: string;
   themeId?: string;
@@ -21,7 +22,7 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   } catch {}
 };
 
-export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, accentColor = "var(--tg-theme-button-color, #7c4dff)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", themeId = "blackroom" }: Props) {
+export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, onClearQueue, accentColor = "var(--tg-theme-button-color, #7c4dff)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", themeId = "blackroom" }: Props) {
   const isTequila = themeId === "tequila";
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -196,11 +197,22 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, a
         color: isTequila ? "#fef0e0" : undefined,
       }}>
         <span>Очередь ({tracks.length})</span>
-        <span style={{ fontSize: 10, color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #888)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10, color: isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #888)" }}>
           {dragIndex !== null ? (
             <><IconTarget size={12} /> отпусти для перемещения</>
           ) : (
             <><IconDragHandle size={12} /> зажми · <IconSwipeLeft size={12} /> удалить</>
+          )}
+          {onClearQueue && (
+            <button
+              onClick={() => { haptic("medium"); onClearQueue(); }}
+              style={{
+                padding: "3px 10px", borderRadius: 10, border: "none",
+                background: isTequila ? "rgba(229,57,53,0.2)" : "rgba(229,57,53,0.15)",
+                color: "#ef5350", fontSize: 10, fontWeight: 600, cursor: "pointer",
+                marginLeft: 4,
+              }}
+            >Очистить</button>
           )}
         </span>
       </div>

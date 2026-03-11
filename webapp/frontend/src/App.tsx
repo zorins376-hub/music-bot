@@ -698,9 +698,9 @@ export function App() {
     try {
       const recs = await fetchWave(userId, 10, moodFilter);
       if (recs.length > 0) {
-        // Add all recommendations to queue
+        // Add all recommendations to queue with metadata
         for (const track of recs) {
-          await sendAction("add", track.video_id);
+          await sendAction("add", track.video_id, undefined, track);
         }
         // Play first if nothing playing
         if (!state.is_playing) {
@@ -1127,6 +1127,9 @@ export function App() {
               }}
               onRemove={(t) => {
                 action("remove", t.video_id);
+              }}
+              onClearQueue={() => {
+                action("clear");
               }}
               accentColor={accentColor}
               accentColorAlpha={accentColorAlpha}

@@ -654,7 +654,12 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
 
     elif body.action == "next":
         if state.queue:
-            state.position = (state.position + 1) % len(state.queue)
+            if state.shuffle:
+                import random
+                candidates = [i for i in range(len(state.queue)) if i != state.position]
+                state.position = random.choice(candidates) if candidates else 0
+            else:
+                state.position = (state.position + 1) % len(state.queue)
             state.is_playing = True
             if state.position < len(state.queue):
                 state.current_track = state.queue[state.position]
@@ -693,6 +698,12 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
                             state.position = max(0, len(state.queue) - 1)
                         state.is_playing = False
                     break
+
+    elif body.action == "clear":
+        state.queue = []
+        state.position = 0
+        state.current_track = None
+        state.is_playing = False
 
     elif body.action == "add":
         # Add track to queue without playing
