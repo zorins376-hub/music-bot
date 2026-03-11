@@ -488,7 +488,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       recap.top_artists[0] ? `🏆 Топ артист: ${recap.top_artists[0].label}` : null,
       `#${party.invite_code}`,
     ].filter(Boolean).join("\n");
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/share/url`)}&text=${encodeURIComponent(summary)}`;
+    const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(summary)}`;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(summary);
@@ -578,7 +579,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
     const orbitMembers = party.members.slice(0, 6);
     const recentReactionEvents = party.events.filter((event) => event.event_type === "reaction").slice(-5).reverse();
-    const chatMessages = party.chat_messages.slice(-12).reverse();
+    const chatMessages = party.chat_messages.slice(-12);
     const activeLyricIndex = currentTrack && lyrics.length > 0 && currentTrack.duration > 0
       ? Math.min(lyrics.length - 1, Math.floor((livePosition / currentTrack.duration) * lyrics.length))
       : -1;

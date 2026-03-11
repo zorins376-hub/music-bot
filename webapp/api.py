@@ -2002,7 +2002,11 @@ async def remove_party_track(code: str, video_id: str, user: dict = Depends(get_
             raise HTTPException(status_code=404, detail="Track not found")
 
         await session.execute(delete(PartyTrackVote).where(PartyTrackVote.track_id == track.id))
+        removed_position = track.position
         await session.execute(delete(PartyTrack).where(PartyTrack.id == track.id))
+        # Adjust current_position if a played/current track was removed
+        if removed_position < party.current_position:
+            party.current_position = max(0, party.current_position - 1)
         await _normalize_party_positions(session, party.id)
         await _record_party_event(
             session,
@@ -2643,31 +2647,38 @@ async def party_events(
                 subs.remove(queue)
             except ValueError:
                 pass
-            async with async_session() as session:
-                from sqlalchemy import select
+            try:
+                async with async_session() as session:
+                    from sqlalchemy import select
 
-                party = await _get_party_or_404(session, code)
-                member = (
-                    await session.execute(
-                        select(PartyMember).where(
-                            PartyMember.party_id == party.id,
-                            PartyMember.user_id == user["id"],
-                        )
+                    result = await session.execute(
+                        select(PartySession).where(PartySession.invite_code == code)
                     )
-                ).scalar_one_or_none()
-                if member is not None:
-                    member.is_online = False
-                    member.last_seen_at = datetime.now(timezone.utc)
-                await _record_party_event(
-                    session,
-                    party.id,
-                    "member_left",
-                    f"{user.get('first_name', 'User')} вышел(шла) из комнаты",
-                    actor_id=user["id"],
-                    actor_name=user.get("first_name", "User"),
-                    payload={"user_id": user["id"]},
-                )
-                await session.commit()
+                    party = result.scalar_one_or_none()
+                    if party is not None:
+                        member = (
+                            await session.execute(
+                                select(PartyMember).where(
+                                    PartyMember.party_id == party.id,
+                                    PartyMember.user_id == user["id"],
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if member is not None:
+                            member.is_online = False
+                            member.last_seen_at = datetime.now(timezone.utc)
+                        await _record_party_event(
+                            session,
+                            party.id,
+                            "member_left",
+                            f"{user.get('first_name', 'User')} вышел(шла) из комнаты",
+                            actor_id=user["id"],
+                            actor_name=user.get("first_name", "User"),
+                            payload={"user_id": user["id"]},
+                        )
+                        await session.commit()
+            except Exception:
+                pass
             # Notify others that someone left
             await _notify_party_state(code, "member_left", {
                 "member_count": len(_party_subscribers.get(code, [])),

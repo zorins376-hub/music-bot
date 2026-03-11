@@ -102,7 +102,9 @@ if (bootLoader) {
   playStartupWhoosh();
   window.setTimeout(() => {
     bootLoader.classList.add("is-exiting");
-    bootLoader.classList.add("is-hidden");
-    window.setTimeout(() => bootLoader.remove(), 600);
+    window.setTimeout(() => {
+      bootLoader.classList.add("is-hidden");
+      window.setTimeout(() => bootLoader.remove(), 100);
+    }, 920);
   }, 4000);
 }
