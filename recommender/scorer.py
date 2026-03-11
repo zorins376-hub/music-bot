@@ -18,7 +18,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 
 from recommender.config import ml_config
 from recommender.model_store import load_als, load_embeddings, load_popularity, model_store

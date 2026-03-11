@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     # ── TMA Player (1.1) ─────────────────────────────────────────────────
     TMA_URL: Optional[str] = None  # e.g. https://example.com/tma/
 
-    # ── ML Recommendations ────────────────────────────────────────────────
+    # ── ML Recommendations (local — disabled when Supabase AI is active) ────
     ML_ENABLED: bool = False                     # Master switch: ML on/off
     ML_AB_TEST_ENABLED: bool = False             # A/B test mode
     ML_MODEL_DIR: Path = _BASE / "data" / "models"
@@ -149,10 +149,10 @@ class Settings(BaseSettings):
     ML_COLD_START_THRESHOLD: int = 5             # Min plays for ML (vs pure content-based)
     ML_RECO_CACHE_TTL: int = 3600                # ML reco cache TTL (seconds)
 
-    # ── Supabase AI Service ───────────────────────────────────────────────
+    # ── Supabase AI Service (primary recommendation + DB backend) ──────────
     SUPABASE_URL: Optional[str] = None           # e.g. https://xxxx.supabase.co
     SUPABASE_SERVICE_KEY: Optional[str] = None   # service_role key (NOT anon)
-    SUPABASE_AI_ENABLED: bool = False            # Master switch: use Supabase AI
+    SUPABASE_AI_ENABLED: bool = True             # Master switch: use Supabase AI (disables local ML)
 
     # ── Bot Fleet / Sharding (5.2) ────────────────────────────────────────
     NODE_ID: Optional[str] = None  # e.g. "node-1"

@@ -15,7 +15,10 @@ import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 
 from recommender.embeddings import build_sessions, train_embeddings
 from recommender.model_store import (

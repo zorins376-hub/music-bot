@@ -18,8 +18,13 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import numpy as np
-import scipy.sparse as sp
+try:
+    import numpy as np
+    import scipy.sparse as sp
+except ImportError:
+    np = None  # type: ignore[assignment]
+    sp = None  # type: ignore[assignment]
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
