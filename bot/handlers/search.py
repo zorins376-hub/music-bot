@@ -993,11 +993,19 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
             from sqlalchemy import select as _sel
             u = (await session.execute(_sel(_User).where(_User.id == user_id))).scalar()
             if u and u.request_count and u.request_count % 10 == 0:
-                from recommender.ai_dj import update_user_profile
-                try:
-                    await update_user_profile(user_id)
-                except Exception:
-                    pass
+                from bot.config import settings as _cfg
+                if _cfg.SUPABASE_AI_ENABLED:
+                    from bot.services.supabase_ai import supabase_ai
+                    try:
+                        await supabase_ai.update_profile(user_id)
+                    except Exception:
+                        pass
+                else:
+                    from recommender.ai_dj import update_user_profile
+                    try:
+                        await update_user_profile(user_id)
+                    except Exception:
+                        pass
     except Exception as e:
         logger.warning("_post_download: profile update failed: %s", e)
     return track.id

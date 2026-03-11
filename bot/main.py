@@ -113,9 +113,10 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.weekly_recap import start_weekly_recap_scheduler
     await start_weekly_recap_scheduler(bot)
 
-    # ML training scheduler (nightly at ML_RETRAIN_HOUR)
-    from recommender.train import start_ml_training_scheduler
-    await start_ml_training_scheduler()
+    # ML training scheduler (nightly at ML_RETRAIN_HOUR) — skip if Supabase AI handles it
+    if not app_settings.SUPABASE_AI_ENABLED:
+        from recommender.train import start_ml_training_scheduler
+        await start_ml_training_scheduler()
 
     # Node heartbeat (Bot Fleet 5.2)
     if app_settings.NODE_ID:

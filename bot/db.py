@@ -152,6 +152,42 @@ async def record_listening_event(
                 )
             )
             await session.commit()
+        # Mirror event to Supabase AI (fire-and-forget)
+        try:
+            from bot.config import settings as _s
+            if _s.SUPABASE_AI_ENABLED and action in ("play", "skip", "like", "dislike"):
+                import asyncio
+                from bot.services.supabase_ai import supabase_ai
+                # Build track dict from track_id if available
+                track_info = {}
+                if track_id:
+                    async with async_session() as s2:
+                        from bot.models.track import Track as _T
+                        t = await s2.get(_T, track_id)
+                        if t:
+                            track_info = {
+                                "source_id": t.source_id,
+                                "title": t.title,
+                                "artist": t.artist,
+                                "genre": t.genre,
+                                "bpm": t.bpm,
+                                "duration": t.duration,
+                                "file_id": t.file_id,
+                                "source": t.source,
+                            }
+                if track_info.get("source_id"):
+                    asyncio.create_task(
+                        supabase_ai.ingest_event(
+                            event=action,
+                            user_id=user_id,
+                            track=track_info,
+                            listen_duration=listen_duration,
+                            source=source,
+                            query=query,
+                        )
+                    )
+        except Exception:
+            pass
         # Check badges on play events (fire-and-forget)
         if action == "play":
             try:

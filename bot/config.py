@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     ML_COLD_START_THRESHOLD: int = 5             # Min plays for ML (vs pure content-based)
     ML_RECO_CACHE_TTL: int = 3600                # ML reco cache TTL (seconds)
 
+    # ── Supabase AI Service ───────────────────────────────────────────────
+    SUPABASE_URL: Optional[str] = None           # e.g. https://xxxx.supabase.co
+    SUPABASE_SERVICE_KEY: Optional[str] = None   # service_role key (NOT anon)
+    SUPABASE_AI_ENABLED: bool = False            # Master switch: use Supabase AI
+
     # ── Bot Fleet / Sharding (5.2) ────────────────────────────────────────
     NODE_ID: Optional[str] = None  # e.g. "node-1"
     DISPATCHER_TOKEN: Optional[str] = None

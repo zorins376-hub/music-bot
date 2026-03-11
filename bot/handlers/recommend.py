@@ -21,7 +21,15 @@ from bot.services.cache import cache
 from bot.callbacks import TrackCallback
 from bot.utils import fmt_duration
 from bot.services.downloader import search_tracks
-from recommender.ai_dj import get_recommendations
+from bot.config import settings as _settings
+
+# Use Supabase AI if configured, otherwise fall back to local recommender
+if _settings.SUPABASE_AI_ENABLED:
+    from bot.services.supabase_ai import supabase_ai as _supa_ai
+    async def get_recommendations(user_id, limit=10, log_for_ab=False):
+        return await _supa_ai.get_recommendations(user_id, limit=limit, log_ab=log_for_ab)
+else:
+    from recommender.ai_dj import get_recommendations
 
 router = Router()
 
