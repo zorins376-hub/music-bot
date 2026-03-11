@@ -78,6 +78,17 @@
       18% { opacity: 0.9; }
       100% { transform: translate3d(0, -26px, 0) scale(1.08); opacity: 0; }
     }
+    @keyframes tequilaFogDrift {
+      0% { transform: translate3d(-5%, 0, 0) scale(1); opacity: 0.12; }
+      50% { transform: translate3d(4%, -2%, 0) scale(1.08); opacity: 0.24; }
+      100% { transform: translate3d(10%, -4%, 0) scale(1.14); opacity: 0.08; }
+    }
+    @keyframes tequilaFinalFlash {
+      0%, 72%, 100% { opacity: 0; }
+      78% { opacity: 0.08; }
+      86% { opacity: 0.34; }
+      92% { opacity: 0.16; }
+    }
     @keyframes tequilaLoaderExit {
       0% { opacity: 1; transform: scale(1); filter: blur(0px); }
       100% { opacity: 0; transform: scale(1.035); filter: blur(8px); }
@@ -165,6 +176,60 @@
       pointer-events: none;
       z-index: 1;
     }
+    .boot-loader-card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 50% 38%, rgba(255, 248, 223, 0.42), rgba(255, 226, 149, 0.16) 18%, rgba(255,255,255,0) 44%),
+        linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255, 239, 205, 0.08) 66%, rgba(255, 244, 217, 0.18) 100%);
+      mix-blend-mode: screen;
+      opacity: 0;
+      pointer-events: none;
+      animation: tequilaFinalFlash 4.2s ease-out infinite;
+      z-index: 2;
+    }
+    .boot-loader-fog {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 2;
+    }
+    .boot-loader-fog span {
+      position: absolute;
+      inset: auto;
+      border-radius: 999px;
+      filter: blur(32px);
+      background: radial-gradient(circle, rgba(255, 233, 184, 0.24) 0%, rgba(181, 138, 52, 0.10) 42%, rgba(8, 6, 6, 0) 72%);
+      animation: tequilaFogDrift 6.8s ease-in-out infinite;
+      mix-blend-mode: screen;
+    }
+    .boot-loader-fog .fog-1 {
+      width: 54vw;
+      height: 26vw;
+      left: -10vw;
+      bottom: 8vh;
+      animation-duration: 7.8s;
+    }
+    .boot-loader-fog .fog-2 {
+      width: 46vw;
+      height: 20vw;
+      right: -8vw;
+      top: 18vh;
+      opacity: 0.16;
+      animation-delay: 1.2s;
+      animation-duration: 6.4s;
+    }
+    .boot-loader-fog .fog-3 {
+      width: 32vw;
+      height: 16vw;
+      left: 34vw;
+      bottom: 24vh;
+      opacity: 0.14;
+      animation-delay: 2.1s;
+      animation-duration: 7.1s;
+    }
     .boot-loader-image-wrap {
       position: absolute;
       inset: 0;
@@ -209,26 +274,27 @@
       transform: translateX(-50%);
       width: min(96vw, 980px);
       padding: 0 8px;
-      font-size: clamp(20px, 5vw, 34px);
-      line-height: 1.02;
+      font-size: clamp(24px, 5.8vw, 44px);
+      line-height: 0.96;
       font-weight: 900;
-      letter-spacing: 0.22em;
+      letter-spacing: 0.28em;
       text-transform: uppercase;
       background: linear-gradient(90deg, #8f5a00 0%, #f4cf68 20%, #fff1b2 36%, #d79d27 52%, #fff7ce 68%, #b87710 84%, #f4cf68 100%);
       background-size: 220% 220%;
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      text-shadow: 0 0 28px rgba(255, 202, 40, 0.22);
+      text-shadow: 0 0 30px rgba(255, 202, 40, 0.22);
       animation: tequilaGoldSweep 4.6s linear infinite;
-      z-index: 2;
+      z-index: 3;
     }
     .boot-loader-caption-line {
       display: block;
     }
     .boot-loader-caption-line + .boot-loader-caption-line {
-      margin-top: 8px;
-      font-size: 1.26em;
+      margin-top: 10px;
+      font-size: 1.4em;
+      letter-spacing: 0.3em;
     }
     .boot-loader-caption .spark {
       color: rgba(255, 229, 159, 0.95);
@@ -244,7 +310,7 @@
       letter-spacing: 0.46em;
       text-transform: uppercase;
       color: rgba(255, 233, 180, 0.54);
-      z-index: 2;
+      z-index: 3;
     }
     .boot-loader-logo {
       position: absolute;
@@ -301,6 +367,11 @@
   <div id="boot-loader" class="boot-loader" aria-hidden="true">
     <div class="boot-loader-card">
       <div class="boot-loader-logo"><img src="/icon.svg" alt="Logo" /></div>
+      <div class="boot-loader-fog" aria-hidden="true">
+        <span class="fog-1"></span>
+        <span class="fog-2"></span>
+        <span class="fog-3"></span>
+      </div>
       <div class="boot-loader-sparkles">
         <span class="boot-loader-sparkle s1">✦</span>
         <span class="boot-loader-sparkle s2">✦</span>
