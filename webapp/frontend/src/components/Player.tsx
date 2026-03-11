@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import type { EqPreset, PlayerState } from "../api";
-import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent } from "../api";
+import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
 import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus } from "./Icons";
 
@@ -42,6 +42,7 @@ interface Props {
   bypassProcessing?: boolean;
   onBypassToggle?: (on: boolean) => void;
   onAddToPlaylist?: () => void;
+  onPlayTrack?: (track: Track) => void;
 }
 
 const QUALITY_OPTIONS = ["auto", "128", "192", "320"] as const;
@@ -221,7 +222,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, onAddToPlaylist }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, onAddToPlaylist, onPlayTrack }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -231,6 +232,41 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   const [isLiked, setIsLiked] = useState(false);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
   const [showShareCard, setShowShareCard] = useState(false);
+  const [similarTracks, setSimilarTracks] = useState<Track[]>([]);
+  const [showSimilar, setShowSimilar] = useState(false);
+  const [isSimilarLoading, setIsSimilarLoading] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiPlaylistTracks, setAiPlaylistTracks] = useState<Track[]>([]);
+  const [showAiPlaylist, setShowAiPlaylist] = useState(false);
+  const [isAiPlaylistLoading, setIsAiPlaylistLoading] = useState(false);
+
+  const handleSimilar = async () => {
+    if (!track || isSimilarLoading) return;
+    if (showSimilar) { setShowSimilar(false); return; }
+    setIsSimilarLoading(true);
+    haptic("medium");
+    try {
+      const results = await fetchSimilar(track.video_id, 10);
+      setSimilarTracks(results);
+      setShowSimilar(true);
+    } catch { setSimilarTracks([]); }
+    setIsSimilarLoading(false);
+  };
+
+  const handleAiPlaylist = async () => {
+    if (!aiPrompt.trim() || isAiPlaylistLoading) return;
+    setIsAiPlaylistLoading(true);
+    haptic("medium");
+    try {
+      const results = await generateAiPlaylist(aiPrompt.trim(), 10);
+      setAiPlaylistTracks(results);
+      setShowAiPlaylist(true);
+    } catch { setAiPlaylistTracks([]); }
+    setIsAiPlaylistLoading(false);
+  };
+
+  // Reset similar/ai-playlist on track change
+  useEffect(() => { setShowSimilar(false); setSimilarTracks([]); }, [track?.video_id]);
 
   // Swipe tracking
   const touchStartX = useRef<number>(0);
@@ -1017,6 +1053,37 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               )}
               Волна
             </button>
+            {/* Similar — warm */}
+            <button
+              onClick={handleSimilar}
+              disabled={!track || isSimilarLoading}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 24,
+                border: `1px solid ${showSimilar ? gold + "88" : borderGold}`,
+                background: showSimilar ? "rgba(255,167,38,0.15)" : glassCard,
+                backdropFilter: "blur(12px)",
+                color: showSimilar ? gold : "#fef0e0",
+                cursor: !track || isSimilarLoading ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                transition: "all 0.3s ease",
+                opacity: !track ? 0.4 : 1,
+              }}
+            >
+              {isSimilarLoading ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>
+                </svg>
+              )}
+              Похожие
+            </button>
             {/* Sleep — warm */}
             <button
               onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
@@ -1042,6 +1109,100 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             </button>
           </div>
         )}
+
+        {/* Similar Tracks — warm */}
+        {showSimilar && similarTracks.length > 0 && (
+          <div style={{
+            marginTop: 14,
+            padding: 14,
+            borderRadius: 20,
+            background: "rgba(40, 25, 15, 0.75)",
+            backdropFilter: "blur(16px)",
+            border: `1px solid ${borderGold}`,
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold, marginBottom: 10 }}>Похожие треки</div>
+            {similarTracks.map((t) => (
+              <button
+                key={t.video_id}
+                onClick={() => { haptic("light"); onPlayTrack?.(t); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 6px",
+                  background: "none", border: "none", borderBottom: `1px solid ${borderGold}`,
+                  color: "#fef0e0", cursor: "pointer", textAlign: "left", fontSize: 13,
+                }}
+              >
+                {t.cover_url && <img src={t.cover_url} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />}
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                  <div style={{ fontSize: 11, color: "#c8a882" }}>{t.artist}</div>
+                </div>
+                <div style={{ fontSize: 11, color: "#c8a882" }}>{t.duration_fmt}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* AI Playlist — warm */}
+        <div style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 20,
+          background: "rgba(40, 25, 15, 0.65)",
+          backdropFilter: "blur(16px)",
+          border: `1px solid ${borderGold}`,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: gold, marginBottom: 10 }}>AI Плейлист</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              placeholder="грустный рок на вечер..."
+              value={aiPrompt}
+              onInput={(e: any) => setAiPrompt(e.target.value)}
+              onKeyDown={(e: any) => { if (e.key === "Enter") handleAiPlaylist(); }}
+              style={{
+                flex: 1, padding: "10px 14px", borderRadius: 14, border: `1px solid ${borderGold}`,
+                background: "rgba(255,213,79,0.06)", color: "#fef0e0", fontSize: 13, outline: "none",
+              }}
+            />
+            <button
+              onClick={handleAiPlaylist}
+              disabled={isAiPlaylistLoading || !aiPrompt.trim()}
+              style={{
+                padding: "10px 18px", borderRadius: 14, border: `1px solid ${gold}55`,
+                background: "linear-gradient(135deg, rgba(255,109,0,0.25), rgba(255,213,79,0.15))",
+                color: gold, cursor: isAiPlaylistLoading ? "wait" : "pointer",
+                fontSize: 13, fontWeight: 700, opacity: isAiPlaylistLoading || !aiPrompt.trim() ? 0.5 : 1,
+              }}
+            >
+              {isAiPlaylistLoading ? "..." : "Go"}
+            </button>
+          </div>
+          {showAiPlaylist && aiPlaylistTracks.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              {aiPlaylistTracks.map((t) => (
+                <button
+                  key={t.video_id}
+                  onClick={() => { haptic("light"); onPlayTrack?.(t); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 6px",
+                    background: "none", border: "none", borderBottom: `1px solid ${borderGold}`,
+                    color: "#fef0e0", cursor: "pointer", textAlign: "left", fontSize: 13,
+                  }}
+                >
+                  {t.cover_url && <img src={t.cover_url} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />}
+                  <div style={{ flex: 1, overflow: "hidden" }}>
+                    <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                    <div style={{ fontSize: 11, color: "#c8a882" }}>{t.artist}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#c8a882" }}>{t.duration_fmt}</div>
+                </button>
+              ))}
+            </div>
+          )}
+          {showAiPlaylist && aiPlaylistTracks.length === 0 && !isAiPlaylistLoading && (
+            <div style={{ marginTop: 10, textAlign: "center", color: "#c8a882", fontSize: 12 }}>Ничего не найдено</div>
+          )}
+        </div>
 
         {audioControlsPanel(true)}
         {luxuryPanel(true)}
@@ -1379,6 +1540,36 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             )}
             Волна
           </button>
+          {/* Similar */}
+          <button
+            onClick={handleSimilar}
+            disabled={!track || isSimilarLoading}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 20,
+              border: `1px solid ${showSimilar ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
+              background: showSimilar ? `${accentColorAlpha}` : "transparent",
+              color: showSimilar ? accentColor : "var(--tg-theme-text-color, #eee)",
+              cursor: !track || isSimilarLoading ? "wait" : "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              transition: "all 0.3s ease",
+              opacity: !track ? 0.4 : 1,
+            }}
+          >
+            {isSimilarLoading ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4" strokeDashoffset="10"/>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>
+              </svg>
+            )}
+            Похожие
+          </button>
           {/* Sleep Timer */}
           <button
             onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
@@ -1460,6 +1651,103 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           )}
         </div>
       )}
+
+      {/* Similar Tracks */}
+      {showSimilar && similarTracks.length > 0 && (
+        <div style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 18,
+          background: "rgba(30, 30, 50, 0.85)",
+          backdropFilter: "blur(16px)",
+          border: `1px solid ${accentColorAlpha}`,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor, marginBottom: 10 }}>Похожие треки</div>
+          {similarTracks.map((t) => (
+            <button
+              key={t.video_id}
+              onClick={() => { haptic("light"); onPlayTrack?.(t); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 6px",
+                background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                color: "var(--tg-theme-text-color, #eee)", cursor: "pointer", textAlign: "left", fontSize: 13,
+              }}
+            >
+              {t.cover_url && <img src={t.cover_url} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />}
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>{t.artist}</div>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>{t.duration_fmt}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* AI Playlist */}
+      <div style={{
+        marginTop: 14,
+        padding: 14,
+        borderRadius: 18,
+        background: "rgba(30, 30, 50, 0.7)",
+        backdropFilter: "blur(16px)",
+        border: `1px solid ${accentColorAlpha}`,
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: accentColor, marginBottom: 10 }}>AI Плейлист</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="text"
+            placeholder="грустный рок на вечер..."
+            value={aiPrompt}
+            onInput={(e: any) => setAiPrompt(e.target.value)}
+            onKeyDown={(e: any) => { if (e.key === "Enter") handleAiPlaylist(); }}
+            style={{
+              flex: 1, padding: "10px 14px", borderRadius: 14,
+              border: `1px solid ${accentColorAlpha}`,
+              background: "rgba(124, 77, 255, 0.06)", color: "var(--tg-theme-text-color, #eee)",
+              fontSize: 13, outline: "none",
+            }}
+          />
+          <button
+            onClick={handleAiPlaylist}
+            disabled={isAiPlaylistLoading || !aiPrompt.trim()}
+            style={{
+              padding: "10px 18px", borderRadius: 14,
+              border: `1px solid ${accentColor}`,
+              background: `linear-gradient(135deg, ${accentColorAlpha}, transparent)`,
+              color: accentColor, cursor: isAiPlaylistLoading ? "wait" : "pointer",
+              fontSize: 13, fontWeight: 700, opacity: isAiPlaylistLoading || !aiPrompt.trim() ? 0.5 : 1,
+            }}
+          >
+            {isAiPlaylistLoading ? "..." : "Go"}
+          </button>
+        </div>
+        {showAiPlaylist && aiPlaylistTracks.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            {aiPlaylistTracks.map((t) => (
+              <button
+                key={t.video_id}
+                onClick={() => { haptic("light"); onPlayTrack?.(t); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 6px",
+                  background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  color: "var(--tg-theme-text-color, #eee)", cursor: "pointer", textAlign: "left", fontSize: 13,
+                }}
+              >
+                {t.cover_url && <img src={t.cover_url} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />}
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                  <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>{t.artist}</div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #888)" }}>{t.duration_fmt}</div>
+              </button>
+            ))}
+          </div>
+        )}
+        {showAiPlaylist && aiPlaylistTracks.length === 0 && !isAiPlaylistLoading && (
+          <div style={{ marginTop: 10, textAlign: "center", color: "var(--tg-theme-hint-color, #888)", fontSize: 12 }}>Ничего не найдено</div>
+        )}
+      </div>
 
       {audioControlsPanel(false)}
       {luxuryPanel(false)}
