@@ -1157,7 +1157,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               type="text"
               placeholder="грустный рок на вечер..."
               value={aiPrompt}
-              onInput={(e: any) => setAiPrompt(e.target.value)}
+              onInput={(e: any) => { const v = e.target.value; setAiPrompt(v); if (!v.trim()) { setShowAiPlaylist(false); setAiPlaylistTracks([]); } }}
               onKeyDown={(e: any) => { if (e.key === "Enter") handleAiPlaylist(); }}
               style={{
                 flex: 1, padding: "10px 14px", borderRadius: 14, border: `1px solid ${borderGold}`,
@@ -1699,7 +1699,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             type="text"
             placeholder="грустный рок на вечер..."
             value={aiPrompt}
-            onInput={(e: any) => setAiPrompt(e.target.value)}
+            onInput={(e: any) => { const v = e.target.value; setAiPrompt(v); if (!v.trim()) { setShowAiPlaylist(false); setAiPlaylistTracks([]); } }}
             onKeyDown={(e: any) => { if (e.key === "Enter") handleAiPlaylist(); }}
             style={{
               flex: 1, padding: "10px 14px", borderRadius: 14,
