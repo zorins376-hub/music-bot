@@ -1,8 +1,9 @@
 # MASTER ТЗ — BLACK ROOM RADIO BOT
 
-> **Версия**: 1.0  
+> **Версия**: 1.1  
 > **Дата консолидации**: Июнь 2025  
-> **Статус документа**: Объединенное техническое задание
+> **Статус документа**: Объединенное техническое задание  
+> **Последнее обновление**: Июль 2025 — добавлен раздел 11 «Spotify-Killer Audio Engine»
 
 ---
 
@@ -18,6 +19,7 @@
 8. [Mini App улучшения](#8-mini-app-улучшения)
 9. [План реализации](#9-план-реализации)
 10. [Definition of Done](#10-definition-of-done)
+11. [Spotify-Killer Audio Engine](#11-spotify-killer-audio-engine)
 
 ---
 
@@ -933,5 +935,85 @@ rapidfuzz>=3.0.0
 ---
 
 > **Документ создан**: Июнь 2025  
-> **Последнее обновление**: Июнь 2025  
+> **Последнее обновление**: Июль 2025  
 > **Автор**: BLACK ROOM TEAM
+
+---
+
+# 11. SPOTIFY-KILLER AUDIO ENGINE
+
+> **Цель:** Довести Mini App до уровня native-приложений Spotify / Apple Music / Yandex Music по качеству воспроизведения, UX и «wow»-эффектам.
+
+## 11.1 Аудит текущего состояния
+
+| Фича | Статус | Детали |
+|-------|--------|--------|
+| MediaSession API | ✅ DONE | play/pause/next/prev/seek/seekforward/seekbackward + artwork + positionState |
+| Dynamic Color Extraction | ✅ DONE | Canvas 64×64, pixel bucketing, dominant saturated color |
+| Glassmorphism Background | ✅ DONE | Blurred cover image behind player |
+| Crossfade | ✅ DONE | 120ms exponential out, 300ms ramp in |
+| Preload Next Track | ✅ DONE | 30s before end via `<audio preload>` |
+| Prefetch Queue (IndexedDB) | ✅ DONE | Next 2 tracks cached as blobs, 100MB LRU |
+| Wake Lock API | ✅ DONE | Screen-on during playback, re-acquire on visibility |
+| Service Worker Notifications | ✅ DONE | SHOW/HIDE_NOW_PLAYING persistent notification |
+| 10-band Parametric EQ | ✅ DONE | Studio Q values, lowshelf/peaking/highshelf |
+| Compressor + Panner + Subsonic HPF | ✅ DONE | Glue compressor, stereo panner, 20Hz HPF |
+| Haptic Feedback | ⚠️ PARTIAL | Только в Player.tsx, не на всех кнопках |
+| Loudness Normalization | ❌ TODO | Нет нормализации громкости (-14 LUFS) |
+| Infinity Autoplay | ❌ TODO | Очередь кончается → тишина |
+| True Gapless Playback | ⚠️ PARTIAL | Есть crossfade, но нет zero-gap overlap |
+| Animated Mesh Gradient | ❌ TODO | Сейчас один цвет, нужен 3-цветный mesh |
+| Global Haptic | ❌ TODO | Нет вибрации на nav, чартах, поиске |
+
+## 11.2 Реализуемые фичи
+
+### SKF-001: Infinity Autoplay (P0)
+**Проблема:** Когда очередь заканчивается — тишина. Spotify никогда не останавливается.
+
+**Решение:** В обработчике `audio.ended` — когда `sendAction("next")` возвращает пустой трек или очередь закончилась, автоматически вызываем `fetchSimilar()` или `fetchWave()` для подгрузки новых треков.
+
+**Acceptance Criteria:**
+- [ ] При окончании очереди автоматически загружаются 5-10 похожих треков
+- [ ] Загрузка происходит бесшовно, без паузы > 1 сек
+- [ ] Используется `fetchSimilar(currentTrackId)` → fallback `fetchWave()`
+- [ ] Максимум 3 автоподгрузки подряд (защита от бесконечного потока)
+- [ ] Можно отключить в настройках
+
+### SKF-002: Loudness Normalization -14 LUFS (P1)
+**Проблема:** Треки из разных источников имеют разную громкость. YouTube может быть тише Yandex на 10dB+.
+
+**Решение:** Real-time RMS analysis через AnalyserNode → вычисление gain compensation → применение через inputGain node.
+
+**Acceptance Criteria:**
+- [ ] Средняя воспринимаемая громкость одинакова между треками
+- [ ] Gain compensation в диапазоне -12dB..+12dB
+- [ ] Плавный ramp (300ms) при применении компенсации
+- [ ] Не влияет на EQ preset и manual gain
+
+### SKF-003: Animated Mesh Gradient (P1)
+**Проблема:** Сейчас извлекается 1 цвет — фон статичный. Spotify/Apple Music имеют анимированный mesh из 3-4 цветов.
+
+**Решение:** Извлечь top-3 цвета из обложки → CSS mesh gradient с анимацией.
+
+**Acceptance Criteria:**
+- [ ] Извлекаются 3 доминирующих цвета из обложки
+- [ ] CSS background: conic/radial gradient с 3 цветами
+- [ ] Плавная CSS анимация (rotate/shift) ~20s loop
+- [ ] Не влияет на производительность (GPU-accelerated)
+
+### SKF-004: Global Haptic Feedback (P2)
+**Проблема:** Вибрация только в Player, но не на остальных кнопках.
+
+**Решение:** Утилита `haptic()` вызывается на всех интерактивных элементах: навигация, чарты, поиск, плейлисты.
+
+**Acceptance Criteria:**
+- [ ] `haptic("light")` на всех навигационных кнопках
+- [ ] `haptic("medium")` на play/pause/skip
+- [ ] `haptic("heavy")` на wave/shuffle/party mode
+
+### SKF-005: Enhanced Crossfade / True Gapless (P2)
+**Проблема:** Текущая реализация имеет паузу ~200ms при смене src. Нет перекрытия аудио.
+
+**Решение:** Dual audio source technique невозможна через один MediaElementSource. Вместо этого — максимально сократить gap через prefetch + instant src swap + crossfade gain.
+
+**Текущее состояние:** Уже реализовано: preload 30s + IndexedDB cache + crossfade gain ramp. Gap минимален (~50-100ms). Дополнительная оптимизация: убрать `audio.pause()` перед сменой src когда трек из кеша.

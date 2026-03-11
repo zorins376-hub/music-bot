@@ -28,6 +28,11 @@
       min-height: 100vh;
       overflow-x: hidden;
     }
+    @keyframes meshRotate {
+      0%, 100% { filter: blur(60px) brightness(0.5); transform: scale(1.1) rotate(0deg); }
+      33% { filter: blur(65px) brightness(0.45); transform: scale(1.15) rotate(2deg); }
+      66% { filter: blur(55px) brightness(0.5); transform: scale(1.1) rotate(-2deg); }
+    }
   </style>
 </head>
 <body>

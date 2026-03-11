@@ -3,6 +3,10 @@ import { searchTracks, type Track } from "../api";
 import { SkeletonTrack } from "./Skeleton";
 import { IconSpinner, IconSearch } from "./Icons";
 
+const haptic = (s: "light" | "medium" | "heavy" = "light") => {
+  try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(s); } catch {}
+};
+
 interface Props {
   onSelect: (track: Track) => void;
   accentColor?: string;
@@ -17,6 +21,7 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
 
   const doSearch = async () => {
     if (!query.trim()) return;
+    haptic("light");
     setLoading(true);
     try {
       const tracks = await searchTracks(query.trim());
@@ -78,7 +83,7 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
       ) : results.map((t) => (
         <div
           key={t.video_id}
-          onClick={() => onSelect(t)}
+          onClick={() => { haptic("medium"); onSelect(t); }}
           style={{
             display: "flex",
             alignItems: "center",

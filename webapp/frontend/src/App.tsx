@@ -8,8 +8,8 @@ import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
 import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner } from "./components/Icons";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
-import { extractDominantColor, rgbToCSS, rgbaToCSS } from "./colorExtractor";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 
@@ -110,6 +110,7 @@ export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getThemeById(getSavedThemeId()));
   const [accentColor, setAccentColor] = useState(theme.accent);
   const [accentColorAlpha, setAccentColorAlpha] = useState(theme.accentAlpha);
+  const [meshColors, setMeshColors] = useState<string[]>([]);
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null);
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -139,6 +140,13 @@ export function App() {
   const [a2pAdding, setA2pAdding] = useState<number | null>(null);
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const loudnessGainRef = useRef<GainNode | null>(null);
+  const loudnessTimerRef = useRef<number | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const autoplayCountRef = useRef(0);
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   // ─── Soft play/pause: ramp outputGain to avoid clicks through EQ/compressor chain ──
   const softPause = useCallback(async (audio: HTMLAudioElement) => {
@@ -206,9 +214,30 @@ export function App() {
       sendAction("next").then(setState).catch(() => {});
     });
 
-    audio.addEventListener("ended", () => {
+    audio.addEventListener("ended", async () => {
       // Don't swap audio elements — it breaks AudioContext source connection.
       // Cache + prefetch ensures the next track loads almost instantly.
+      const s = stateRef.current;
+      const isLastTrack = s.queue.length > 0 && s.position >= s.queue.length - 1;
+
+      if (isLastTrack && autoplayCountRef.current < 3) {
+        // Infinity autoplay: queue exhausted — fetch similar/wave tracks
+        autoplayCountRef.current++;
+        try {
+          const currentId = s.current_track?.video_id;
+          let recs: Track[] = [];
+          if (currentId) recs = await fetchSimilar(currentId, 8);
+          if (recs.length === 0) recs = await fetchWave(userIdRef.current, 8, null);
+          if (recs.length > 0) {
+            for (const t of recs) await sendAction("add", t.video_id, undefined, t);
+            const ns = await sendAction("next");
+            setState(ns);
+            return;
+          }
+        } catch {}
+      }
+
+      if (!isLastTrack) autoplayCountRef.current = 0;
       sendAction("next").then(setState).catch(() => {});
     });
     audio.addEventListener("timeupdate", () => {
@@ -274,6 +303,11 @@ export function App() {
       const inputGain = ctx.createGain();
       const outputGain = ctx.createGain();
 
+      // ── Loudness normalization gain — adjusted per-track to ~-14 LUFS ──
+      const loudnessGain = ctx.createGain();
+      loudnessGain.gain.value = 1;
+      loudnessGainRef.current = loudnessGain;
+
       // ── Subsonic filter: HPF @ 20Hz removes inaudible rumble ──
       const subsonicFilter = ctx.createBiquadFilter();
       subsonicFilter.type = "highpass";
@@ -308,8 +342,9 @@ export function App() {
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.82;
 
-      // ── Signal chain: source → crossfade → preamp → HPF → EQ → compressor → panner → analyser → output ──
-      source.connect(crossfadeGain);
+      // ── Signal chain: source → loudness → crossfade → preamp → HPF → EQ → compressor → panner → analyser → output ──
+      source.connect(loudnessGain);
+      loudnessGain.connect(crossfadeGain);
       crossfadeGain.connect(inputGain);
       inputGain.connect(subsonicFilter);
 
@@ -361,6 +396,44 @@ export function App() {
       g.setTargetAtTime(dbToGain(profile.makeup), now, 0.2);
     }
   }, [ensureEqualizerGraph]);
+
+  // ── Loudness normalization: measure RMS and adjust gain towards -14 LUFS ──
+  const measureLoudness = useCallback(() => {
+    if (loudnessTimerRef.current) clearInterval(loudnessTimerRef.current);
+    const analyser = analyserRef.current;
+    const ctx = audioContextRef.current;
+    const lg = loudnessGainRef.current;
+    if (!analyser || !ctx || !lg) return;
+
+    const buf = new Float32Array(analyser.fftSize);
+    let samples = 0;
+    let sumSquares = 0;
+    const TARGET_LUFS = -14;
+
+    loudnessTimerRef.current = window.setInterval(() => {
+      analyser.getFloatTimeDomainData(buf);
+      for (let i = 0; i < buf.length; i++) sumSquares += buf[i] * buf[i];
+      samples += buf.length;
+
+      // After ~2 seconds of data (enough for reliable RMS)
+      if (samples >= ctx.sampleRate * 2) {
+        if (loudnessTimerRef.current) clearInterval(loudnessTimerRef.current);
+        loudnessTimerRef.current = null;
+
+        const rms = Math.sqrt(sumSquares / samples);
+        if (rms > 0.0001) {
+          const currentLUFS = 20 * Math.log10(rms);
+          const correction = TARGET_LUFS - currentLUFS;
+          // Clamp to ±12dB
+          const clampedDb = Math.max(-12, Math.min(12, correction));
+          const gain = Math.pow(10, clampedDb / 20);
+          const t = ctx.currentTime;
+          lg.gain.setValueAtTime(lg.gain.value, t);
+          lg.gain.linearRampToValueAtTime(gain, t + 0.3);
+        }
+      }
+    }, 200);
+  }, []);
 
   // Bypass all processing (raw audio signal)
   const handleBypass = useCallback((on: boolean) => {
@@ -522,6 +595,13 @@ export function App() {
         outGain.gain.linearRampToValueAtTime(1, t + 0.15);
       }
 
+      // Reset loudness gain to unity for new track, then measure after 0.5s
+      const lg = loudnessGainRef.current;
+      if (ctx && lg) {
+        lg.gain.setValueAtTime(1, ctx.currentTime);
+      }
+      setTimeout(() => measureLoudness(), 500);
+
       // Prefetch next 2 tracks in queue so they start instantly
       if (state.queue.length > 1) {
         const nextIds: string[] = [];
@@ -643,9 +723,13 @@ export function App() {
         setAccentColor(rgbToCSS(color));
         setAccentColorAlpha(rgbaToCSS(color, 0.4));
       });
+      extractTopColors(coverUrl).then((colors) => {
+        setMeshColors(colors.map((c) => rgbaToCSS(c, 0.35)));
+      });
     } else {
       setAccentColor(theme.accent);
       setAccentColorAlpha(theme.accentAlpha);
+      setMeshColors([]);
     }
   }, [state.current_track?.cover_url, theme]);
 
@@ -899,8 +983,27 @@ export function App() {
           }}
         />
       )}
-      {/* Glassmorphism Background (cover blur) */}
-      {state.current_track?.cover_url && !theme.bgImage && (
+      {/* Animated Mesh Gradient Background (from cover colors) */}
+      {state.current_track?.cover_url && !theme.bgImage && meshColors.length >= 3 && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: `
+              radial-gradient(ellipse at 20% 20%, ${meshColors[0]} 0%, transparent 50%),
+              radial-gradient(ellipse at 80% 30%, ${meshColors[1]} 0%, transparent 50%),
+              radial-gradient(ellipse at 50% 80%, ${meshColors[2]} 0%, transparent 50%),
+              ${theme.bgColor}
+            `,
+            animation: "meshRotate 20s ease-in-out infinite",
+            zIndex: -1,
+          }}
+        />
+      )}
+      {state.current_track?.cover_url && !theme.bgImage && meshColors.length < 3 && (
         <div
           style={{
             position: "fixed",
@@ -940,7 +1043,7 @@ export function App() {
         {(["player", "playlists", "charts", "search"] as View[]).map((v) => (
           <button
             key={v}
-            onClick={() => setView(v)}
+            onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView(v); }}
             style={{
               padding: isTequila ? "7px 11px" : "6px 14px",
               borderRadius: isTequila ? 18 : 16,
@@ -963,7 +1066,7 @@ export function App() {
         ))}
         {/* Theme switcher */}
         <button
-          onClick={switchTheme}
+          onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} switchTheme(); }}
           title={`Switch theme (${theme.name})`}
           style={{
             padding: "6px 10px",
