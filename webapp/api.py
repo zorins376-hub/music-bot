@@ -38,6 +38,7 @@ from webapp.auth import verify_init_data
 from webapp.schemas import (
     LyricsResponse,
     PartyAddTrackRequest,
+    PartyChatRequest,
     PartyCreateRequest,
     PartyEventSchema,
     PartyMemberSchema,
@@ -2277,6 +2278,30 @@ async def save_party_as_playlist(code: str, user: dict = Depends(get_current_use
 
     await _notify_party_state(code, "playlist_saved", {"playlist_name": f"Party • {party.name}"[:100]})
     return PlaylistSchema(id=playlist.id, name=playlist.name, track_count=cnt)
+
+
+@app.post("/api/party/{code}/chat", response_model=PartySchema)
+async def send_party_chat_message(code: str, body: PartyChatRequest, user: dict = Depends(get_current_user)):
+    """Send a live chat message to the party room."""
+    message = (body.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+    async with async_session() as session:
+        party = await _get_party_or_404(session, code)
+        await _ensure_party_member(session, party, user, mark_online=False)
+        await _record_party_event(
+            session,
+            party.id,
+            "chat",
+            f"{user.get('first_name', 'User')}: {message[:180]}",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "User"),
+            payload={"message": message[:400]},
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "chat", {"message": message[:400], "actor_name": user.get("first_name", "User")})
+    return await _get_party_with_tracks(code, int(user["id"]))
 
 
 @app.post("/api/party/{code}/react", response_model=PartySchema)

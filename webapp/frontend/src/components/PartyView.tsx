@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchParty, addPartyTrack, removePartyTrack, skipPartyTrack, closeParty,
-  createParty, fetchLyrics, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, syncPartyPlayback, updatePartyMemberRole,
+  createParty, fetchLyrics, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, sendPartyChat, syncPartyPlayback, updatePartyMemberRole,
   type Party, type PartyRecap, type Track,
 } from "../api";
 import { IconMusic, IconSpinner, IconSearch, IconPlus } from "./Icons";
@@ -35,6 +35,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [reactionBursts, setReactionBursts] = useState<Array<{ id: number; emoji: string; left: number }>>([]);
   const [livePosition, setLivePosition] = useState(0);
   const [showStageMode, setShowStageMode] = useState(false);
+  const [showTvMode, setShowTvMode] = useState(false);
+  const [chatMessage, setChatMessage] = useState("");
   const [lyrics, setLyrics] = useState<string[]>([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [transitionFx, setTransitionFx] = useState(false);
@@ -226,6 +228,17 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     }
   };
 
+  const handleSendChat = async () => {
+    if (!party || !chatMessage.trim()) return;
+    try {
+      const updated = await sendPartyChat(party.invite_code, chatMessage.trim());
+      setParty(updated);
+      setChatMessage("");
+    } catch {
+      showToast("❌ Не удалось отправить сообщение");
+    }
+  };
+
   useEffect(() => {
     if (!party) {
       setRecap(null);
@@ -294,7 +307,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   }, [party?.current_position, party?.tracks]);
 
   useEffect(() => {
-    if (!showStageMode) {
+    if (!showStageMode && !showTvMode) {
       document.body.style.overflow = "";
       return;
     }
@@ -303,7 +316,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showStageMode]);
+  }, [showStageMode, showTvMode]);
 
   useEffect(() => {
     if (initialCode) {
@@ -526,6 +539,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
     const orbitMembers = party.members.slice(0, 6);
     const recentReactionEvents = party.events.filter((event) => event.event_type === "reaction").slice(-5).reverse();
+    const chatEvents = party.events.filter((event) => event.event_type === "chat").slice(-8).reverse();
     const activeLyricIndex = currentTrack && lyrics.length > 0 && currentTrack.duration > 0
       ? Math.min(lyrics.length - 1, Math.floor((livePosition / currentTrack.duration) * lyrics.length))
       : -1;
@@ -573,6 +587,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
                   background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>✨ Stage</button>
+              )}
+              {currentTrack && (
+                <button onClick={() => setShowTvMode(true)} style={{
+                  padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                }}>📺 TV</button>
               )}
               {canControl && (
                 <button onClick={handleAutoDj} style={{
@@ -786,6 +806,32 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             )}
           </div>
         )}
+
+        <div style={{ ...glassCard, padding: 12, borderRadius: 18, marginBottom: 12 }}>
+          <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Live chat</span>
+            <span style={{ fontSize: 10, color: hintColor }}>{chatEvents.length} msgs</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 180, overflowY: "auto", marginBottom: 10 }}>
+            {chatEvents.length > 0 ? chatEvents.map((event) => (
+              <div key={event.id} style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.03)" }}>
+                <div style={{ fontSize: 11, color: textColor, fontWeight: 700 }}>{event.actor_name || "Guest"}</div>
+                <div style={{ fontSize: 12, color: hintColor, marginTop: 2 }}>{String(event.payload?.message || event.message)}</div>
+              </div>
+            )) : <div style={{ color: hintColor, fontSize: 12 }}>Чат пока тихий. Напиши первым.</div>}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              placeholder="Написать в чат..."
+              value={chatMessage}
+              onInput={(e: any) => setChatMessage(e.target.value)}
+              onKeyDown={(e: any) => { if (e.key === "Enter") handleSendChat(); }}
+              style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 13, outline: "none" }}
+            />
+            <button onClick={handleSendChat} style={{ padding: "10px 12px", borderRadius: 12, border: "none", background: activeBg, color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Send</button>
+          </div>
+        </div>
 
         <button onClick={() => { haptic("light"); setShowSearch(true); }} style={{
           width: "100%", padding: "14px 0", borderRadius: 16, border: cardBorder,
@@ -1130,6 +1176,55 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 {canControl && (
                   <button onClick={() => handleSyncPlayback(party.playback.action === "pause" ? "play" : "pause", currentTrack.position, livePosition, currentTrack)} style={{ padding: "14px 16px", borderRadius: 18, border: cardBorder, background: "rgba(255,255,255,0.07)", color: textColor, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>{party.playback.action === "pause" ? "▶ Room" : "⏸ Room"}</button>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showTvMode && currentTrack && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 99997,
+            background: warm ? "linear-gradient(180deg, rgba(25,14,6,0.98), rgba(10,7,3,1))" : "linear-gradient(180deg, rgba(5,7,14,0.99), rgba(2,3,8,1))",
+            overflow: "auto",
+          }}>
+            <div style={{ minHeight: "100vh", padding: "24px 22px 36px", display: "flex", flexDirection: "column", gap: 24 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ color: hintColor, fontSize: 11, fontWeight: 800, letterSpacing: 1.6, textTransform: "uppercase" }}>Party TV</div>
+                  <div style={{ color: textColor, fontSize: 24, fontWeight: 800 }}>{party.name}</div>
+                </div>
+                <button onClick={() => setShowTvMode(false)} style={{ padding: "10px 14px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕ Close</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)", gap: 24 }}>
+                <div style={{ ...glassCard, borderRadius: 28, padding: 20 }}>
+                  <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+                    <div style={{ width: 220, height: 220, borderRadius: 26, overflow: "hidden", background: "rgba(255,255,255,0.06)", flexShrink: 0 }}>
+                      {currentTrack.cover_url ? <img src={currentTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={48} color={textColor} /></div>}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: textColor, fontSize: 34, fontWeight: 800, lineHeight: 1.08 }}>{currentTrack.title}</div>
+                      <div style={{ color: hintColor, fontSize: 18, marginTop: 8 }}>{currentTrack.artist}</div>
+                      <div style={{ marginTop: 16, height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}><div style={{ width: `${progressPercent}%`, height: "100%", background: activeBg }} /></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", color: hintColor, fontSize: 13, marginTop: 8 }}><span>{formatDuration(livePosition)}</span><span>{currentTrack.duration_fmt}</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ ...glassCard, borderRadius: 28, padding: 20 }}>
+                  <div style={{ ...sectionLabel, marginBottom: 12 }}>Queue</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {upNext.slice(0, 6).map((track, index) => (
+                      <div key={`tv-${track.video_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ color: textColor, fontSize: 14, fontWeight: 700 }}>{index + 1}. {track.title}</div>
+                          <div style={{ color: hintColor, fontSize: 12 }}>{track.artist}</div>
+                        </div>
+                        <div style={{ color: hintColor, fontSize: 12 }}>{track.duration_fmt}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

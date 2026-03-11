@@ -131,6 +131,10 @@ class PartyReactionRequest(BaseModel):
     emoji: str = "🔥"
 
 
+class PartyChatRequest(BaseModel):
+    message: str
+
+
 class PartySchema(BaseModel):
     id: int
     invite_code: str

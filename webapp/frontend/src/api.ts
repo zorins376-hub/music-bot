@@ -471,6 +471,16 @@ export async function savePartyAsPlaylist(code: string): Promise<Playlist> {
   return r.json();
 }
 
+export async function sendPartyChat(code: string, message: string): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/chat`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ message }),
+  });
+  if (!r.ok) throw new Error("Failed to send party chat");
+  return r.json();
+}
+
 export async function reactToPartyTrack(code: string, emoji: string): Promise<Party> {
   const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/react`, {
     method: "POST",
