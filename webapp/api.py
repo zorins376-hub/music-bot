@@ -1486,6 +1486,7 @@ async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_u
 import secrets
 import time
 
+from bot.models.base import async_session
 from bot.models.party import PartySession, PartyTrack
 
 # In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
@@ -1561,6 +1562,8 @@ async def _notify_party(code: str, event: str, data: dict | None = None):
 @app.post("/api/party", response_model=PartySchema)
 async def create_party(body: PartyCreateRequest, user: dict = Depends(get_current_user)):
     """Create a new party session."""
+    # Ensure user exists in DB (FK constraint on creator_id → users.id)
+    await _get_or_create_webapp_user(user)
     code = secrets.token_urlsafe(8)[:10]
     async with async_session() as session:
         from sqlalchemy import select, func
