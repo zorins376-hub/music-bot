@@ -103,6 +103,14 @@ class PartyEventSchema(BaseModel):
     created_at: Optional[str] = None
 
 
+class PartyChatMessageSchema(BaseModel):
+    id: int
+    user_id: int
+    display_name: Optional[str] = None
+    message: str
+    created_at: Optional[str] = None
+
+
 class PartyPlaybackStateSchema(BaseModel):
     track_position: int = 0
     action: str = "idle"
@@ -148,6 +156,7 @@ class PartySchema(BaseModel):
     viewer_role: str = "listener"
     members: list[PartyMemberSchema] = []
     events: list[PartyEventSchema] = []
+    chat_messages: list[PartyChatMessageSchema] = []
     playback: PartyPlaybackStateSchema = PartyPlaybackStateSchema()
     current_reactions: dict[str, int] = {}
 

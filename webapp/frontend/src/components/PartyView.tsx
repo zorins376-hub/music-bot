@@ -556,7 +556,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
     const orbitMembers = party.members.slice(0, 6);
     const recentReactionEvents = party.events.filter((event) => event.event_type === "reaction").slice(-5).reverse();
-    const chatEvents = party.events.filter((event) => event.event_type === "chat").slice(-8).reverse();
+    const chatMessages = party.chat_messages.slice(-12).reverse();
     const activeLyricIndex = currentTrack && lyrics.length > 0 && currentTrack.duration > 0
       ? Math.min(lyrics.length - 1, Math.floor((livePosition / currentTrack.duration) * lyrics.length))
       : -1;
@@ -831,13 +831,13 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
         <div style={{ ...glassCard, padding: 12, borderRadius: 18, marginBottom: 12 }}>
           <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span>Live chat</span>
-            <span style={{ fontSize: 10, color: hintColor }}>{chatEvents.length} msgs</span>
+            <span style={{ fontSize: 10, color: hintColor }}>{chatMessages.length} msgs</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 180, overflowY: "auto", marginBottom: 10 }}>
-            {chatEvents.length > 0 ? chatEvents.map((event) => (
-              <div key={event.id} style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.03)" }}>
-                <div style={{ fontSize: 11, color: textColor, fontWeight: 700 }}>{event.actor_name || "Guest"}</div>
-                <div style={{ fontSize: 12, color: hintColor, marginTop: 2 }}>{String(event.payload?.message || event.message)}</div>
+            {chatMessages.length > 0 ? chatMessages.map((message) => (
+              <div key={message.id} style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.03)" }}>
+                <div style={{ fontSize: 11, color: textColor, fontWeight: 700 }}>{message.display_name || "Guest"}</div>
+                <div style={{ fontSize: 12, color: hintColor, marginTop: 2 }}>{message.message}</div>
               </div>
             )) : <div style={{ color: hintColor, fontSize: 12 }}>{readOnlyMode ? "Read-only screen. Сообщения только для просмотра." : "Чат пока тихий. Напиши первым."}</div>}
           </div>

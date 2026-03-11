@@ -325,6 +325,14 @@ export interface PartyEvent {
   created_at?: string;
 }
 
+export interface PartyChatMessage {
+  id: number;
+  user_id: number;
+  display_name?: string;
+  message: string;
+  created_at?: string;
+}
+
 export interface PartyPlaybackState {
   track_position: number;
   action: string;
@@ -362,6 +370,7 @@ export interface Party {
   viewer_role: string;
   members: PartyMember[];
   events: PartyEvent[];
+  chat_messages: PartyChatMessage[];
   playback: PartyPlaybackState;
   current_reactions: Record<string, number>;
 }

@@ -39,6 +39,7 @@ from webapp.schemas import (
     LyricsResponse,
     PartyAddTrackRequest,
     PartyChatRequest,
+    PartyChatMessageSchema,
     PartyCreateRequest,
     PartyEventSchema,
     PartyMemberSchema,
@@ -1499,7 +1500,7 @@ import time
 from datetime import datetime, timezone
 
 from bot.models.base import async_session
-from bot.models.party import PartyEvent, PartyMember, PartyPlaybackState, PartyReaction, PartySession, PartyTrack, PartyTrackVote
+from bot.models.party import PartyChatMessage, PartyEvent, PartyMember, PartyPlaybackState, PartyReaction, PartySession, PartyTrack, PartyTrackVote
 
 # In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
 _party_subscribers: dict[str, list[asyncio.Queue]] = {}
@@ -1668,6 +1669,15 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
         )
     ).scalars().all()
     events = list(reversed(events))
+    chat_messages = (
+        await session.execute(
+            select(PartyChatMessage)
+            .where(PartyChatMessage.party_id == party.id)
+            .order_by(PartyChatMessage.created_at.desc())
+            .limit(30)
+        )
+    ).scalars().all()
+    chat_messages = list(reversed(chat_messages))
 
     playback = await _get_or_create_party_playback(session, party.id)
     online_count = sum(1 for member in members if member.is_online)
@@ -1710,6 +1720,16 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
                 created_at=_iso_dt(e.created_at),
             )
             for e in events
+        ],
+        chat_messages=[
+            PartyChatMessageSchema(
+                id=message.id,
+                user_id=message.user_id,
+                display_name=message.display_name,
+                message=message.message,
+                created_at=_iso_dt(message.created_at),
+            )
+            for message in chat_messages
         ],
         playback=PartyPlaybackStateSchema(
             track_position=playback.track_position,
@@ -2289,6 +2309,14 @@ async def send_party_chat_message(code: str, body: PartyChatRequest, user: dict 
     async with async_session() as session:
         party = await _get_party_or_404(session, code)
         await _ensure_party_member(session, party, user, mark_online=False)
+        session.add(
+            PartyChatMessage(
+                party_id=party.id,
+                user_id=user["id"],
+                display_name=user.get("first_name", "User"),
+                message=message[:400],
+            )
+        )
         await _record_party_event(
             session,
             party.id,

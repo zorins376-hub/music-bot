@@ -145,3 +145,22 @@ class PartyReaction(Base):
         UniqueConstraint("track_id", "user_id", "emoji", name="uq_party_reactions_unique"),
         Index("ix_party_reactions_track_emoji", "track_id", "emoji"),
     )
+
+
+class PartyChatMessage(Base):
+    """Persistent live-chat messages for party rooms."""
+    __tablename__ = "party_chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    party_id: Mapped[int] = mapped_column(Integer, ForeignKey("party_sessions.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_party_chat_messages_party_created", "party_id", "created_at"),
+    )
