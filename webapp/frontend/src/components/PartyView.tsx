@@ -407,6 +407,62 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     window.open(shareUrl, "_blank");
   };
 
+  const handleDownloadRecapPoster = () => {
+    if (!party || !recap) return;
+    const escapeXml = (value: string) => value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+    const topArtist = recap.top_artists[0]?.label || "Party vibe";
+    const topContributor = recap.top_contributors[0]?.label || "Your crew";
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600" viewBox="0 0 1200 1600">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#7c4dff"/>
+            <stop offset="55%" stop-color="#311b92"/>
+            <stop offset="100%" stop-color="#ff9100"/>
+          </linearGradient>
+        </defs>
+        <rect width="1200" height="1600" rx="56" fill="url(#bg)"/>
+        <circle cx="980" cy="180" r="180" fill="rgba(255,255,255,0.10)"/>
+        <circle cx="180" cy="1320" r="220" fill="rgba(255,255,255,0.08)"/>
+        <text x="100" y="140" fill="#ffffff" font-size="42" font-family="Arial, sans-serif" font-weight="700">Party recap</text>
+        <text x="100" y="220" fill="#ffffff" font-size="84" font-family="Arial, sans-serif" font-weight="800">${escapeXml(party.name)}</text>
+        <text x="100" y="290" fill="rgba(255,255,255,0.84)" font-size="30" font-family="Arial, sans-serif">#${escapeXml(party.invite_code)}</text>
+        <rect x="100" y="380" width="480" height="180" rx="36" fill="rgba(255,255,255,0.12)"/>
+        <rect x="620" y="380" width="480" height="180" rx="36" fill="rgba(255,255,255,0.12)"/>
+        <rect x="100" y="600" width="480" height="180" rx="36" fill="rgba(255,255,255,0.12)"/>
+        <rect x="620" y="600" width="480" height="180" rx="36" fill="rgba(255,255,255,0.12)"/>
+        <text x="140" y="450" fill="rgba(255,255,255,0.72)" font-size="28" font-family="Arial, sans-serif">Tracks</text>
+        <text x="140" y="530" fill="#ffffff" font-size="74" font-family="Arial, sans-serif" font-weight="800">${recap.total_tracks}</text>
+        <text x="660" y="450" fill="rgba(255,255,255,0.72)" font-size="28" font-family="Arial, sans-serif">Members</text>
+        <text x="660" y="530" fill="#ffffff" font-size="74" font-family="Arial, sans-serif" font-weight="800">${recap.total_members}</text>
+        <text x="140" y="670" fill="rgba(255,255,255,0.72)" font-size="28" font-family="Arial, sans-serif">Duration</text>
+        <text x="140" y="750" fill="#ffffff" font-size="74" font-family="Arial, sans-serif" font-weight="800">${formatDuration(recap.total_duration)}</text>
+        <text x="660" y="670" fill="rgba(255,255,255,0.72)" font-size="28" font-family="Arial, sans-serif">Events</text>
+        <text x="660" y="750" fill="#ffffff" font-size="74" font-family="Arial, sans-serif" font-weight="800">${recap.events_count}</text>
+        <text x="100" y="930" fill="#ffffff" font-size="34" font-family="Arial, sans-serif" font-weight="700">Top artist</text>
+        <text x="100" y="995" fill="rgba(255,255,255,0.88)" font-size="54" font-family="Arial, sans-serif" font-weight="800">${escapeXml(topArtist)}</text>
+        <text x="100" y="1110" fill="#ffffff" font-size="34" font-family="Arial, sans-serif" font-weight="700">Top contributor</text>
+        <text x="100" y="1175" fill="rgba(255,255,255,0.88)" font-size="54" font-family="Arial, sans-serif" font-weight="800">${escapeXml(topContributor)}</text>
+        <text x="100" y="1360" fill="rgba(255,255,255,0.78)" font-size="34" font-family="Arial, sans-serif">Made in Music Party</text>
+      </svg>
+    `.trim();
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `party-recap-${party.invite_code}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast("🖼 Poster downloaded");
+  };
+
   const Toast = toast ? (
     <div style={{
       position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
@@ -430,6 +486,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const played = party.tracks.filter(t => t.position < party.current_position).sort((a, b) => a.position - b.position);
     const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
     const orbitMembers = party.members.slice(0, 6);
+    const recentReactionEvents = party.events.filter((event) => event.event_type === "reaction").slice(-5).reverse();
 
     return (
       <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
@@ -618,6 +675,15 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 </button>
               ))}
             </div>
+            {recentReactionEvents.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+                {recentReactionEvents.map((event) => (
+                  <div key={event.id} style={{ whiteSpace: "nowrap", padding: "7px 10px", borderRadius: 999, background: "rgba(255,255,255,0.05)", color: hintColor, fontSize: 11, fontWeight: 700 }}>
+                    {String(event.payload?.emoji || "🔥")} {event.actor_name || "Guest"}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -756,7 +822,10 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           <div style={{ ...glassCard, padding: 12, borderRadius: 18, marginTop: 12 }}>
             <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span>Party recap</span>
-              <button onClick={handleShareRecap} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📤 Share recap</button>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button onClick={handleDownloadRecapPoster} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>🖼 Poster</button>
+                <button onClick={handleShareRecap} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📤 Share recap</button>
+              </div>
             </div>
             <div style={{
               position: "relative",
@@ -832,6 +901,19 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             WebkitBackdropFilter: "blur(18px) saturate(145%)",
             overflow: "auto",
           }}>
+            {[0, 1, 2, 3, 4, 5].map((particle) => (
+              <div key={`particle-${particle}`} style={{
+                position: "absolute",
+                width: 120 + (particle % 3) * 30,
+                height: 120 + (particle % 3) * 30,
+                borderRadius: "50%",
+                left: `${8 + particle * 14}%`,
+                top: `${10 + (particle % 3) * 22}%`,
+                background: warm ? "rgba(255,193,7,0.08)" : `${accentColor}22`,
+                filter: "blur(18px)",
+                animation: `partyParticleFloat ${4.5 + particle * 0.4}s ease-in-out infinite`,
+              }} />
+            ))}
             <div style={{
               position: "absolute",
               inset: 0,
@@ -932,7 +1014,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           </div>
         )}
 
-        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } } @keyframes partyOrbitPulse { 0%, 100% { transform: scale(0.96); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } }`}</style>
+        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } } @keyframes partyOrbitPulse { 0%, 100% { transform: scale(0.96); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } } @keyframes partyParticleFloat { 0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.4; } 50% { transform: translate3d(0, -18px, 0) scale(1.08); opacity: 0.75; } }`}</style>
       </div>
     );
   }
