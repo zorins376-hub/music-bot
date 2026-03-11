@@ -1393,31 +1393,31 @@ export function App() {
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            justifyContent: "center",
-            padding: "40px 24px",
-            textAlign: "center",
-            minHeight: 400,
+            padding: "24px 16px",
+            overflowY: "auto",
           }}>
-            {/* Promo Card */}
+            {/* Hero Card */}
             <div style={{
               background: isTequila
-                ? "linear-gradient(135deg, rgba(255,109,0,0.18), rgba(255,213,79,0.1))"
-                : "linear-gradient(135deg, rgba(124,77,255,0.18), rgba(168,85,247,0.1))",
+                ? "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))"
+                : "linear-gradient(135deg, rgba(124,77,255,0.2), rgba(168,85,247,0.12))",
               border: isTequila
-                ? "1px solid rgba(255,213,79,0.22)"
-                : "1px solid rgba(124,77,255,0.25)",
-              borderRadius: 24,
-              padding: "36px 28px",
-              maxWidth: 360,
-              backdropFilter: "blur(20px)",
+                ? "1px solid rgba(255,213,79,0.25)"
+                : "1px solid rgba(124,77,255,0.28)",
+              borderRadius: 28,
+              padding: "32px 24px",
+              maxWidth: 400,
+              width: "100%",
+              backdropFilter: "blur(24px)",
               boxShadow: isTequila
-                ? "0 20px 50px rgba(255,109,0,0.15)"
-                : "0 20px 50px rgba(124,77,255,0.18)",
+                ? "0 24px 60px rgba(255,109,0,0.2)"
+                : "0 24px 60px rgba(124,77,255,0.22)",
+              marginBottom: 20,
             }}>
               {/* Rocket Icon */}
               <div style={{
-                width: 72,
-                height: 72,
+                width: 80,
+                height: 80,
                 borderRadius: "50%",
                 background: isTequila
                   ? "linear-gradient(135deg, #ff6d00, #ffb300)"
@@ -1427,70 +1427,189 @@ export function App() {
                 justifyContent: "center",
                 margin: "0 auto 20px",
                 boxShadow: isTequila
-                  ? "0 12px 32px rgba(255,109,0,0.35)"
-                  : "0 12px 32px rgba(124,77,255,0.4)",
+                  ? "0 16px 40px rgba(255,109,0,0.4)"
+                  : "0 16px 40px rgba(124,77,255,0.45)",
               }}>
-                <IconRocket size={36} color="#fff" />
+                <IconRocket size={40} color="#fff" />
               </div>
               {/* Title */}
               <h2 style={{
-                fontSize: 24,
+                fontSize: 28,
                 fontWeight: 800,
                 color: isTequila ? "#ffe082" : "#fff",
-                margin: "0 0 10px",
+                margin: "0 0 8px",
                 letterSpacing: 0.5,
+                textAlign: "center",
               }}>Party Mode</h2>
               <div style={{
-                fontSize: 14,
-                fontWeight: 600,
+                fontSize: 13,
+                fontWeight: 700,
                 color: isTequila ? "#ffb74d" : "#a78bfa",
-                marginBottom: 18,
-                letterSpacing: 1.5,
+                marginBottom: 16,
+                letterSpacing: 2,
                 textTransform: "uppercase",
-              }}>Скоро!</div>
-              {/* Description */}
+                textAlign: "center",
+              }}>🚀 Скоро запуск!</div>
+              {/* Tagline */}
               <p style={{
-                fontSize: 14,
-                lineHeight: 1.65,
-                color: isTequila ? "#c8a882" : "rgba(255,255,255,0.75)",
-                margin: "0 0 20px",
+                fontSize: 15,
+                lineHeight: 1.7,
+                color: isTequila ? "#fef0e0" : "rgba(255,255,255,0.85)",
+                margin: 0,
+                textAlign: "center",
               }}>
-                Слушай музыку вместе с друзьями в реальном времени! 
-                Создавай комнату, приглашай участников и управляйте плейлистом вместе.
+                Слушай музыку с друзьями в реальном времени.<br/>
+                Создавай комнаты, приглашай участников, голосуй за треки!
               </p>
-              {/* Features List */}
+            </div>
+
+            {/* Features Grid */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              maxWidth: 400,
+              width: "100%",
+              marginBottom: 20,
+            }}>
+              {/* Feature 1 — Sync */}
               <div style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                textAlign: "left",
-                marginBottom: 22,
+                background: isTequila
+                  ? "linear-gradient(135deg, rgba(40,25,15,0.7), rgba(60,35,18,0.5))"
+                  : "linear-gradient(135deg, rgba(30,25,50,0.7), rgba(40,30,60,0.5))",
+                border: isTequila ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(124,77,255,0.18)",
+                borderRadius: 18,
+                padding: "18px 14px",
+                backdropFilter: "blur(16px)",
               }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>🎧</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Синхрон</div>
+                <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
+                  Все слышат одну музыку в один момент. Идеальная синхронизация.
+                </div>
+              </div>
+              {/* Feature 2 — Room */}
+              <div style={{
+                background: isTequila
+                  ? "linear-gradient(135deg, rgba(40,25,15,0.7), rgba(60,35,18,0.5))"
+                  : "linear-gradient(135deg, rgba(30,25,50,0.7), rgba(40,30,60,0.5))",
+                border: isTequila ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(124,77,255,0.18)",
+                borderRadius: 18,
+                padding: "18px 14px",
+                backdropFilter: "blur(16px)",
+              }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>🏠</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Комнаты</div>
+                <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
+                  Создай свою или присоединись по коду. До 50 человек.
+                </div>
+              </div>
+              {/* Feature 3 — Voting */}
+              <div style={{
+                background: isTequila
+                  ? "linear-gradient(135deg, rgba(40,25,15,0.7), rgba(60,35,18,0.5))"
+                  : "linear-gradient(135deg, rgba(30,25,50,0.7), rgba(40,30,60,0.5))",
+                border: isTequila ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(124,77,255,0.18)",
+                borderRadius: 18,
+                padding: "18px 14px",
+                backdropFilter: "blur(16px)",
+              }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>📊</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Голосование</div>
+                <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
+                  Голосуй за следующий трек. Демократия в действии!
+                </div>
+              </div>
+              {/* Feature 4 — Chat */}
+              <div style={{
+                background: isTequila
+                  ? "linear-gradient(135deg, rgba(40,25,15,0.7), rgba(60,35,18,0.5))"
+                  : "linear-gradient(135deg, rgba(30,25,50,0.7), rgba(40,30,60,0.5))",
+                border: isTequila ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(124,77,255,0.18)",
+                borderRadius: 18,
+                padding: "18px 14px",
+                backdropFilter: "blur(16px)",
+              }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>💬</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 4 }}>Живой чат</div>
+                <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.65)", lineHeight: 1.4 }}>
+                  Общайся с участниками в реальном времени.
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced Features List */}
+            <div style={{
+              background: isTequila
+                ? "linear-gradient(135deg, rgba(40,25,15,0.6), rgba(50,30,15,0.4))"
+                : "linear-gradient(135deg, rgba(25,20,45,0.6), rgba(35,28,55,0.4))",
+              border: isTequila ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(124,77,255,0.15)",
+              borderRadius: 20,
+              padding: "20px 18px",
+              maxWidth: 400,
+              width: "100%",
+              backdropFilter: "blur(16px)",
+              marginBottom: 20,
+            }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: 1.8,
+                color: isTequila ? "#c8a882" : "rgba(255,255,255,0.5)",
+                marginBottom: 14,
+              }}>Расширенные возможности</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {[
-                  { icon: "🎧", text: "Синхронное воспроизведение" },
-                  { icon: "👥", text: "До 50 участников в комнате" },
-                  { icon: "🎤", text: "Живой чат и реакции" },
-                  { icon: "📊", text: "Голосование за треки" },
-                  { icon: "🤖", text: "AI DJ для автоподбора" },
+                  { icon: "🎤", title: "DJ Mode", desc: "Управляй очередью как диджей. Микшируй треки, используй переходы." },
+                  { icon: "🤖", title: "AI Auto-DJ", desc: "Умный подбор следующих треков на основе вкусов участников." },
+                  { icon: "🔥", title: "Реакции", desc: "Отправляй огонь, сердечки и другие эмоции прямо во время трека." },
+                  { icon: "📺", title: "TV Mode", desc: "Выведи пати на большой экран. Идеально для вечеринок." },
+                  { icon: "🎭", title: "Stage Mode", desc: "Полноэкранный режим с визуализацией и текстом песен." },
+                  { icon: "👑", title: "Co-host", desc: "Назначай соведущих с правами управления плейлистом." },
+                  { icon: "📋", title: "История", desc: "Сохраняй плейлисты пати и смотри статистику после." },
+                  { icon: "🔗", title: "Шеринг", desc: "Приглашай друзей одной ссылкой или QR-кодом." },
                 ].map((f, i) => (
-                  <div key={i} style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    fontSize: 13,
-                    color: isTequila ? "#fef0e0" : "rgba(255,255,255,0.85)",
-                  }}>
-                    <span style={{ fontSize: 16 }}>{f.icon}</span>
-                    <span>{f.text}</span>
+                  <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{
+                      fontSize: 20,
+                      width: 32,
+                      height: 32,
+                      borderRadius: 10,
+                      background: isTequila
+                        ? "linear-gradient(135deg, rgba(255,109,0,0.25), rgba(255,213,79,0.15))"
+                        : "linear-gradient(135deg, rgba(124,77,255,0.25), rgba(168,85,247,0.15))",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}>{f.icon}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isTequila ? "#ffe082" : "#fff", marginBottom: 2 }}>{f.title}</div>
+                      <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.6)", lineHeight: 1.4 }}>{f.desc}</div>
+                    </div>
                   </div>
                 ))}
               </div>
-              {/* CTA */}
-              <div style={{
-                fontSize: 12,
-                color: isTequila ? "#c8a882" : "rgba(255,255,255,0.5)",
-                fontStyle: "italic",
-              }}>Следи за обновлениями!</div>
+            </div>
+
+            {/* CTA Footer */}
+            <div style={{
+              textAlign: "center",
+              padding: "12px 20px",
+              background: isTequila
+                ? "linear-gradient(135deg, rgba(255,109,0,0.15), rgba(255,213,79,0.08))"
+                : "linear-gradient(135deg, rgba(124,77,255,0.15), rgba(168,85,247,0.08))",
+              borderRadius: 16,
+              maxWidth: 400,
+              width: "100%",
+            }}>
+              <div style={{ fontSize: 13, color: isTequila ? "#fef0e0" : "rgba(255,255,255,0.85)", marginBottom: 4 }}>
+                🔔 Следи за обновлениями!
+              </div>
+              <div style={{ fontSize: 11, color: isTequila ? "#c8a882" : "rgba(255,255,255,0.5)" }}>
+                Party Mode уже на финальном этапе тестирования
+              </div>
             </div>
           </div>
         )
