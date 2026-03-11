@@ -43,6 +43,11 @@
       0%, 100% { transform: translateY(0px) scale(1); }
       50% { transform: translateY(-8px) scale(1.012); }
     }
+    @keyframes tequilaLoaderZoom {
+      0% { transform: scale(1.02) translate3d(0, 0, 0); }
+      50% { transform: scale(1.065) translate3d(0, -0.4%, 0); }
+      100% { transform: scale(1.1) translate3d(0, -0.8%, 0); }
+    }
     @keyframes tequilaLoaderPulse {
       0%, 100% { opacity: 0.45; transform: scale(1); }
       50% { opacity: 0.82; transform: scale(1.08); }
@@ -143,6 +148,7 @@
       position: absolute;
       inset: 0;
       background:
+        radial-gradient(circle at center, transparent 42%, rgba(5, 4, 6, 0.14) 62%, rgba(5, 4, 6, 0.52) 100%),
         linear-gradient(180deg, rgba(8,6,6,0.10) 0%, rgba(8,6,6,0.22) 58%, rgba(8,6,6,0.82) 100%),
         linear-gradient(135deg, rgba(255,255,255,0.06), transparent 38%, rgba(255,193,7,0.06));
       pointer-events: none;
@@ -153,25 +159,27 @@
       height: 100%;
       object-fit: cover;
       object-position: center;
+      animation: tequilaLoaderZoom 4.8s ease-out forwards;
+      filter: saturate(1.03) contrast(1.03);
     }
     .boot-loader-caption {
       position: absolute;
       left: 50%;
-      bottom: max(42px, env(safe-area-inset-bottom));
+      bottom: max(58px, calc(env(safe-area-inset-bottom) + 28px));
       transform: translateX(-50%);
-      width: min(92vw, 760px);
+      width: min(96vw, 980px);
       padding: 0 8px;
-      font-size: clamp(16px, 4vw, 24px);
-      line-height: 1.28;
+      font-size: clamp(18px, 4.2vw, 28px);
+      line-height: 1.22;
       font-weight: 900;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
       background: linear-gradient(90deg, #8f5a00 0%, #f4cf68 20%, #fff1b2 36%, #d79d27 52%, #fff7ce 68%, #b87710 84%, #f4cf68 100%);
       background-size: 220% 220%;
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      text-shadow: 0 0 22px rgba(255, 202, 40, 0.18);
+      text-shadow: 0 0 28px rgba(255, 202, 40, 0.22);
       animation: tequilaGoldSweep 4.6s linear infinite;
       z-index: 2;
     }
@@ -182,11 +190,11 @@
     .boot-loader-subline {
       position: absolute;
       left: 50%;
-      bottom: max(18px, calc(env(safe-area-inset-bottom) * 0.5));
+      bottom: max(24px, calc(env(safe-area-inset-bottom) * 0.65));
       transform: translateX(-50%);
-      width: min(92vw, 760px);
+      width: min(96vw, 980px);
       font-size: 11px;
-      letter-spacing: 0.38em;
+      letter-spacing: 0.46em;
       text-transform: uppercase;
       color: rgba(255, 233, 180, 0.54);
       z-index: 2;
