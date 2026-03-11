@@ -405,3 +405,51 @@ class TestSupabaseAiEndpoints:
             from webapp.api import get_trending
             result = await get_trending(hours=24, limit=20, genre=None, user={"id": 1})
             assert "i.ytimg.com" in result.tracks[0].cover_url
+
+
+# ═══════════════════════════════════ Stream Routing Guard ════════════════
+
+class TestStreamRouting:
+    """Test that non-YouTube IDs don't hit YouTube downloader."""
+
+    def test_is_likely_youtube_id_valid(self):
+        from webapp.api import _is_likely_youtube_id
+        assert _is_likely_youtube_id("dQw4w9WgXcQ") is True
+        assert _is_likely_youtube_id("abc12_-XYZq") is True
+        assert _is_likely_youtube_id("kJQP7kiw5Fk") is True
+
+    def test_is_likely_youtube_id_rejects_spotify(self):
+        from webapp.api import _is_likely_youtube_id
+        assert _is_likely_youtube_id("sp_5VFjlJeNf8DgKHCsTje5Ny") is False
+
+    def test_is_likely_youtube_id_rejects_yandex(self):
+        from webapp.api import _is_likely_youtube_id
+        assert _is_likely_youtube_id("ym_628727") is False
+
+    def test_is_likely_youtube_id_rejects_vk(self):
+        from webapp.api import _is_likely_youtube_id
+        assert _is_likely_youtube_id("vk_12345678") is False
+
+    def test_is_likely_youtube_id_rejects_pure_digits(self):
+        from webapp.api import _is_likely_youtube_id
+        assert _is_likely_youtube_id("1630262112") is False
+        assert _is_likely_youtube_id("110914091") is False
+
+    @pytest.mark.asyncio
+    async def test_resolve_stream_url_skips_non_youtube(self):
+        """_resolve_stream_url_cached should return None for sp_ IDs."""
+        from webapp.api import _resolve_stream_url_cached
+        result = await _resolve_stream_url_cached("sp_5VFjlJeNf8DgKHCsTje5Ny")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_stream_url_skips_yandex(self):
+        from webapp.api import _resolve_stream_url_cached
+        result = await _resolve_stream_url_cached("ym_628727")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_prefetch_skips_non_youtube(self):
+        from webapp.api import _prefetch_stream_url
+        result = await _prefetch_stream_url("sp_3iVKcXe4ziRBNZ00NuXkqM")
+        assert result is None

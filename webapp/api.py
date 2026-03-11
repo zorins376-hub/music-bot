@@ -279,9 +279,31 @@ async def stream_audio(
                 from bot.services.yandex_provider import download_yandex
                 track_id = int(video_id[3:])  # Remove "ym_" prefix
                 mp3_path = await download_yandex(track_id, mp3_path)
+            elif video_id.startswith("sp_"):
+                # Spotify track — search YouTube by metadata
+                sp_query = await _spotify_id_to_query(video_id)
+                if not sp_query:
+                    raise HTTPException(status_code=404, detail="Spotify track not found")
+                from bot.services.downloader import search_tracks
+                results = await search_tracks(sp_query, max_results=1, source="youtube")
+                if not results:
+                    raise HTTPException(status_code=404, detail="No YouTube match for Spotify track")
+                yt_id = results[0].get("video_id", "")
+                if not yt_id:
+                    raise HTTPException(status_code=404, detail="No YouTube match for Spotify track")
+                mp3_path = await download_manager.download(yt_id)
+                # Symlink or copy so sp_ ID maps to the file
+                sp_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+                if not sp_path.exists() and mp3_path.exists():
+                    import shutil
+                    shutil.copy2(mp3_path, sp_path)
+                mp3_path = sp_path
             elif video_id.startswith("vk_"):
                 # VK Music — need to re-fetch URL (temporary links)
                 raise HTTPException(status_code=501, detail="VK streaming not supported in TMA yet")
+            elif not _is_likely_youtube_id(video_id):
+                # Unknown source — reject early instead of sending junk to YouTube
+                raise HTTPException(status_code=400, detail=f"Unsupported track source: {video_id}")
             else:
                 # YouTube: try cached stream URL first, then resolve
                 import time as _time
@@ -427,10 +449,47 @@ async def stream_audio(
     )
 
 
+def _is_likely_youtube_id(video_id: str) -> bool:
+    """Check if video_id looks like a real YouTube ID (11 alphanumeric/dash/underscore chars)."""
+    import re as _re
+    # Reject known non-YouTube prefixes
+    if video_id.startswith(("ym_", "sp_", "vk_", "sc_", "dz_")):
+        return False
+    # Reject pure digits (old Yandex IDs leaked as video_id)
+    if video_id.isdigit():
+        return False
+    # Standard YouTube IDs are exactly 11 chars: [a-zA-Z0-9_-]
+    if _re.match(r'^[a-zA-Z0-9_-]{8,15}$', video_id):
+        return True
+    return False
+
+
+async def _spotify_id_to_query(video_id: str) -> str | None:
+    """Look up Spotify track metadata from DB and return 'artist title' search query."""
+    try:
+        from bot.db import async_session, Track
+        async with async_session() as session:
+            from sqlalchemy import select
+            result = await session.execute(
+                select(Track).where(Track.source_id == video_id).limit(1)
+            )
+            track = result.scalar_one_or_none()
+            if track:
+                return f"{track.artist} {track.title}"
+    except Exception:
+        pass
+    # Fallback: strip sp_ prefix and use as-is (Spotify ID won't work, but at least we tried)
+    return None
+
+
 # ── Helper: Redis player state ──────────────────────────────────────────
 
 
 async def _resolve_stream_url_cached(video_id: str) -> str | None:
+    """Resolve and cache YouTube stream URL. Only works for YouTube IDs."""
+    if not _is_likely_youtube_id(video_id):
+        return None
+
     import time as _time
 
     cached = _stream_url_cache.get(video_id)
@@ -462,6 +521,8 @@ async def _resolve_stream_url_cached(video_id: str) -> str | None:
 
 async def _prefetch_stream_url(video_id: str) -> str | None:
     """Resolve and cache a stream URL without downloading (for prefetch)."""
+    if not _is_likely_youtube_id(video_id):
+        return None
     import time as _time
     cached = _stream_url_cache.get(video_id)
     if cached and cached[1] > _time.time():
