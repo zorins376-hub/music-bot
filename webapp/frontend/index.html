@@ -33,7 +33,32 @@
       33% { filter: blur(65px) brightness(0.45); transform: scale(1.15) rotate(2deg); }
       66% { filter: blur(55px) brightness(0.5); transform: scale(1.1) rotate(-2deg); }
     }
+    @keyframes luxuryShine {
+      0% { transform: translateX(-140%) skewX(-18deg); opacity: 0; }
+      20% { opacity: 0.1; }
+      50% { opacity: 0.32; }
+      100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
+    }
     .luxury-carousel::-webkit-scrollbar { display: none; }
+    .luxury-tab::after,
+    .luxury-theme-chip::after {
+      content: "";
+      position: absolute;
+      inset: -20% auto -20% -35%;
+      width: 38%;
+      pointer-events: none;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      transform: translateX(-140%) skewX(-18deg);
+      opacity: 0;
+    }
+    .luxury-tab.is-active::after,
+    .luxury-tab.is-party::after,
+    .luxury-theme-chip::after {
+      animation: luxuryShine 3.2s ease-in-out infinite;
+    }
+    .luxury-tab.is-party {
+      box-shadow: 0 8px 22px rgba(255, 122, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.12);
+    }
   </style>
 </head>
 <body>

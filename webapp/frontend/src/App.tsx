@@ -120,6 +120,7 @@ export function App() {
   const [buffering, setBuffering] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [eqPreset, setEqPreset] = useState<EqPreset>(() => getSavedEqPreset());
+  const navCarouselRef = useRef<HTMLElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -143,6 +144,17 @@ export function App() {
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
   const loudnessGainRef = useRef<GainNode | null>(null);
+
+  useEffect(() => {
+    const nav = navCarouselRef.current;
+    if (!nav) return;
+    const activeButton = nav.querySelector<HTMLElement>(`[data-view="${view}"]`);
+    if (!activeButton) return;
+    const navRect = nav.getBoundingClientRect();
+    const buttonRect = activeButton.getBoundingClientRect();
+    const delta = (buttonRect.left - navRect.left) - (navRect.width / 2 - buttonRect.width / 2);
+    nav.scrollTo({ left: nav.scrollLeft + delta, behavior: "smooth" });
+  }, [view]);
   const loudnessTimerRef = useRef<number | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -1069,7 +1081,7 @@ export function App() {
           borderRadius: 22,
           background: `linear-gradient(270deg, ${theme.bgColor}, transparent)`,
         }} />
-        <nav className="luxury-carousel" style={{
+        <nav ref={navCarouselRef} className="luxury-carousel" style={{
           display: "flex",
           gap: isTequila ? 7 : 10,
           alignItems: "center",
@@ -1104,6 +1116,8 @@ export function App() {
             return (
               <button
                 key={v}
+                data-view={v}
+                className={`luxury-tab${isActive ? " is-active" : ""}${isParty ? " is-party" : ""}`}
                 onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView(v); }}
                 style={{
                   padding: isTequila ? "9px 14px" : "9px 15px",
@@ -1138,6 +1152,9 @@ export function App() {
                         : `0 10px 24px ${accentColorAlpha}, inset 0 1px 0 rgba(255,255,255,0.18)`)
                     : "inset 0 1px 0 rgba(255,255,255,0.08)",
                   textShadow: isActive ? "0 1px 10px rgba(0,0,0,0.18)" : "none",
+                  position: "relative",
+                  overflow: "hidden",
+                  transform: isActive ? "translateY(-1px) scale(1.02)" : "translateY(0) scale(1)",
                 }}
               >
                 {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? "🎉 Party" : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
@@ -1146,6 +1163,7 @@ export function App() {
           })}
           {/* Theme switcher */}
           <button
+            className="luxury-theme-chip"
             onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} switchTheme(); }}
             title={`Switch theme (${theme.name})`}
             style={{
@@ -1166,6 +1184,8 @@ export function App() {
               flexShrink: 0,
               scrollSnapAlign: "end",
               boxShadow: `0 8px 20px ${theme.accentAlpha}, inset 0 1px 0 rgba(255,255,255,0.14)`,
+              position: "relative",
+              overflow: "hidden",
             }}
           >
             {theme.id === "tequila" ? <IconLime size={14} /> :
