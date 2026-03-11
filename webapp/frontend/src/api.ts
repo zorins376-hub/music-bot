@@ -308,6 +308,31 @@ export interface PartyTrack extends Track {
   position: number;
 }
 
+export interface PartyMember {
+  user_id: number;
+  display_name?: string;
+  role: string;
+  is_online: boolean;
+}
+
+export interface PartyEvent {
+  id: number;
+  event_type: string;
+  actor_id?: number;
+  actor_name?: string;
+  message: string;
+  payload?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface PartyPlaybackState {
+  track_position: number;
+  action: string;
+  seek_position: number;
+  updated_by?: number;
+  updated_at?: string;
+}
+
 export interface Party {
   id: number;
   invite_code: string;
@@ -317,6 +342,11 @@ export interface Party {
   current_position: number;
   tracks: PartyTrack[];
   member_count: number;
+  skip_threshold: number;
+  viewer_role: string;
+  members: PartyMember[];
+  events: PartyEvent[];
+  playback: PartyPlaybackState;
 }
 
 export async function createParty(name = "Party 🎉"): Promise<Party> {
@@ -374,6 +404,54 @@ export async function closeParty(code: string): Promise<void> {
     method: "POST",
     headers: getHeaders(),
   });
+}
+
+export async function playNextPartyTrack(code: string, videoId: string): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/tracks/${encodeURIComponent(videoId)}/play-next`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to move track to play next");
+  return r.json();
+}
+
+export async function reorderPartyTrack(code: string, fromPosition: number, toPosition: number): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/reorder`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ from_position: fromPosition, to_position: toPosition }),
+  });
+  if (!r.ok) throw new Error("Failed to reorder party tracks");
+  return r.json();
+}
+
+export async function updatePartyMemberRole(code: string, memberUserId: number, role: "cohost" | "listener"): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/members/${memberUserId}/role`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ role }),
+  });
+  if (!r.ok) throw new Error("Failed to update member role");
+  return r.json();
+}
+
+export async function syncPartyPlayback(code: string, action: "play" | "pause" | "seek", trackPosition = 0, seekPosition = 0): Promise<Party> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/playback`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ action, track_position: trackPosition, seek_position: seekPosition }),
+  });
+  if (!r.ok) throw new Error("Failed to sync playback");
+  return r.json();
+}
+
+export async function savePartyAsPlaylist(code: string): Promise<Playlist> {
+  const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/save-playlist`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to save party as playlist");
+  return r.json();
 }
 
 export async function fetchMyParties(): Promise<Party[]> {

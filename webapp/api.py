@@ -39,6 +39,12 @@ from webapp.schemas import (
     LyricsResponse,
     PartyAddTrackRequest,
     PartyCreateRequest,
+    PartyEventSchema,
+    PartyMemberSchema,
+    PartyPlaybackRequest,
+    PartyPlaybackStateSchema,
+    PartyReorderRequest,
+    PartyRoleUpdateRequest,
     PartySchema,
     PartyTrackSchema,
     PlayerAction,
@@ -1483,63 +1489,245 @@ async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_u
 
 # ── Party Playlists ──────────────────────────────────────────────────────
 
+import math
 import secrets
 import time
+from datetime import datetime, timezone
 
 from bot.models.base import async_session
-from bot.models.party import PartySession, PartyTrack
+from bot.models.party import PartyEvent, PartyMember, PartyPlaybackState, PartySession, PartyTrack, PartyTrackVote
 
 # In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
 _party_subscribers: dict[str, list[asyncio.Queue]] = {}
 
 
-async def _get_party_with_tracks(code: str) -> PartySchema:
-    """Load party session by invite code with all tracks."""
-    async with async_session() as session:
-        from sqlalchemy import select
-        result = await session.execute(
-            select(PartySession).where(
-                PartySession.invite_code == code,
-                PartySession.is_active == True,
-            )
-        )
-        party = result.scalar_one_or_none()
-        if not party:
-            raise HTTPException(status_code=404, detail="Party not found")
+def _party_skip_threshold(member_count: int) -> int:
+    if member_count <= 1:
+        return 1
+    if member_count <= 3:
+        return 2
+    return min(5, max(3, math.ceil(member_count * 0.5)))
 
-        tracks_result = await session.execute(
+
+def _iso_dt(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat()
+
+
+async def _record_party_event(
+    session,
+    party_id: int,
+    event_type: str,
+    message: str,
+    actor_id: int | None = None,
+    actor_name: str | None = None,
+    payload: dict | None = None,
+):
+    session.add(
+        PartyEvent(
+            party_id=party_id,
+            event_type=event_type,
+            actor_id=actor_id,
+            actor_name=actor_name,
+            message=message[:500],
+            payload=payload,
+        )
+    )
+
+
+async def _get_party_or_404(session, code: str) -> PartySession:
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(PartySession).where(
+            PartySession.invite_code == code,
+            PartySession.is_active == True,
+        )
+    )
+    party = result.scalar_one_or_none()
+    if not party:
+        raise HTTPException(status_code=404, detail="Party not found")
+    return party
+
+
+async def _ensure_party_member(session, party: PartySession, user: dict, *, mark_online: bool) -> PartyMember:
+    from sqlalchemy import select
+
+    user_id = int(user["id"])
+    name = user.get("first_name") or user.get("username") or f"User {user_id}"
+    result = await session.execute(
+        select(PartyMember).where(
+            PartyMember.party_id == party.id,
+            PartyMember.user_id == user_id,
+        )
+    )
+    member = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if member is None:
+        member = PartyMember(
+            party_id=party.id,
+            user_id=user_id,
+            display_name=name,
+            role="dj" if party.creator_id == user_id else "listener",
+            is_online=mark_online,
+            joined_at=now,
+            last_seen_at=now,
+        )
+        session.add(member)
+    else:
+        member.display_name = name
+        member.last_seen_at = now
+        if party.creator_id == user_id:
+            member.role = "dj"
+        if mark_online:
+            member.is_online = True
+    return member
+
+
+async def _get_or_create_party_playback(session, party_id: int) -> PartyPlaybackState:
+    from sqlalchemy import select
+
+    result = await session.execute(select(PartyPlaybackState).where(PartyPlaybackState.party_id == party_id))
+    playback = result.scalar_one_or_none()
+    if playback is None:
+        playback = PartyPlaybackState(party_id=party_id)
+        session.add(playback)
+        await session.flush()
+    return playback
+
+
+async def _normalize_party_positions(session, party_id: int):
+    from sqlalchemy import select
+
+    tracks = (
+        await session.execute(
+            select(PartyTrack)
+            .where(PartyTrack.party_id == party_id)
+            .order_by(PartyTrack.position, PartyTrack.id)
+        )
+    ).scalars().all()
+    changed = False
+    for idx, track in enumerate(tracks):
+        if track.position != idx:
+            track.position = idx
+            changed = True
+    return changed
+
+
+async def _build_party_schema(session, party: PartySession, viewer_id: int | None = None) -> PartySchema:
+    from sqlalchemy import func, select
+
+    tracks = (
+        await session.execute(
             select(PartyTrack)
             .where(PartyTrack.party_id == party.id)
-            .order_by(PartyTrack.position)
+            .order_by(PartyTrack.position, PartyTrack.id)
         )
-        tracks = tracks_result.scalars().all()
-
-        subs = _party_subscribers.get(code, [])
-
-        return PartySchema(
-            id=party.id,
-            invite_code=party.invite_code,
-            creator_id=party.creator_id,
-            name=party.name,
-            is_active=party.is_active,
-            current_position=party.current_position,
-            member_count=len(subs),
-            tracks=[
-                PartyTrackSchema(
-                    video_id=t.video_id,
-                    title=t.title,
-                    artist=t.artist,
-                    duration=t.duration,
-                    duration_fmt=t.duration_fmt,
-                    source=t.source,
-                    cover_url=t.cover_url,
-                    added_by=t.added_by,
-                    added_by_name=t.added_by_name,
-                    skip_votes=t.skip_votes,
-                    position=t.position,
-                ) for t in tracks
-            ],
+    ).scalars().all()
+    track_ids = [t.id for t in tracks]
+    vote_counts: dict[int, int] = {}
+    if track_ids:
+        rows = await session.execute(
+            select(PartyTrackVote.track_id, func.count())
+            .where(
+                PartyTrackVote.track_id.in_(track_ids),
+                PartyTrackVote.vote_type == "skip",
+            )
+            .group_by(PartyTrackVote.track_id)
         )
+        vote_counts = {track_id: count for track_id, count in rows.all()}
+
+    members = (
+        await session.execute(
+            select(PartyMember)
+            .where(PartyMember.party_id == party.id)
+            .order_by(PartyMember.is_online.desc(), PartyMember.joined_at.asc())
+        )
+    ).scalars().all()
+    events = (
+        await session.execute(
+            select(PartyEvent)
+            .where(PartyEvent.party_id == party.id)
+            .order_by(PartyEvent.created_at.desc())
+            .limit(12)
+        )
+    ).scalars().all()
+    events = list(reversed(events))
+
+    playback = await _get_or_create_party_playback(session, party.id)
+    online_count = sum(1 for member in members if member.is_online)
+    viewer_role = "listener"
+    if viewer_id is not None:
+        if viewer_id == party.creator_id:
+            viewer_role = "dj"
+        else:
+            viewer_member = next((m for m in members if m.user_id == viewer_id), None)
+            if viewer_member:
+                viewer_role = viewer_member.role
+
+    return PartySchema(
+        id=party.id,
+        invite_code=party.invite_code,
+        creator_id=party.creator_id,
+        name=party.name,
+        is_active=party.is_active,
+        current_position=party.current_position,
+        member_count=online_count,
+        skip_threshold=_party_skip_threshold(online_count),
+        viewer_role=viewer_role,
+        members=[
+            PartyMemberSchema(
+                user_id=m.user_id,
+                display_name=m.display_name,
+                role=m.role,
+                is_online=bool(m.is_online),
+            )
+            for m in members
+        ],
+        events=[
+            PartyEventSchema(
+                id=e.id,
+                event_type=e.event_type,
+                actor_id=e.actor_id,
+                actor_name=e.actor_name,
+                message=e.message,
+                payload=e.payload,
+                created_at=_iso_dt(e.created_at),
+            )
+            for e in events
+        ],
+        playback=PartyPlaybackStateSchema(
+            track_position=playback.track_position,
+            action=playback.action,
+            seek_position=playback.seek_position,
+            updated_by=playback.updated_by,
+            updated_at=_iso_dt(playback.updated_at),
+        ),
+        tracks=[
+            PartyTrackSchema(
+                video_id=t.video_id,
+                title=t.title,
+                artist=t.artist,
+                duration=t.duration,
+                duration_fmt=t.duration_fmt,
+                source=t.source,
+                cover_url=t.cover_url,
+                added_by=t.added_by,
+                added_by_name=t.added_by_name,
+                skip_votes=vote_counts.get(t.id, 0),
+                position=t.position,
+            )
+            for t in tracks
+        ],
+    )
+
+
+async def _get_party_with_tracks(code: str, viewer_id: int | None = None) -> PartySchema:
+    """Load party session by invite code with all extended state."""
+    async with async_session() as session:
+        party = await _get_party_or_404(session, code)
+        return await _build_party_schema(session, party, viewer_id)
 
 
 async def _notify_party(code: str, event: str, data: dict | None = None):
@@ -1557,6 +1745,10 @@ async def _notify_party(code: str, event: str, data: dict | None = None):
             subs.remove(q)
         except ValueError:
             pass
+
+
+async def _notify_party_state(code: str, event: str, data: dict | None = None):
+    await _notify_party(code, event, data)
 
 
 @app.post("/api/party", response_model=PartySchema)
@@ -1583,25 +1775,31 @@ async def create_party(body: PartyCreateRequest, user: dict = Depends(get_curren
             name=body.name[:100],
         )
         session.add(party)
+        await session.flush()
+        await _ensure_party_member(session, party, user, mark_online=False)
+        await _get_or_create_party_playback(session, party.id)
+        await _record_party_event(
+            session,
+            party.id,
+            "party_created",
+            f"{user.get('first_name', 'DJ')} создал пати",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+        )
         await session.commit()
-        await session.refresh(party)
 
-    return PartySchema(
-        id=party.id,
-        invite_code=party.invite_code,
-        creator_id=party.creator_id,
-        name=party.name,
-        is_active=True,
-        current_position=0,
-        tracks=[],
-        member_count=0,
-    )
+    return await _get_party_with_tracks(code, int(user["id"]))
 
 
 @app.get("/api/party/{code}", response_model=PartySchema)
 async def get_party(code: str, user: dict = Depends(get_current_user)):
     """Get party state with tracks."""
-    return await _get_party_with_tracks(code)
+    await _get_or_create_webapp_user(user)
+    async with async_session() as session:
+        party = await _get_party_or_404(session, code)
+        await _ensure_party_member(session, party, user, mark_online=False)
+        await session.commit()
+    return await _get_party_with_tracks(code, int(user["id"]))
 
 
 @app.post("/api/party/{code}/tracks", response_model=PartySchema)
@@ -1609,15 +1807,8 @@ async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = De
     """Add a track to party queue."""
     async with async_session() as session:
         from sqlalchemy import select, func
-        result = await session.execute(
-            select(PartySession).where(
-                PartySession.invite_code == code,
-                PartySession.is_active == True,
-            )
-        )
-        party = result.scalar_one_or_none()
-        if not party:
-            raise HTTPException(status_code=404, detail="Party not found")
+        party = await _get_party_or_404(session, code)
+        await _ensure_party_member(session, party, user, mark_online=False)
 
         # Get max position
         max_pos_result = await session.execute(
@@ -1640,43 +1831,156 @@ async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = De
             position=max_pos + 1,
         )
         session.add(track)
+        await session.flush()
+        await _record_party_event(
+            session,
+            party.id,
+            "track_added",
+            f"{user.get('first_name', 'User')} добавил(а) {body.title}",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "User"),
+            payload={"video_id": body.video_id, "title": body.title},
+        )
         await session.commit()
 
-    await _notify_party(code, "track_added", {
+    await _notify_party_state(code, "track_added", {
         "video_id": body.video_id,
         "title": body.title,
         "artist": body.artist,
         "added_by_name": user.get("first_name", "User"),
     })
-    return await _get_party_with_tracks(code)
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.post("/api/party/{code}/tracks/{video_id}/play-next", response_model=PartySchema)
+async def play_next_party_track(code: str, video_id: str, user: dict = Depends(get_current_user)):
+    """Move a queued track to play next."""
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ/co-host can reorder tracks")
+
+        tracks = (
+            await session.execute(
+                select(PartyTrack)
+                .where(PartyTrack.party_id == party.id)
+                .order_by(PartyTrack.position, PartyTrack.id)
+            )
+        ).scalars().all()
+        target = next((t for t in tracks if t.video_id == video_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="Track not found")
+        if target.position <= party.current_position:
+            raise HTTPException(status_code=400, detail="Track is already playing or finished")
+
+        upcoming = [t for t in tracks if t.position > party.current_position]
+        upcoming = [t for t in upcoming if t.video_id != video_id]
+        upcoming.insert(0, target)
+        start_pos = party.current_position + 1
+        for idx, track in enumerate(upcoming):
+            track.position = start_pos + idx
+        await _record_party_event(
+            session,
+            party.id,
+            "queue_reordered",
+            f"{user.get('first_name', 'DJ')} перенёс(ла) {target.title} в play next",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+            payload={"video_id": video_id, "mode": "play_next"},
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "queue_reordered", {"video_id": video_id, "mode": "play_next"})
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.post("/api/party/{code}/reorder", response_model=PartySchema)
+async def reorder_party_tracks(code: str, body: PartyReorderRequest, user: dict = Depends(get_current_user)):
+    """Reorder queued tracks for DJ/co-hosts."""
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ/co-host can reorder tracks")
+        if body.from_position <= party.current_position or body.to_position <= party.current_position:
+            raise HTTPException(status_code=400, detail="Only upcoming tracks can be reordered")
+
+        tracks = (
+            await session.execute(
+                select(PartyTrack)
+                .where(PartyTrack.party_id == party.id)
+                .order_by(PartyTrack.position, PartyTrack.id)
+            )
+        ).scalars().all()
+        upcoming = [t for t in tracks if t.position > party.current_position]
+        from_index = next((idx for idx, track in enumerate(upcoming) if track.position == body.from_position), None)
+        to_index = next((idx for idx, track in enumerate(upcoming) if track.position == body.to_position), None)
+        if from_index is None or to_index is None:
+            raise HTTPException(status_code=404, detail="Track position not found")
+
+        track = upcoming.pop(from_index)
+        upcoming.insert(to_index, track)
+        start_pos = party.current_position + 1
+        for idx, queued_track in enumerate(upcoming):
+            queued_track.position = start_pos + idx
+
+        await _record_party_event(
+            session,
+            party.id,
+            "queue_reordered",
+            f"{user.get('first_name', 'DJ')} изменил(а) порядок очереди",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+            payload={"from_position": body.from_position, "to_position": body.to_position},
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "queue_reordered", {"from_position": body.from_position, "to_position": body.to_position})
+    return await _get_party_with_tracks(code, int(user["id"]))
 
 
 @app.delete("/api/party/{code}/tracks/{video_id}")
 async def remove_party_track(code: str, video_id: str, user: dict = Depends(get_current_user)):
     """Remove a track from party queue (creator only)."""
     async with async_session() as session:
-        from sqlalchemy import select, delete
-        result = await session.execute(
-            select(PartySession).where(
-                PartySession.invite_code == code,
-                PartySession.is_active == True,
-            )
-        )
-        party = result.scalar_one_or_none()
-        if not party:
-            raise HTTPException(status_code=404, detail="Party not found")
-        if party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ can remove tracks")
+        from sqlalchemy import delete, select
 
-        await session.execute(
-            delete(PartyTrack).where(
-                PartyTrack.party_id == party.id,
-                PartyTrack.video_id == video_id,
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ/co-host can remove tracks")
+
+        track = (
+            await session.execute(
+                select(PartyTrack).where(
+                    PartyTrack.party_id == party.id,
+                    PartyTrack.video_id == video_id,
+                )
             )
+        ).scalar_one_or_none()
+        if track is None:
+            raise HTTPException(status_code=404, detail="Track not found")
+
+        await session.execute(delete(PartyTrackVote).where(PartyTrackVote.track_id == track.id))
+        await session.execute(delete(PartyTrack).where(PartyTrack.id == track.id))
+        await _normalize_party_positions(session, party.id)
+        await _record_party_event(
+            session,
+            party.id,
+            "track_removed",
+            f"{user.get('first_name', 'DJ')} удалил(а) {track.title}",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+            payload={"video_id": video_id},
         )
         await session.commit()
 
-    await _notify_party(code, "track_removed", {"video_id": video_id})
+    await _notify_party_state(code, "track_removed", {"video_id": video_id})
     return {"ok": True}
 
 
@@ -1684,18 +1988,11 @@ async def remove_party_track(code: str, video_id: str, user: dict = Depends(get_
 async def skip_party_track(code: str, user: dict = Depends(get_current_user)):
     """Vote to skip or force-skip (DJ). Auto-skips at 3 votes."""
     async with async_session() as session:
-        from sqlalchemy import select, update
-        result = await session.execute(
-            select(PartySession).where(
-                PartySession.invite_code == code,
-                PartySession.is_active == True,
-            )
-        )
-        party = result.scalar_one_or_none()
-        if not party:
-            raise HTTPException(status_code=404, detail="Party not found")
+        from sqlalchemy import delete, func, select
 
-        is_dj = party.creator_id == user["id"]
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        can_control = member.role in {"dj", "cohost"} or party.creator_id == user["id"]
 
         # Get current track
         track_result = await session.execute(
@@ -1705,46 +2002,267 @@ async def skip_party_track(code: str, user: dict = Depends(get_current_user)):
             )
         )
         current_track = track_result.scalar_one_or_none()
+        if current_track is None:
+            raise HTTPException(status_code=400, detail="No active track")
 
-        skip = is_dj  # DJ can always skip
-        if current_track and not is_dj:
-            current_track.skip_votes += 1
-            if current_track.skip_votes >= 3:
-                skip = True
-            await session.commit()
+        member_count = (
+            await session.execute(
+                select(func.count()).where(
+                    PartyMember.party_id == party.id,
+                    PartyMember.is_online == True,
+                )
+            )
+        ).scalar() or 0
+        threshold = _party_skip_threshold(int(member_count))
+
+        skip = can_control
+        votes = 0
+        if not can_control:
+            existing_vote = (
+                await session.execute(
+                    select(PartyTrackVote).where(
+                        PartyTrackVote.track_id == current_track.id,
+                        PartyTrackVote.user_id == user["id"],
+                        PartyTrackVote.vote_type == "skip",
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_vote:
+                raise HTTPException(status_code=400, detail="Already voted to skip")
+            session.add(
+                PartyTrackVote(
+                    party_id=party.id,
+                    track_id=current_track.id,
+                    user_id=user["id"],
+                    vote_type="skip",
+                )
+            )
+            await session.flush()
+            votes = (
+                await session.execute(
+                    select(func.count()).where(
+                        PartyTrackVote.track_id == current_track.id,
+                        PartyTrackVote.vote_type == "skip",
+                    )
+                )
+            ).scalar() or 0
+            skip = votes >= threshold
+            await _record_party_event(
+                session,
+                party.id,
+                "skip_vote",
+                f"{user.get('first_name', 'User')} проголосовал(а) за skip",
+                actor_id=user["id"],
+                actor_name=user.get("first_name", "User"),
+                payload={"votes": votes, "threshold": threshold},
+            )
 
         if skip:
+            await session.execute(delete(PartyTrackVote).where(PartyTrackVote.track_id == current_track.id))
             party.current_position += 1
-            await session.commit()
-            await _notify_party(code, "next", {"position": party.current_position})
+            playback = await _get_or_create_party_playback(session, party.id)
+            playback.track_position = party.current_position
+            playback.action = "play"
+            playback.seek_position = 0
+            playback.updated_by = int(user["id"])
+            playback.updated_at = datetime.now(timezone.utc)
+            await _record_party_event(
+                session,
+                party.id,
+                "next_track",
+                f"{user.get('first_name', 'DJ')} переключил(а) следующий трек",
+                actor_id=user["id"],
+                actor_name=user.get("first_name", "DJ"),
+                payload={"position": party.current_position},
+            )
 
-    return await _get_party_with_tracks(code)
+        await session.commit()
+
+    if skip:
+        await _notify_party_state(code, "next", {"position": party.current_position})
+    else:
+        await _notify_party_state(code, "vote_skip", {"votes": votes, "threshold": threshold})
+
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.post("/api/party/{code}/members/{member_user_id}/role", response_model=PartySchema)
+async def update_party_member_role(
+    code: str,
+    member_user_id: int,
+    body: PartyRoleUpdateRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Promote or demote co-hosts inside a party."""
+    if body.role not in {"cohost", "listener"}:
+        raise HTTPException(status_code=400, detail="Unsupported role")
+
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        party = await _get_party_or_404(session, code)
+        await _ensure_party_member(session, party, user, mark_online=False)
+        if party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ can change roles")
+        if member_user_id == party.creator_id:
+            raise HTTPException(status_code=400, detail="DJ role cannot be changed")
+
+        target = (
+            await session.execute(
+                select(PartyMember).where(
+                    PartyMember.party_id == party.id,
+                    PartyMember.user_id == member_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if target is None:
+            raise HTTPException(status_code=404, detail="Member not found")
+
+        target.role = body.role
+        await _record_party_event(
+            session,
+            party.id,
+            "role_updated",
+            f"{target.display_name or 'Участник'} теперь {body.role}",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+            payload={"user_id": member_user_id, "role": body.role},
+        )
+        await session.commit()
+
+    await _notify_party_state(code, "role_updated", {"user_id": member_user_id, "role": body.role})
+    return await _get_party_with_tracks(code, int(user["id"]))
+
+
+@app.post("/api/party/{code}/playback", response_model=PartySchema)
+async def sync_party_playback(code: str, body: PartyPlaybackRequest, user: dict = Depends(get_current_user)):
+    """Sync party playback for all listeners (DJ/co-host)."""
+    if body.action not in {"play", "pause", "seek"}:
+        raise HTTPException(status_code=400, detail="Unsupported playback action")
+
+    async with async_session() as session:
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=False)
+        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Only DJ/co-host can sync playback")
+
+        playback = await _get_or_create_party_playback(session, party.id)
+        playback.action = body.action
+        playback.track_position = max(0, body.track_position)
+        playback.seek_position = max(0, body.seek_position)
+        playback.updated_by = int(user["id"])
+        playback.updated_at = datetime.now(timezone.utc)
+        if body.action == "play":
+            party.current_position = max(0, body.track_position)
+
+        await _record_party_event(
+            session,
+            party.id,
+            "playback_sync",
+            f"{user.get('first_name', 'DJ')} синхронизировал(а) playback: {body.action}",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+            payload={
+                "action": body.action,
+                "track_position": body.track_position,
+                "seek_position": body.seek_position,
+            },
+        )
+        await session.commit()
+
+    await _notify_party_state(
+        code,
+        "playback_sync",
+        {
+            "action": body.action,
+            "track_position": body.track_position,
+            "seek_position": body.seek_position,
+            "updated_by": user["id"],
+        },
+    )
+    return await _get_party_with_tracks(code, int(user["id"]))
 
 
 @app.post("/api/party/{code}/close")
 async def close_party(code: str, user: dict = Depends(get_current_user)):
     """Close party session (creator only)."""
     async with async_session() as session:
-        from sqlalchemy import select
-        result = await session.execute(
-            select(PartySession).where(
-                PartySession.invite_code == code,
-                PartySession.is_active == True,
-            )
-        )
-        party = result.scalar_one_or_none()
-        if not party:
-            raise HTTPException(status_code=404, detail="Party not found")
+        party = await _get_party_or_404(session, code)
         if party.creator_id != user["id"]:
             raise HTTPException(status_code=403, detail="Only DJ can close")
 
         party.is_active = False
+        await _record_party_event(
+            session,
+            party.id,
+            "closed",
+            f"{user.get('first_name', 'DJ')} завершил(а) пати",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "DJ"),
+        )
         await session.commit()
 
-    await _notify_party(code, "closed", {})
+    await _notify_party_state(code, "closed", {})
     # Clean up subscribers
     _party_subscribers.pop(code, None)
     return {"ok": True}
+
+
+@app.post("/api/party/{code}/save-playlist", response_model=PlaylistSchema)
+async def save_party_as_playlist(code: str, user: dict = Depends(get_current_user)):
+    """Save current party queue as a regular playlist for the requesting user."""
+    from sqlalchemy import func, select
+
+    from bot.db import upsert_track
+    from bot.models.playlist import Playlist, PlaylistTrack
+
+    await _get_or_create_webapp_user(user)
+    async with async_session() as session:
+        party = await _get_party_or_404(session, code)
+        tracks = (
+            await session.execute(
+                select(PartyTrack)
+                .where(PartyTrack.party_id == party.id)
+                .order_by(PartyTrack.position, PartyTrack.id)
+            )
+        ).scalars().all()
+        if not tracks:
+            raise HTTPException(status_code=400, detail="Party queue is empty")
+
+        playlist = Playlist(user_id=user["id"], name=f"Party • {party.name}"[:100])
+        session.add(playlist)
+        await session.flush()
+
+        for idx, track in enumerate(tracks):
+            db_track = await upsert_track(
+                source_id=track.video_id,
+                source=track.source,
+                title=track.title,
+                artist=track.artist,
+                duration=track.duration,
+                cover_url=track.cover_url,
+            )
+            session.add(PlaylistTrack(playlist_id=playlist.id, track_id=db_track.id, position=idx))
+
+        await _record_party_event(
+            session,
+            party.id,
+            "playlist_saved",
+            f"{user.get('first_name', 'User')} сохранил(а) пати как плейлист",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "User"),
+            payload={"playlist_name": playlist.name},
+        )
+        await session.commit()
+
+        cnt = (
+            await session.execute(
+                select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist.id)
+            )
+        ).scalar() or 0
+
+    await _notify_party_state(code, "playlist_saved", {"playlist_name": f"Party • {party.name}"[:100]})
+    return PlaylistSchema(id=playlist.id, name=playlist.name, track_count=cnt)
 
 
 @app.get("/api/party/{code}/events")
@@ -1762,17 +2280,24 @@ async def party_events(
     user = verify_init_data(init_data)
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid initData")
+    await _get_or_create_webapp_user(user)
     # Verify party exists
     async with async_session() as session:
-        from sqlalchemy import select
-        result = await session.execute(
-            select(PartySession.id).where(
-                PartySession.invite_code == code,
-                PartySession.is_active == True,
-            )
+        party = await _get_party_or_404(session, code)
+        member = await _ensure_party_member(session, party, user, mark_online=True)
+        joined_message = None
+        if member.display_name:
+            joined_message = f"{member.display_name} присоединился(ась) к пати"
+        await _record_party_event(
+            session,
+            party.id,
+            "member_joined",
+            joined_message or "Новый участник вошёл в комнату",
+            actor_id=user["id"],
+            actor_name=user.get("first_name", "User"),
+            payload={"user_id": user["id"]},
         )
-        if not result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Party not found")
+        await session.commit()
 
     queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
     if code not in _party_subscribers:
@@ -1780,7 +2305,7 @@ async def party_events(
     _party_subscribers[code].append(queue)
 
     # Notify others that someone joined
-    await _notify_party(code, "member_joined", {
+    await _notify_party_state(code, "member_joined", {
         "user_id": user["id"],
         "name": user.get("first_name", "User"),
         "member_count": len(_party_subscribers.get(code, [])),
@@ -1803,8 +2328,33 @@ async def party_events(
                 subs.remove(queue)
             except ValueError:
                 pass
+            async with async_session() as session:
+                from sqlalchemy import select
+
+                party = await _get_party_or_404(session, code)
+                member = (
+                    await session.execute(
+                        select(PartyMember).where(
+                            PartyMember.party_id == party.id,
+                            PartyMember.user_id == user["id"],
+                        )
+                    )
+                ).scalar_one_or_none()
+                if member is not None:
+                    member.is_online = False
+                    member.last_seen_at = datetime.now(timezone.utc)
+                await _record_party_event(
+                    session,
+                    party.id,
+                    "member_left",
+                    f"{user.get('first_name', 'User')} вышел(шла) из комнаты",
+                    actor_id=user["id"],
+                    actor_name=user.get("first_name", "User"),
+                    payload={"user_id": user["id"]},
+                )
+                await session.commit()
             # Notify others that someone left
-            await _notify_party(code, "member_left", {
+            await _notify_party_state(code, "member_left", {
                 "member_count": len(_party_subscribers.get(code, [])),
             })
 
@@ -1834,16 +2384,7 @@ async def my_parties(user: dict = Depends(get_current_user)):
 
     schemas = []
     for p in parties:
-        schemas.append(PartySchema(
-            id=p.id,
-            invite_code=p.invite_code,
-            creator_id=p.creator_id,
-            name=p.name,
-            is_active=True,
-            current_position=p.current_position,
-            tracks=[],
-            member_count=len(_party_subscribers.get(p.invite_code, [])),
-        ))
+        schemas.append(await _build_party_schema(session, p, int(user["id"])))
     return schemas
 
 

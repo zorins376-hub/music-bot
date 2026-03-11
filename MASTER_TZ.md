@@ -970,6 +970,25 @@ rapidfuzz>=3.0.0
 | Party Playlists (чаты) | ✅ DONE | DB модели + REST API + SSE real-time sync + bot /party + frontend PartyView |
 | Aggressive Pre-fetch (70%) | ✅ DONE | prefetchTracks при 70% прослушивания + preload при 30s до конца |
 
+## 11.1.1 Party Playlists 2.0 — roadmap ядра продукта
+
+> `Party` — одна из ключевых differentiator-фич продукта. Ниже — следующий этап эволюции из "общего плейлиста" в полноценную live listening room.
+
+| Подфича Party 2.0 | Статус | Детали |
+|---|---|---|
+| Presence / участники комнаты | ✅ DONE | online/offline участники, роли, member_count из live-state |
+| Роли `DJ` / `co-host` / `listener` | ✅ DONE | DJ может назначать/снимать co-host, co-host управляет очередью |
+| Unique voting for skip | ✅ DONE | уникальный голос на текущий трек + динамический threshold от online-участников |
+| Activity feed | ✅ DONE | party events: join/leave/add/reorder/skip/playback sync/close |
+| Queue management | ✅ DONE | `play next`, reorder upcoming queue, remove track для DJ/co-host |
+| Playback sync room-state | ✅ DONE | room playback state + SSE sync `play/pause/seek` |
+| Invite / onboarding | ✅ DONE | invite_code + share link + luxury Party entry UI |
+| Member management UI | ✅ DONE | список участников + роль + promote/demote co-host из PartyView |
+| Save party as playlist | ✅ DONE | экспорт текущей очереди Party в обычный playlist пользователя |
+| Reactions on current track | ⏳ TODO | 🔥 ❤️ ⚡ live reactions на текущий трек |
+| AI Auto-DJ for Party | ⏳ TODO | auto-fill queue по вайбу комнаты и истории участников |
+| Party recap / shareable stats | ⏳ TODO | best tracks, joins, skips, total duration, shareable summary |
+
 ## 11.2 Реализуемые фичи
 
 ### SKF-001: Infinity Autoplay (P0)

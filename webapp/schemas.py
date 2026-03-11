@@ -86,6 +86,31 @@ class PartyTrackSchema(BaseModel):
     position: int = 0
 
 
+class PartyMemberSchema(BaseModel):
+    user_id: int
+    display_name: Optional[str] = None
+    role: str = "listener"
+    is_online: bool = False
+
+
+class PartyEventSchema(BaseModel):
+    id: int
+    event_type: str = "info"
+    actor_id: Optional[int] = None
+    actor_name: Optional[str] = None
+    message: str
+    payload: Optional[dict] = None
+    created_at: Optional[str] = None
+
+
+class PartyPlaybackStateSchema(BaseModel):
+    track_position: int = 0
+    action: str = "idle"
+    seek_position: int = 0
+    updated_by: Optional[int] = None
+    updated_at: Optional[str] = None
+
+
 class PartySchema(BaseModel):
     id: int
     invite_code: str
@@ -95,6 +120,11 @@ class PartySchema(BaseModel):
     current_position: int = 0
     tracks: list[PartyTrackSchema] = []
     member_count: int = 0
+    skip_threshold: int = 3
+    viewer_role: str = "listener"
+    members: list[PartyMemberSchema] = []
+    events: list[PartyEventSchema] = []
+    playback: PartyPlaybackStateSchema = PartyPlaybackStateSchema()
 
 
 class PartyAddTrackRequest(BaseModel):
@@ -109,3 +139,18 @@ class PartyAddTrackRequest(BaseModel):
 
 class PartyCreateRequest(BaseModel):
     name: str = "Party 🎉"
+
+
+class PartyReorderRequest(BaseModel):
+    from_position: int
+    to_position: int
+
+
+class PartyPlaybackRequest(BaseModel):
+    action: str
+    track_position: int = 0
+    seek_position: int = 0
+
+
+class PartyRoleUpdateRequest(BaseModel):
+    role: str

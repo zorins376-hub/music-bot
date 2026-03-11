@@ -1369,7 +1369,11 @@ export function App() {
 
       {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
 
-      {view === "party" && <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} />}
+      {view === "party" && <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} onPlaybackAction={(playbackAction, track, position) => {
+        if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
+        if (playbackAction === "pause") return action("pause");
+        if (playbackAction === "seek") return action("seek", undefined, position);
+      }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} />}
 
       {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
