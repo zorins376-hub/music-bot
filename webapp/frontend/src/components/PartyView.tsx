@@ -34,6 +34,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [recap, setRecap] = useState<PartyRecap | null>(null);
   const [reactionBursts, setReactionBursts] = useState<Array<{ id: number; emoji: string; left: number }>>([]);
   const [livePosition, setLivePosition] = useState(0);
+  const [showStageMode, setShowStageMode] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionBurstIdRef = useRef(0);
@@ -254,6 +255,18 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   }, [party?.current_position, party?.playback.action, party?.tracks]);
 
   useEffect(() => {
+    if (!showStageMode) {
+      document.body.style.overflow = "";
+      return;
+    }
+    document.body.style.overflow = "hidden";
+    try { window.Telegram?.WebApp?.expand?.(); } catch {}
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [showStageMode]);
+
+  useEffect(() => {
     if (initialCode) {
       setLoading(true);
       fetchParty(initialCode)
@@ -455,6 +468,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 background: "rgba(0,0,0,0.22)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
               }}>📤 Поделиться</button>
+              {currentTrack && (
+                <button onClick={() => setShowStageMode(true)} style={{
+                  padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                }}>✨ Stage</button>
+              )}
               {canControl && (
                 <button onClick={handleAutoDj} style={{
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
@@ -541,6 +560,18 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 <div style={{ display: "flex", gap: 6, marginTop: 7, flexWrap: "wrap" }}>
                   <span style={{ padding: "4px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: hintColor, fontSize: 10, fontWeight: 700 }}>{currentTrack.duration_fmt}</span>
                   <span style={{ padding: "4px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: hintColor, fontSize: 10, fontWeight: 700 }}>{currentTrack.source || "music"}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 18, marginTop: 10 }}>
+                  {[0, 1, 2, 3, 4, 5].map((bar) => (
+                    <span key={bar} style={{
+                      width: 4,
+                      height: party.playback.action === "play" ? 8 + ((bar % 3) * 4) : 8,
+                      borderRadius: 999,
+                      background: warm ? "linear-gradient(180deg, #ffd54f, #ff8f00)" : activeBg,
+                      animation: party.playback.action === "play" ? `partyEqualizer 1s ${bar * 0.12}s ease-in-out infinite` : "none",
+                      transformOrigin: "bottom center",
+                    }} />
+                  ))}
                 </div>
               </div>
               <button onClick={() => { haptic("light"); onPlayTrack(currentTrack); }} style={{
@@ -730,6 +761,15 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               <div style={{ color: textColor, fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Ночь получилась громкой</div>
               <div style={{ color: hintColor, fontSize: 12, lineHeight: 1.45 }}>В комнате было {recap.total_members} участников, прозвучало {recap.total_tracks} треков и музыка играла {formatDuration(recap.total_duration)}.</div>
             </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              {recap.top_artists[0] && (
+                <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 }}>🏆 {recap.top_artists[0].label}</div>
+              )}
+              {recap.top_contributors[0] && (
+                <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 }}>👑 {recap.top_contributors[0].label}</div>
+              )}
+              <div style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700 }}>🔥 {recap.events_count} событий</div>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 10 }}>
               <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Tracks</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_tracks}</div></div>
               <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Members</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_members}</div></div>
@@ -752,7 +792,84 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           </div>
         )}
 
-        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } }`}</style>
+        {showStageMode && currentTrack && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 99998,
+            background: warm ? "linear-gradient(180deg, rgba(36,20,8,0.96), rgba(13,8,4,0.98))" : "linear-gradient(180deg, rgba(10,12,25,0.96), rgba(4,6,14,0.98))",
+            backdropFilter: "blur(18px) saturate(145%)",
+            WebkitBackdropFilter: "blur(18px) saturate(145%)",
+            overflow: "auto",
+          }}>
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              backgroundImage: currentTrack.cover_url ? `url(${currentTrack.cover_url})` : "none",
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              opacity: 0.14,
+              filter: "blur(28px)",
+              transform: "scale(1.12)",
+            }} />
+            <div style={{ position: "relative", zIndex: 1, minHeight: "100vh", padding: "18px 16px 28px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <div style={{ color: hintColor, fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase" }}>Party Stage</div>
+                <button onClick={() => setShowStageMode(false)} style={{ padding: "9px 12px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕ Close</button>
+              </div>
+
+              <div>
+                <div style={{ width: "min(72vw, 320px)", aspectRatio: "1 / 1", margin: "0 auto", borderRadius: 28, overflow: "hidden", boxShadow: warm ? "0 24px 70px rgba(255,145,0,0.24)" : `0 24px 70px ${accentColor}33`, background: "rgba(255,255,255,0.06)" }}>
+                  {currentTrack.cover_url ? <img src={currentTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={46} color={textColor} /></div>}
+                </div>
+
+                <div style={{ textAlign: "center", marginTop: 18 }}>
+                  <div style={{ color: textColor, fontSize: 28, fontWeight: 800, lineHeight: 1.1 }}>{currentTrack.title}</div>
+                  <div style={{ color: hintColor, fontSize: 14, marginTop: 8 }}>{currentTrack.artist} · {party.name}</div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 6, height: 40, marginTop: 18 }}>
+                  {[0, 1, 2, 3, 4, 5, 6, 7].map((bar) => (
+                    <span key={bar} style={{
+                      width: 8,
+                      height: party.playback.action === "play" ? 18 + ((bar % 4) * 5) : 16,
+                      borderRadius: 999,
+                      background: warm ? "linear-gradient(180deg, #ffe082, #ff8f00)" : activeBg,
+                      animation: party.playback.action === "play" ? `partyEqualizer 0.95s ${bar * 0.08}s ease-in-out infinite` : "none",
+                      transformOrigin: "bottom center",
+                      boxShadow: warm ? "0 0 14px rgba(255,193,7,0.2)" : `0 0 14px ${accentColor}44`,
+                    }} />
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <div style={{ width: `${progressPercent}%`, height: "100%", borderRadius: 999, background: activeBg, transition: "width 0.9s linear" }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, color: hintColor, fontSize: 12 }}>
+                    <span>{formatDuration(livePosition)}</span>
+                    <span>{currentTrack.duration_fmt}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
+                  {(["🔥", "❤️", "⚡", "🪩"] as const).map((emoji) => (
+                    <button key={`stage-${emoji}`} onClick={() => handleReaction(emoji)} style={{ padding: "10px 14px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.07)", color: textColor, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{emoji} {party.current_reactions?.[emoji] || 0}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 22, display: "flex", gap: 10 }}>
+                <button onClick={() => { haptic("light"); onPlayTrack(currentTrack); }} style={{ flex: 1, padding: "14px 0", borderRadius: 18, border: "none", background: activeBg, color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>▶ Play local</button>
+                {canControl && (
+                  <button onClick={() => handleSyncPlayback(party.playback.action === "pause" ? "play" : "pause", currentTrack.position, livePosition, currentTrack)} style={{ padding: "14px 16px", borderRadius: 18, border: cardBorder, background: "rgba(255,255,255,0.07)", color: textColor, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>{party.playback.action === "pause" ? "▶ Room" : "⏸ Room"}</button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } }`}</style>
       </div>
     );
   }
