@@ -32,8 +32,11 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [newName, setNewName] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [recap, setRecap] = useState<PartyRecap | null>(null);
+  const [reactionBursts, setReactionBursts] = useState<Array<{ id: number; emoji: string; left: number }>>([]);
+  const [livePosition, setLivePosition] = useState(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reactionBurstIdRef = useRef(0);
 
   const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
   const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
@@ -82,6 +85,13 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const formatDuration = (totalSeconds: number) => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds || 0));
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
   };
 
   const connectSSE = useCallback((code: string) => {
@@ -186,6 +196,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
 
   const handleReaction = async (emoji: string) => {
     if (!party) return;
+    const burstId = reactionBurstIdRef.current + 1;
+    reactionBurstIdRef.current = burstId;
+    setReactionBursts((prev) => [...prev, { id: burstId, emoji, left: 18 + Math.random() * 64 }]);
+    setTimeout(() => {
+      setReactionBursts((prev) => prev.filter((burst) => burst.id !== burstId));
+    }, 900);
     try {
       const updated = await reactToPartyTrack(party.invite_code, emoji);
       setParty(updated);
@@ -212,6 +228,30 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     }
     fetchPartyRecap(party.invite_code).then(setRecap).catch(() => {});
   }, [party?.invite_code, party?.tracks.length, party?.events.length, party?.member_count]);
+
+  useEffect(() => {
+    const currentTrack = party?.tracks.find((t) => t.position === party.current_position);
+    if (!party || !currentTrack) {
+      setLivePosition(0);
+      return;
+    }
+    if (party.playback.track_position === currentTrack.position) {
+      setLivePosition(Math.min(currentTrack.duration || 0, party.playback.seek_position || 0));
+    } else {
+      setLivePosition(0);
+    }
+  }, [party?.current_position, party?.playback.track_position, party?.playback.seek_position, party?.tracks]);
+
+  useEffect(() => {
+    const currentTrack = party?.tracks.find((t) => t.position === party.current_position);
+    if (!party || !currentTrack || party.playback.action !== "play") {
+      return;
+    }
+    const timer = setInterval(() => {
+      setLivePosition((prev) => Math.min(currentTrack.duration || 0, prev + 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [party?.current_position, party?.playback.action, party?.tracks]);
 
   useEffect(() => {
     if (initialCode) {
@@ -332,6 +372,28 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     window.open(shareUrl, "_blank");
   };
 
+  const handleShareRecap = async () => {
+    if (!party || !recap) return;
+    haptic("light");
+    const summary = [
+      `🎉 Recap пати «${party.name}»`,
+      `🎶 Треков: ${recap.total_tracks}`,
+      `👥 Участников: ${recap.total_members}`,
+      `⏱️ Длительность: ${formatDuration(recap.total_duration)}`,
+      `⏭️ Skip votes: ${recap.total_skip_votes}`,
+      recap.top_artists[0] ? `🏆 Топ артист: ${recap.top_artists[0].label}` : null,
+      `#${party.invite_code}`,
+    ].filter(Boolean).join("\n");
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/share/url`)}&text=${encodeURIComponent(summary)}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(summary);
+        showToast("📋 Recap скопирован");
+      }
+    } catch {}
+    window.open(shareUrl, "_blank");
+  };
+
   const Toast = toast ? (
     <div style={{
       position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
@@ -353,6 +415,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     const currentTrack = party.tracks.find(t => t.position === party.current_position);
     const upNext = party.tracks.filter(t => t.position > party.current_position).sort((a, b) => a.position - b.position);
     const played = party.tracks.filter(t => t.position < party.current_position).sort((a, b) => a.position - b.position);
+    const progressPercent = currentTrack?.duration ? Math.min(100, (livePosition / currentTrack.duration) * 100) : 0;
 
     return (
       <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
@@ -444,11 +507,26 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             boxShadow: warm ? "0 14px 34px rgba(255,109,0,0.12)" : "0 14px 34px rgba(124,77,255,0.12)",
             backdropFilter: "blur(16px) saturate(135%)",
             WebkitBackdropFilter: "blur(16px) saturate(135%)",
+            position: "relative",
+            overflow: "hidden",
           }}>
             <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
               <span>▶ Сейчас играет</span>
               <span style={{ color: warm ? "#ffd54f" : accentColor, fontSize: 10 }}>{party.playback.action === "pause" ? "Paused room" : (isDJ ? "DJ control" : "Live sync")}</span>
             </div>
+            {reactionBursts.map((burst) => (
+              <div key={burst.id} style={{
+                position: "absolute",
+                left: `${burst.left}%`,
+                bottom: 18,
+                fontSize: 22,
+                pointerEvents: "none",
+                animation: "partyReactionFloat 0.9s ease-out forwards",
+                filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.18))",
+              }}>
+                {burst.emoji}
+              </div>
+            ))}
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{
                 width: 62, height: 62, borderRadius: 16, overflow: "hidden", flexShrink: 0,
@@ -470,6 +548,22 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 background: activeBg, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 boxShadow: warm ? "0 10px 24px rgba(255,109,0,0.2)" : `0 10px 24px ${accentColor}33`,
               }}>▶</button>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <div style={{ height: 7, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                <div style={{
+                  width: `${progressPercent}%`,
+                  height: "100%",
+                  borderRadius: 999,
+                  background: activeBg,
+                  boxShadow: warm ? "0 0 18px rgba(255,193,7,0.24)" : `0 0 18px ${accentColor}55`,
+                  transition: "width 0.9s linear",
+                }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, fontSize: 11, color: hintColor }}>
+                <span>{formatDuration(livePosition)}</span>
+                <span>{currentTrack.duration_fmt}</span>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
               <button onClick={handleSkip} style={{
@@ -628,12 +722,19 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
 
         {recap && (
           <div style={{ ...glassCard, padding: 12, borderRadius: 18, marginTop: 12 }}>
-            <div style={sectionLabel}>Party recap</div>
+            <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>Party recap</span>
+              <button onClick={handleShareRecap} style={{ padding: "6px 10px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📤 Share recap</button>
+            </div>
+            <div style={{ marginBottom: 10, padding: "12px 12px", borderRadius: 16, background: warm ? "linear-gradient(135deg, rgba(255,193,7,0.12), rgba(255,109,0,0.08))" : `linear-gradient(135deg, ${accentColor}22, rgba(255,255,255,0.04))`, border: warm ? "1px solid rgba(255,193,7,0.14)" : `1px solid ${accentColor}22` }}>
+              <div style={{ color: textColor, fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Ночь получилась громкой</div>
+              <div style={{ color: hintColor, fontSize: 12, lineHeight: 1.45 }}>В комнате было {recap.total_members} участников, прозвучало {recap.total_tracks} треков и музыка играла {formatDuration(recap.total_duration)}.</div>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 10 }}>
               <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Tracks</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_tracks}</div></div>
               <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Members</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_members}</div></div>
               <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Skips</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.total_skip_votes}</div></div>
-              <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Events</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{recap.events_count}</div></div>
+              <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}><div style={{ fontSize: 10, color: hintColor }}>Duration</div><div style={{ color: textColor, fontSize: 18, fontWeight: 800 }}>{formatDuration(recap.total_duration)}</div></div>
             </div>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 150 }}>
@@ -645,8 +746,13 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 {recap.top_artists.map((item) => <div key={item.label} style={{ fontSize: 12, color: textColor, marginBottom: 4 }}>{item.label} · {item.value}</div>)}
               </div>
             </div>
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.06)", fontSize: 11, color: hintColor }}>
+              Events logged: {recap.events_count} · Online peak right now: {recap.online_members}
+            </div>
           </div>
         )}
+
+        <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } }`}</style>
       </div>
     );
   }
