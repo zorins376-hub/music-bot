@@ -8,7 +8,7 @@ import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket } from "./components/Icons";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
@@ -1167,7 +1167,7 @@ export function App() {
                   transform: isActive ? "translateY(-1px) scale(1.02)" : "translateY(0) scale(1)",
                 }}
               >
-                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? "🎉 Party" : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
+                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
               </button>
             );
           })}
@@ -1379,11 +1379,122 @@ export function App() {
 
       {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
 
-      {view === "party" && <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} onPlaybackAction={(playbackAction, track, position) => {
-        if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
-        if (playbackAction === "pause") return action("pause");
-        if (playbackAction === "seek") return action("seek", undefined, position);
-      }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />}
+      {view === "party" && (
+        userProfile?.is_admin ? (
+          <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} onPlaybackAction={(playbackAction, track, position) => {
+            if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
+            if (playbackAction === "pause") return action("pause");
+            if (playbackAction === "seek") return action("seek", undefined, position);
+          }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />
+        ) : (
+          /* Coming Soon Banner for non-admins */
+          <div style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "40px 24px",
+            textAlign: "center",
+            minHeight: 400,
+          }}>
+            {/* Promo Card */}
+            <div style={{
+              background: isTequila
+                ? "linear-gradient(135deg, rgba(255,109,0,0.18), rgba(255,213,79,0.1))"
+                : "linear-gradient(135deg, rgba(124,77,255,0.18), rgba(168,85,247,0.1))",
+              border: isTequila
+                ? "1px solid rgba(255,213,79,0.22)"
+                : "1px solid rgba(124,77,255,0.25)",
+              borderRadius: 24,
+              padding: "36px 28px",
+              maxWidth: 360,
+              backdropFilter: "blur(20px)",
+              boxShadow: isTequila
+                ? "0 20px 50px rgba(255,109,0,0.15)"
+                : "0 20px 50px rgba(124,77,255,0.18)",
+            }}>
+              {/* Rocket Icon */}
+              <div style={{
+                width: 72,
+                height: 72,
+                borderRadius: "50%",
+                background: isTequila
+                  ? "linear-gradient(135deg, #ff6d00, #ffb300)"
+                  : "linear-gradient(135deg, #7c4dff, #a855f7)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 20px",
+                boxShadow: isTequila
+                  ? "0 12px 32px rgba(255,109,0,0.35)"
+                  : "0 12px 32px rgba(124,77,255,0.4)",
+              }}>
+                <IconRocket size={36} color="#fff" />
+              </div>
+              {/* Title */}
+              <h2 style={{
+                fontSize: 24,
+                fontWeight: 800,
+                color: isTequila ? "#ffe082" : "#fff",
+                margin: "0 0 10px",
+                letterSpacing: 0.5,
+              }}>Party Mode</h2>
+              <div style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: isTequila ? "#ffb74d" : "#a78bfa",
+                marginBottom: 18,
+                letterSpacing: 1.5,
+                textTransform: "uppercase",
+              }}>Скоро!</div>
+              {/* Description */}
+              <p style={{
+                fontSize: 14,
+                lineHeight: 1.65,
+                color: isTequila ? "#c8a882" : "rgba(255,255,255,0.75)",
+                margin: "0 0 20px",
+              }}>
+                Слушай музыку вместе с друзьями в реальном времени! 
+                Создавай комнату, приглашай участников и управляйте плейлистом вместе.
+              </p>
+              {/* Features List */}
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                textAlign: "left",
+                marginBottom: 22,
+              }}>
+                {[
+                  { icon: "🎧", text: "Синхронное воспроизведение" },
+                  { icon: "👥", text: "До 50 участников в комнате" },
+                  { icon: "🎤", text: "Живой чат и реакции" },
+                  { icon: "📊", text: "Голосование за треки" },
+                  { icon: "🤖", text: "AI DJ для автоподбора" },
+                ].map((f, i) => (
+                  <div key={i} style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    fontSize: 13,
+                    color: isTequila ? "#fef0e0" : "rgba(255,255,255,0.85)",
+                  }}>
+                    <span style={{ fontSize: 16 }}>{f.icon}</span>
+                    <span>{f.text}</span>
+                  </div>
+                ))}
+              </div>
+              {/* CTA */}
+              <div style={{
+                fontSize: 12,
+                color: isTequila ? "#c8a882" : "rgba(255,255,255,0.5)",
+                fontStyle: "italic",
+              }}>Следи за обновлениями!</div>
+            </div>
+          </div>
+        )
+      )}
 
       {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
