@@ -329,6 +329,152 @@ class SupabaseAI:
             logger.error("Log click failed: %s", e)
             return False
 
+    # ── New endpoints ────────────────────────────────────────────────────
+
+    async def get_trending(
+        self,
+        hours: int = 24,
+        limit: int = 20,
+        genre: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get currently trending tracks by play velocity."""
+        if not self.enabled:
+            return []
+
+        try:
+            session = await _get_session()
+            params: dict[str, str] = {
+                "hours": str(hours),
+                "limit": str(limit),
+            }
+            if genre:
+                params["genre"] = genre
+
+            async with session.get(
+                _fn_url("trending"),
+                headers=_headers(),
+                params=params,
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data.get("trending", [])
+        except Exception as e:
+            logger.error("Trending API failed: %s", e)
+            return []
+
+    async def send_feedback(
+        self,
+        user_id: int,
+        feedback: str,
+        track_id: int | None = None,
+        source_id: str | None = None,
+        context: str | None = None,
+    ) -> bool:
+        """
+        Send explicit user feedback.
+
+        feedback: "like" | "dislike" | "skip" | "save" | "share" | "repeat"
+        context:  "recommend" | "search" | "radio" | "playlist" | "trending"
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            session = await _get_session()
+            payload: dict[str, Any] = {
+                "user_id": user_id,
+                "feedback": feedback,
+            }
+            if track_id:
+                payload["track_id"] = track_id
+            if source_id:
+                payload["source_id"] = source_id
+            if context:
+                payload["context"] = context
+
+            async with session.post(
+                _fn_url("feedback"),
+                headers=_headers(),
+                json=payload,
+            ) as resp:
+                return resp.status == 200
+        except Exception as e:
+            logger.error("Feedback API failed: %s", e)
+            return False
+
+    async def search_catalog(
+        self,
+        query: str,
+        limit: int = 20,
+        genre: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Full-text search across the Supabase tracks catalog."""
+        if not self.enabled:
+            return []
+
+        try:
+            session = await _get_session()
+            params: dict[str, str] = {
+                "q": query,
+                "limit": str(limit),
+            }
+            if genre:
+                params["genre"] = genre
+
+            async with session.get(
+                _fn_url("search"),
+                headers=_headers(),
+                params=params,
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data.get("results", [])
+        except Exception as e:
+            logger.error("Search API failed: %s", e)
+            return []
+
+    async def get_taste_summary(self, user_id: int) -> dict[str, Any]:
+        """Get rich user taste summary (top genres, artists, stats)."""
+        if not self.enabled:
+            return {}
+
+        try:
+            session = await _get_session()
+            base = _SUPABASE_URL.rstrip("/")
+            url = f"{base}/rest/v1/rpc/user_taste_summary"
+            async with session.post(
+                url,
+                headers=_headers(),
+                json={"p_user_id": user_id},
+            ) as resp:
+                if resp.status != 200:
+                    return {}
+                return await resp.json()
+        except Exception as e:
+            logger.error("Taste summary failed: %s", e)
+            return {}
+
+    async def health_check(self) -> dict[str, Any]:
+        """Check Supabase connectivity and return basic stats."""
+        if not self.enabled:
+            return {"ok": False, "error": "Not configured"}
+
+        try:
+            session = await _get_session()
+            base = _SUPABASE_URL.rstrip("/")
+            url = f"{base}/rest/v1/tracks?select=id&limit=1"
+            async with session.get(url, headers=_headers()) as resp:
+                ok = resp.status == 200
+                return {
+                    "ok": ok,
+                    "status": resp.status,
+                    "url": _SUPABASE_URL,
+                }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
 
 # ── Singleton ────────────────────────────────────────────────────────────────
 

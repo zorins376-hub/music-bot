@@ -43,7 +43,16 @@ serve(async (req: Request) => {
       p_limit: limit,
     });
 
-    if (error) throw error;
+    if (error) {
+      // Empty results are fine (cold-start user, empty DB)
+      if (error.code === "PGRST116" || error.message?.includes("0 rows")) {
+        return new Response(
+          JSON.stringify({ recommendations: [], count: 0, cold_start: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(error.message || JSON.stringify(error));
+    }
 
     // Format response
     const tracks = (recs || []).map((r: any) => ({

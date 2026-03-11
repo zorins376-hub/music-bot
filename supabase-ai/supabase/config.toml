@@ -1,21 +1,18 @@
 # Supabase AI Service Configuration
-# Run: supabase init && supabase start (local dev)
 # Deploy: supabase link --project-ref <ref> && supabase db push && supabase functions deploy
-
-[project]
-id = "music-bot-ai"
+project_id = "music-bot-ai"
 
 [api]
 enabled = true
 port = 54321
-schemas = ["public"]
+schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 
 [db]
 port = 54322
 shadow_port = 54320
-major_version = 15
+major_version = 17
 
 [studio]
 enabled = true

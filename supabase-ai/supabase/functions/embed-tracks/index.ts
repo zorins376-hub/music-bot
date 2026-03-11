@@ -106,27 +106,45 @@ serve(async (req: Request) => {
     const embData = await embResp.json();
     const embeddings = embData.data as Array<{ index: number; embedding: number[] }>;
 
-    // ── 5. Store embeddings in tracks table ─────────────────────────────
+    // ── 5. Store embeddings in tracks table (batch) ────────────────────
     let processed = 0;
     const errors: string[] = [];
+    const updates: Array<{ id: number; embedding: number[] }> = [];
+    const doneIds: number[] = [];
 
     for (const emb of embeddings) {
       const track = tracks[emb.index];
       if (!track) continue;
+      updates.push({ id: track.id, embedding: emb.embedding });
+    }
 
-      const { error: uErr } = await sb
-        .from("tracks")
-        .update({ embedding: emb.embedding })
-        .eq("id", track.id);
-
-      if (uErr) {
-        errors.push(`Track ${track.id}: ${uErr.message}`);
-        continue;
+    // Process updates in parallel chunks of 10
+    const CHUNK = 10;
+    for (let i = 0; i < updates.length; i += CHUNK) {
+      const chunk = updates.slice(i, i + CHUNK);
+      const results = await Promise.allSettled(
+        chunk.map(async (u) => {
+          const { error: uErr } = await sb
+            .from("tracks")
+            .update({ embedding: u.embedding })
+            .eq("id", u.id);
+          if (uErr) throw new Error(`Track ${u.id}: ${uErr.message}`);
+          doneIds.push(u.id);
+          return u.id;
+        }),
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          processed++;
+        } else {
+          errors.push(r.reason?.message || "Unknown error");
+        }
       }
+    }
 
-      // Remove from queue
-      await sb.from("embedding_queue").delete().eq("track_id", track.id);
-      processed++;
+    // Remove processed tracks from queue in one call
+    if (doneIds.length > 0) {
+      await sb.from("embedding_queue").delete().in("track_id", doneIds);
     }
 
     return new Response(

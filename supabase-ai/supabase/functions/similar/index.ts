@@ -46,7 +46,7 @@ serve(async (req: Request) => {
 
     if (error) throw error;
 
-    const result = (tracks || []).map((t: any) => ({
+    let result = (tracks || []).map((t: any) => ({
       track_id: t.track_id,
       source_id: t.source_id,
       video_id: t.source_id,
@@ -55,6 +55,50 @@ serve(async (req: Request) => {
       genre: t.genre,
       similarity: t.similarity,
     }));
+
+    // Fallback: if vector similarity returned too few, fill with same genre/artist
+    if (result.length < limit) {
+      const remaining = limit - result.length;
+      const excludeIds = [trackId, ...result.map((r: any) => r.track_id)];
+
+      // Get the source track's genre and artist
+      const { data: srcTrack } = await sb
+        .from("tracks")
+        .select("genre, artist")
+        .eq("id", trackId)
+        .single();
+
+      if (srcTrack) {
+        const filters: string[] = [];
+        if (srcTrack.genre) filters.push(`genre.eq.${srcTrack.genre}`);
+        if (srcTrack.artist) filters.push(`artist.eq.${srcTrack.artist}`);
+
+        if (filters.length > 0) {
+          const { data: fallback } = await sb
+            .from("tracks")
+            .select("id, source_id, title, artist, genre")
+            .or(filters.join(","))
+            .not("id", "in", `(${excludeIds.join(",")})`)
+            .not("file_id", "is", null)
+            .order("downloads", { ascending: false })
+            .limit(remaining);
+
+          if (fallback) {
+            result = result.concat(
+              fallback.map((t: any) => ({
+                track_id: t.id,
+                source_id: t.source_id,
+                video_id: t.source_id,
+                title: t.title,
+                artist: t.artist,
+                genre: t.genre,
+                similarity: 0,
+              })),
+            );
+          }
+        }
+      }
+    }
 
     return new Response(
       JSON.stringify({ similar: result, count: result.length }),

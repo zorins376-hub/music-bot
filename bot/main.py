@@ -182,6 +182,11 @@ async def on_shutdown(bot: Bot) -> None:
     from bot.services.http_session import close_session
     await close_session()
 
+    # Close Supabase AI session
+    if app_settings.SUPABASE_AI_ENABLED:
+        from bot.services.supabase_ai import close as close_supabase
+        await close_supabase()
+
     # Gracefully shutdown thread pools
     from bot.services.downloader import _ytdl_pool
     from bot.services.vk_provider import _vk_pool
