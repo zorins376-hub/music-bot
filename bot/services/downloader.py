@@ -44,6 +44,9 @@ def log_runtime_info() -> None:
 def _base_opts() -> dict:
     """Return base yt-dlp options: cookies + remote EJS components + proxy."""
     opts: dict = {"remote_components": {"ejs:github"}}
+    # Enable JS runtimes for signature solving (node + deno)
+    # yt-dlp defaults to {'deno': {}} only, we need to include node
+    opts["js_runtimes"] = {"node": {}, "deno": {}}
     if _COOKIES_PATH.exists():
         opts["cookiefile"] = str(_COOKIES_PATH)
     # Proxy rotation
