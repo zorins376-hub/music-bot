@@ -9,7 +9,7 @@ import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
 import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic } from "./components/Icons";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
@@ -1381,7 +1381,7 @@ export function App() {
         </>
       )}
 
-      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayAll={async (tracks) => { console.log("[PlayAll] Clearing queue and adding", tracks.length, "tracks"); await action("clear"); for (const t of tracks) { await action("add", t.video_id, undefined, t); } if (tracks.length) { await action("play", tracks[0].video_id); setView("player"); } }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
+      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayPlaylist={async (playlistId) => { setBuffering(true); try { const s = await playPlaylist(playlistId); setState(s); setView("player"); } catch (e) { console.error("Play playlist error:", e); } }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
 
       {view === "party" && (
         userProfile?.is_admin ? (

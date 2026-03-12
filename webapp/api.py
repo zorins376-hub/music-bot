@@ -838,6 +838,45 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
     return state
 
 
+@app.post("/api/playlist/{playlist_id}/play", response_model=PlayerState)
+async def play_playlist(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Play all tracks from a playlist - clears queue and adds all tracks."""
+    from sqlalchemy import select
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist, PlaylistTrack
+    from bot.models.track import Track
+
+    user_id = user["id"]
+
+    async with async_session() as session:
+        # Verify ownership
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+        q = (
+            select(Track)
+            .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+            .where(PlaylistTrack.playlist_id == playlist_id)
+            .order_by(PlaylistTrack.position)
+        )
+        db_tracks = (await session.execute(q)).scalars().all()
+        tracks = await asyncio.gather(*(_db_track_to_schema(t) for t in db_tracks))
+
+    if not tracks:
+        raise HTTPException(status_code=400, detail="Playlist is empty")
+
+    # Load current state, clear queue, add all tracks
+    state = await _load_state(user_id)
+    state.queue = list(tracks)
+    state.position = 0
+    state.current_track = tracks[0]
+    state.is_playing = True
+
+    await _save_state(user_id, state)
+    return state
+
+
 @app.get("/api/playlists/{user_id}", response_model=list[PlaylistSchema])
 async def get_playlists(user_id: int, user: dict = Depends(get_current_user)):
     if user.get("id") != user_id:

@@ -107,6 +107,15 @@ export async function fetchPlaylistTracks(playlistId: number): Promise<Track[]> 
   return r.json();
 }
 
+export async function playPlaylist(playlistId: number): Promise<PlayerState> {
+  const r = await fetch(`${API_BASE}/playlist/${playlistId}/play`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to play playlist");
+  return r.json();
+}
+
 export async function fetchLyrics(trackId: string): Promise<string | null> {
   const r = await fetch(`${API_BASE}/lyrics/${trackId}`, { headers: getHeaders() });
   if (!r.ok) return null;

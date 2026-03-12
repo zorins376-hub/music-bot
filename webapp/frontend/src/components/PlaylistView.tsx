@@ -10,6 +10,7 @@ interface Props {
   userId: number;
   onPlayTrack: (track: Track) => void;
   onPlayAll?: (tracks: Track[]) => void;
+  onPlayPlaylist?: (playlistId: number) => void;
   accentColor?: string;
   themeId?: string;
   currentTrack?: Track | null;
@@ -19,7 +20,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function PlaylistView({ userId, onPlayTrack, onPlayAll, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", currentTrack }: Props) {
+export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", currentTrack }: Props) {
   const warm = themeId === "tequila";
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -182,7 +183,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, accentColor = "va
 
         {tracks.length > 0 && (
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <button onClick={() => { haptic("medium"); if (onPlayAll) onPlayAll(tracks); else if (tracks[0]) onPlayTrack(tracks[0]); }}
+            <button onClick={() => { haptic("medium"); if (onPlayPlaylist && selectedId) onPlayPlaylist(selectedId); else if (onPlayAll) onPlayAll(tracks); else if (tracks[0]) onPlayTrack(tracks[0]); }}
               style={{ flex: 1, padding: "10px 0", borderRadius: 14, border: "none", background: activeBg, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               ▶ Воспроизвести всё
             </button>
