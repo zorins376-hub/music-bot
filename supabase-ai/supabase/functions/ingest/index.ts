@@ -46,7 +46,7 @@ serve(async (req: Request) => {
     const body: IngestEvent = await req.json();
     const { event, user_id, track, listen_duration, source, query } = body;
 
-    if (!user_id || !track?.source_id || !event) {
+    if (user_id === undefined || user_id === null || !track?.source_id || !event) {
       return new Response(
         JSON.stringify({ error: "user_id, track.source_id, and event required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },

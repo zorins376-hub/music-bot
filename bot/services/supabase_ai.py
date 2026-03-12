@@ -51,6 +51,10 @@ _SUPABASE_URL: str = getattr(settings, "SUPABASE_URL", "") or ""
 _SUPABASE_KEY: str = getattr(settings, "SUPABASE_SERVICE_KEY", "") or ""
 _TIMEOUT = aiohttp.ClientTimeout(total=15)
 
+# Rate-limit repeated error logging (avoid log spam)
+_ingest_error_count: int = 0
+_INGEST_ERROR_LOG_INTERVAL: int = 50
+
 
 def _fn_url(fn_name: str) -> str:
     """Build Edge Function URL."""
@@ -179,8 +183,11 @@ class SupabaseAI:
                 json=payload,
             ) as resp:
                 if resp.status != 200:
-                    text = await resp.text()
-                    logger.error("Ingest API error %d: %s", resp.status, text)
+                    global _ingest_error_count
+                    _ingest_error_count += 1
+                    if _ingest_error_count <= 3 or _ingest_error_count % _INGEST_ERROR_LOG_INTERVAL == 0:
+                        text = await resp.text()
+                        logger.error("Ingest API error %d: %s (count=%d)", resp.status, text, _ingest_error_count)
                     return False
                 return True
         except Exception as e:

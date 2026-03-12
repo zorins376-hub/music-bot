@@ -534,7 +534,7 @@ async def _ingest_to_supabase(tracks: list[dict[str, Any]]) -> None:
                 continue
             await supabase_ai.ingest_event(
                 event="index",
-                user_id=0,  # system user
+                user_id=-1,  # system user (0 is falsy in JS edge function)
                 track={
                     "source_id": source_id,
                     "title": tr.get("title") or "",
