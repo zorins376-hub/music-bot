@@ -127,6 +127,7 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
     itunes_url = f"https://itunes.apple.com/{storefront}/rss/topsongs/limit=100/json"
     try:
         sess = get_session()
+        logger.info("Apple chart %s: connector=%s, url=%s", storefront, type(sess.connector).__name__, itunes_url)
         async with sess.get(itunes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 data = await resp.json(content_type=None)
