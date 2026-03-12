@@ -46,7 +46,8 @@ def _base_opts() -> dict:
     opts: dict = {"remote_components": {"ejs:github"}}
     # Enable JS runtimes for signature solving (node + deno)
     # yt-dlp defaults to {'deno': {}} only, we need to include node
-    opts["js_runtimes"] = {"node": {}, "deno": {}}
+    # Explicit path avoids PATH lookup issues in containers
+    opts["js_runtimes"] = {"node": {"path": "/usr/bin/node"}, "deno": {}}
     if _COOKIES_PATH.exists():
         opts["cookiefile"] = str(_COOKIES_PATH)
     # Proxy rotation

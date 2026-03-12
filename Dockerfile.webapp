@@ -11,10 +11,15 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install ffmpeg + copy Node.js binary from official image (for yt-dlp JS solver)
-COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
-COPY --from=frontend /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# Install ffmpeg + Node.js 20 via NodeSource apt (required by yt-dlp JS challenge solver)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/* \
     && node --version
 
@@ -33,4 +38,4 @@ COPY --from=frontend /build/dist webapp/frontend/dist
 EXPOSE 8080
 
 # Railway sets PORT env var, default to 8080
-CMD sh -c "uvicorn webapp.api:app --host 0.0.0.0 --port \${PORT:-8080}"
+CMD sh -c "echo '[startup] node:' && node --version 2>&1 || echo '[startup] node NOT FOUND'; uvicorn webapp.api:app --host 0.0.0.0 --port \${PORT:-8080}"
