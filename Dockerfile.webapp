@@ -11,6 +11,11 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# Install Node.js for yt-dlp JS challenge and ffmpeg for audio
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs npm ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir fastapi uvicorn[standard]
@@ -20,9 +25,10 @@ COPY recommender/ recommender/
 COPY mixer/ mixer/
 COPY webapp/ webapp/
 
-# Copy built frontend
-COPY --from=frontend /build/dist webapp/static
+# Copy built frontend to correct location (webapp/frontend/dist)
+COPY --from=frontend /build/dist webapp/frontend/dist
 
-EXPOSE 8000
+EXPOSE 8080
 
-CMD ["uvicorn", "webapp.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway sets PORT env var, default to 8080
+CMD sh -c "uvicorn webapp.api:app --host 0.0.0.0 --port \${PORT:-8080}"
