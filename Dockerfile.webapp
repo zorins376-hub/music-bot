@@ -1,5 +1,5 @@
 # ── Stage 1: Build frontend ────────────────────────────────────────────────
-FROM node:20-alpine AS frontend
+FROM node:20-slim AS frontend
 WORKDIR /build
 COPY webapp/frontend/package.json webapp/frontend/package-lock.json* ./
 RUN npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
@@ -9,18 +9,14 @@ RUN npm run build
 # ── Stage 2: Python backend ───────────────────────────────────────────────
 FROM python:3.13-slim
 
-# Cache bust: 2026-03-12-v2
 WORKDIR /app
 
-# Install ffmpeg and download Node.js 20 LTS binary
-ENV NODE_VERSION=20.18.2
-ENV PATH="/usr/local/bin:${PATH}"
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl xz-utils \
-    && curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz | tar -xJ -C /usr/local --strip-components=1 \
+# Install ffmpeg + copy Node.js binary from official image (for yt-dlp JS solver)
+COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && which node \
-    && node --version \
-    && echo "Node.js installed successfully"
+    && node --version
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
