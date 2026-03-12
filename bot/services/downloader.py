@@ -32,22 +32,32 @@ def log_runtime_info() -> None:
         path = shutil.which(rt)
         if path:
             try:
-                ver = subprocess.check_output([rt, "--version"], timeout=5, text=True).strip()
+                ver = subprocess.check_output([path, "--version"], timeout=5, text=True).strip()
                 logger.info("JS runtime '%s': %s (%s)", rt, ver, path)
-            except Exception:
-                logger.info("JS runtime '%s': found at %s (version unknown)", rt, path)
+            except Exception as e:
+                logger.warning("JS runtime '%s': found at %s but failed to get version: %s", rt, path, e)
         else:
-            logger.info("JS runtime '%s': NOT FOUND", rt)
+            logger.warning("JS runtime '%s': NOT FOUND in PATH", rt)
+    # Also check explicit paths used in _base_opts
+    for explicit in ("/usr/local/bin/deno",):
+        import os
+        if os.path.isfile(explicit) and os.access(explicit, os.X_OK):
+            try:
+                ver = subprocess.check_output([explicit, "--version"], timeout=5, text=True).strip()
+                logger.info("Explicit runtime '%s': %s", explicit, ver)
+            except Exception as e:
+                logger.warning("Explicit runtime '%s': exists but failed: %s", explicit, e)
+        else:
+            logger.warning("Explicit runtime '%s': NOT FOUND or not executable", explicit)
     logger.info("Cookies file: %s (exists=%s)", _COOKIES_PATH, _COOKIES_PATH.exists())
 
 
 def _base_opts() -> dict:
     """Return base yt-dlp options: cookies + remote EJS components + proxy."""
     opts: dict = {"remote_components": {"ejs:github"}}
-    # Enable JS runtimes for signature solving (node + deno)
-    # yt-dlp defaults to {'deno': {}} only, we need to include node
-    # Explicit path avoids PATH lookup issues in containers
-    opts["js_runtimes"] = {"node": {"path": "/usr/bin/node"}, "deno": {}}
+    # Enable JS runtimes for signature solving
+    # Use deno (single static binary) with explicit path for container reliability
+    opts["js_runtimes"] = {"deno": {"path": "/usr/local/bin/deno"}, "node": {}}
     if _COOKIES_PATH.exists():
         opts["cookiefile"] = str(_COOKIES_PATH)
     # Proxy rotation
