@@ -855,6 +855,10 @@ export function App() {
     async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
       try {
         if (act === "play") {
+          // Show buffering spinner immediately if switching to a new track
+          if (trackId && trackId !== currentTrackIdRef.current) {
+            setBuffering(true);
+          }
           ensureEqualizerGraph();
           audioContextRef.current?.resume().catch(() => {});
           if (audioRef.current && audioRef.current.paused) {
