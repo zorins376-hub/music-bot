@@ -1377,7 +1377,7 @@ export function App() {
         </>
       )}
 
-      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
+      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) { await action("play", tracks[0].video_id); setView("player"); } }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
 
       {view === "party" && (
         userProfile?.is_admin ? (
