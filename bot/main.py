@@ -415,15 +415,12 @@ async def main() -> None:
     if app_settings.USE_WEBHOOK:
         await _run_webhook(bot, dp)
     else:
-        # Start TMA webapp alongside polling if TMA_URL is configured
-        tma_task = None
-        if app_settings.TMA_URL:
-            tma_task = asyncio.create_task(_run_tma_server())
+        # Always start TMA webapp alongside polling (serves frontend + API)
+        tma_task = asyncio.create_task(_run_tma_server())
         try:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
         finally:
-            if tma_task:
-                tma_task.cancel()
+            tma_task.cancel()
 
 
 async def _run_tma_server() -> None:

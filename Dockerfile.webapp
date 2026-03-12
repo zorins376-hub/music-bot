@@ -38,4 +38,5 @@ COPY --from=frontend /build/dist webapp/frontend/dist
 EXPOSE 8080
 
 # Railway sets PORT env var, default to 8080
-CMD sh -c "echo '[startup] node:' && node --version 2>&1 || echo '[startup] node NOT FOUND'; uvicorn webapp.api:app --host 0.0.0.0 --port \${PORT:-8080}"
+# Run bot.main which starts both the Telegram bot (polling) and the webapp (FastAPI)
+CMD ["python", "-m", "bot.main"]
