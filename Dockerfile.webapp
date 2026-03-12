@@ -11,10 +11,13 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install Node.js for yt-dlp JS challenge and ffmpeg for audio
+# Install Node.js 20 LTS for yt-dlp JS challenge solver and ffmpeg for audio
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs npm ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    curl ca-certificates ffmpeg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
