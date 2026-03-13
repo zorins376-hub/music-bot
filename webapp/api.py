@@ -75,6 +75,8 @@ _dl_inflight: dict[str, asyncio.Future[Path]] = {}
 _dl_inflight_lock = asyncio.Lock()
 _cover_url_cache: dict[str, tuple[str | None, float]] = {}
 _COVER_URL_TTL = 3600
+_user_audio_cache: dict[int, tuple[str, bool, float]] = {}  # user_id -> (quality, premium, expires_at)
+_USER_AUDIO_CACHE_TTL = 60
 _LYRICS_CACHE_TTL = 86400 * 7
 _LYRICS_MISS_TTL = 3600 * 6
 _LYRICS_CACHE_MISS = "__MISS__"
@@ -119,6 +121,38 @@ _error_handler.setFormatter(logging.Formatter(
 logging.getLogger().addHandler(_error_handler)
 
 logger = logging.getLogger(__name__)
+
+
+def _get_cached_user_audio(user_id: int) -> tuple[str, bool] | None:
+    import time as _time
+
+    item = _user_audio_cache.get(user_id)
+    if not item:
+        return None
+    quality, premium, expires_at = item
+    if expires_at <= _time.time():
+        _user_audio_cache.pop(user_id, None)
+        return None
+    return quality, premium
+
+
+def _set_cached_user_audio(user_id: int, quality: str, premium: bool) -> None:
+    import time as _time
+
+    _user_audio_cache[user_id] = (quality, premium, _time.time() + _USER_AUDIO_CACHE_TTL)
+
+
+async def _resolve_user_audio_profile(user: dict) -> tuple[str, bool]:
+    user_id = int(user["id"])
+    cached = _get_cached_user_audio(user_id)
+    if cached is not None:
+        return cached
+
+    db_user = await _get_or_create_webapp_user(user)
+    quality = str(db_user.quality or "192")
+    premium = bool(db_user.is_premium or db_user.is_admin)
+    _set_cached_user_audio(user_id, quality, premium)
+    return quality, premium
 
 
 # ── Auth dependency ──────────────────────────────────────────────────────
@@ -305,6 +339,7 @@ async def update_audio_settings(body: UserAudioSettingsSchema, user: dict = Depe
         await session.commit()
 
     db_user.quality = quality
+    _set_cached_user_audio(db_user.id, quality, bool(db_user.is_premium or db_user.is_admin))
     return UserProfileSchema(
         id=db_user.id,
         first_name=db_user.first_name or "",
@@ -341,15 +376,12 @@ async def stream_audio(
     """Download (if needed) and stream MP3 for a given video_id with Range support."""
     # Auth: accept header or query param (audio elements can't send headers)
     init_data = x_telegram_init_data or token
-    if not init_data or verify_init_data(init_data) is None:
+    user = verify_init_data(init_data) if init_data else None
+    if user is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user = verify_init_data(init_data)
-    db_user = await _get_or_create_webapp_user(user) if user else None
-    preferred_bitrate = _select_bitrate(
-        getattr(db_user, "quality", None),
-        bool(getattr(db_user, "is_premium", False) or getattr(db_user, "is_admin", False)),
-    )
+    quality, premium = await _resolve_user_audio_profile(user)
+    preferred_bitrate = _select_bitrate(quality, premium)
 
     # Sanitize video_id to prevent path traversal
     import re
