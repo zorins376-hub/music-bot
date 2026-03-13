@@ -61,7 +61,6 @@ class Settings(BaseSettings):
     # ── Paths ─────────────────────────────────────────────────────────────
     DOWNLOAD_DIR: Path = _BASE / "downloads"
     DATA_DIR: Path = _BASE / "data"
-    TEMP_DOWNLOAD_DIR: Path = Path("/tmp/musicbot-downloads") if _IN_DOCKER else (_BASE / "downloads" / ".tmp")
 
     # ── Rate limiting ─────────────────────────────────────────────────────
     RATE_LIMIT_REGULAR: int = 10
@@ -185,7 +184,6 @@ config = settings
 
 settings.DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
-settings.TEMP_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Write YouTube cookies file from env var if provided
 _COOKIES_PATH = settings.DATA_DIR / "cookies.txt"

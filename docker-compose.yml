@@ -4,8 +4,6 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
-    environment:
-      TMPDIR: /tmp
     ports:
       - "8080:8080"   # TMA webapp
       - "9090:9090"   # Prometheus metrics
@@ -13,20 +11,14 @@ services:
       - ./data:/app/data
       - ./downloads:/app/downloads
       - ./logs:/app/logs
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=512m
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    cpus: 1.50
-    mem_limit: 2g
-    mem_reservation: 512m
     deploy:
       resources:
         limits:
-          cpus: '1.50'
           memory: 2G
         reservations:
           memory: 512M

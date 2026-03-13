@@ -3,9 +3,9 @@ import logging
 import re
 import shutil
 import subprocess
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import uuid
 
 import yt_dlp
 
@@ -14,30 +14,33 @@ from bot.utils import fmt_duration as _utils_fmt_duration
 
 logger = logging.getLogger(__name__)
 
-# Dedicated thread pool for yt-dlp I/O operations
-_ytdl_pool = ThreadPoolExecutor(max_workers=settings.YTDL_WORKERS, thread_name_prefix="ytdl")
 
+# ── Staging helpers (shared by download_manager and providers) ──────────
 
-def stage_path_for(dest: Path, *, suffix: str = "") -> Path:
-    token = uuid.uuid4().hex[:8]
-    staged_name = f"{dest.stem}.{token}{suffix}{dest.suffix}"
-    return settings.TEMP_DOWNLOAD_DIR / staged_name
-
-
-def finalize_staged_file(staged_path: Path, dest: Path) -> Path:
+def stage_path_for(dest: Path, suffix: str = ".part") -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(staged_path), str(dest))
+    temp_name = f"{dest.name}.{uuid.uuid4().hex}{suffix}"
+    return dest.parent / temp_name
+
+
+def finalize_staged_file(staged: Path | None, dest: Path) -> Path:
+    if staged is None:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    staged.replace(dest)
     return dest
 
 
-def cleanup_staged_files(*paths: Path | None) -> None:
-    for path in paths:
-        if not path:
-            continue
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:
-            pass
+def cleanup_staged_files(staged: Path | None) -> None:
+    if staged is None:
+        return
+    try:
+        staged.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+# Dedicated thread pool for yt-dlp I/O operations
+_ytdl_pool = ThreadPoolExecutor(max_workers=settings.YTDL_WORKERS, thread_name_prefix="ytdl")
 
 
 def _fmt_duration(seconds: int | None) -> str:
@@ -397,9 +400,7 @@ def _list_formats_debug(video_id: str) -> None:
 def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=None, dl_id: str | None = None) -> Path:
     url = f"https://www.youtube.com/watch?v={video_id}"
     file_stem = f"{video_id}_{dl_id}" if dl_id else video_id
-    final_mp3_path = output_dir / f"{file_stem}.mp3"
-    staged_base = stage_path_for(final_mp3_path, suffix=".ytdl")
-    output_template = str(staged_base.with_suffix(".%(ext)s"))
+    output_template = str(output_dir / f"{file_stem}.%(ext)s")
 
     def _hook(d: dict) -> None:
         if progress_cb and d.get("status") == "downloading":
@@ -437,22 +438,16 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
     except Exception as e:
         logger.error("Download failed for %s: %s", video_id, e)
         _list_formats_debug(video_id)
-        cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
         raise
 
-    staged_mp3_path = staged_base.with_suffix(".mp3")
-    if staged_mp3_path.exists():
-        try:
-            return finalize_staged_file(staged_mp3_path, final_mp3_path)
-        finally:
-            cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
+    mp3_path = output_dir / f"{file_stem}.mp3"
+    if mp3_path.exists():
+        return mp3_path
     # Fallback: check without dl_id suffix (older naming)
     if dl_id:
         alt = output_dir / f"{video_id}.mp3"
         if alt.exists():
-            cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
             return alt
-    cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
     raise FileNotFoundError(f"MP3 not found after download: {video_id}")
 
 
@@ -480,9 +475,7 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
     """Download YouTube video as mp4. quality: 360 / 480 / 720."""
     url = f"https://www.youtube.com/watch?v={video_id}"
     height = int(quality)
-    final_video_path = output_dir / f"{video_id}_v{quality}.mp4"
-    staged_base = stage_path_for(final_video_path, suffix=".ytv")
-    output_template = str(staged_base.with_suffix(".%(ext)s"))
+    output_template = str(output_dir / f"{video_id}_v{quality}.%(ext)s")
     ydl_opts = {
         "format": f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]",
         "outtmpl": output_template,
@@ -502,23 +495,15 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
             ydl.download([url])
     except Exception as e:
         logger.error("Video download failed for %s: %s", video_id, e)
-        cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
         raise
 
-    staged_mp4_path = staged_base.with_suffix(".mp4")
-    if staged_mp4_path.exists():
-        try:
-            return finalize_staged_file(staged_mp4_path, final_video_path)
-        finally:
-            cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
+    mp4_path = output_dir / f"{video_id}_v{quality}.mp4"
+    if mp4_path.exists():
+        return mp4_path
     # yt-dlp might have used a different extension; find it
-    for f in settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}.*"):
+    for f in output_dir.glob(f"{video_id}_v{quality}.*"):
         if f.suffix in (".mp4", ".mkv", ".webm"):
-            try:
-                return finalize_staged_file(f, output_dir / f"{video_id}_v{quality}{f.suffix}")
-            finally:
-                cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
-    cleanup_staged_files(*settings.TEMP_DOWNLOAD_DIR.glob(f"{staged_base.stem}*"))
+            return f
     raise FileNotFoundError(f"Video not found after download: {video_id}")
 
 
