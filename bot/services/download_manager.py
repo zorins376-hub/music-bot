@@ -18,18 +18,19 @@ from typing import Optional
 import aiohttp
 
 from bot.config import settings
+from bot.services.downloader import cleanup_staged_files, finalize_staged_file, stage_path_for
 
 logger = logging.getLogger(__name__)
 
-# ── Configuration ────────────────────────────────────────────────────────
+# ── Configuration (VPS-optimized via config.py) ─────────────────────────────
 
 MIN_WORKERS = settings.YTDL_WORKERS  # baseline thread pool size
-MAX_WORKERS = MIN_WORKERS * 4        # max scaling limit
-MAX_CONCURRENT_DOWNLOADS = MAX_WORKERS + 2  # semaphore limit
-CHUNK_SIZE = 2 * 1024 * 1024         # 2 MB per chunk for parallel download
-MIN_FILE_SIZE_FOR_CHUNKS = 512 * 1024  # only chunk files > 512 KB
-MAX_PARALLEL_CHUNKS = 6              # max parallel Range segments
-SCALE_CHECK_INTERVAL = 5             # seconds between scaling checks
+MAX_WORKERS = settings.YTDL_WORKERS * settings.YTDL_MAX_WORKERS_MULTIPLIER  # max scaling limit
+MAX_CONCURRENT_DOWNLOADS = MAX_WORKERS + 4  # semaphore limit
+CHUNK_SIZE = 4 * 1024 * 1024         # 4 MB per chunk for parallel download (was 2MB)
+MIN_FILE_SIZE_FOR_CHUNKS = 256 * 1024  # chunk files > 256 KB (was 512KB)
+MAX_PARALLEL_CHUNKS = settings.YTDL_CONCURRENT_FRAGMENTS  # max parallel Range segments
+SCALE_CHECK_INTERVAL = 3             # seconds between scaling checks (was 5)
 
 
 class DownloadManager:
@@ -96,7 +97,9 @@ class DownloadManager:
             session = aiohttp.ClientSession()
             own_session = True
 
+        staged_dest: Path | None = None
         try:
+            staged_dest = stage_path_for(dest, suffix=".chunked")
             # Get file size
             content_length = await self._get_content_length(session, url)
             if not content_length or content_length < MIN_FILE_SIZE_FOR_CHUNKS:
@@ -125,11 +128,14 @@ class DownloadManager:
             )
 
             # Merge chunks to file
-            with open(dest, "wb") as f:
+            with open(staged_dest, "wb") as f:
                 for data in chunk_data:
                     f.write(data)
 
-            return dest
+            return finalize_staged_file(staged_dest, dest)
+        except Exception:
+            cleanup_staged_files(staged_dest)
+            raise
         finally:
             if own_session:
                 await session.close()
@@ -245,13 +251,18 @@ class DownloadManager:
     async def _single_download(
         session: aiohttp.ClientSession, url: str, dest: Path
     ) -> Path:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise IOError(f"Download failed: HTTP {resp.status}")
-            with open(dest, "wb") as f:
-                async for chunk in resp.content.iter_chunked(64 * 1024):
-                    f.write(chunk)
-        return dest
+        staged_dest = stage_path_for(dest, suffix=".single")
+        try:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    raise IOError(f"Download failed: HTTP {resp.status}")
+                with open(staged_dest, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        f.write(chunk)
+            return finalize_staged_file(staged_dest, dest)
+        except Exception:
+            cleanup_staged_files(staged_dest)
+            raise
 
 
 # Singleton

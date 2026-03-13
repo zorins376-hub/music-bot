@@ -12,12 +12,17 @@ from pathlib import Path
 import aiohttp
 
 from bot.config import settings
+from bot.services.downloader import cleanup_staged_files, finalize_staged_file, stage_path_for
 from bot.services.http_session import get_session
 from bot.utils import fmt_duration as _fmt_dur
 
 logger = logging.getLogger(__name__)
 
-_vk_pool = ThreadPoolExecutor(max_workers=max(1, settings.YTDL_WORKERS // 2), thread_name_prefix="vk")
+# VPS-optimized: larger pool for VK API calls
+_vk_pool = ThreadPoolExecutor(
+    max_workers=max(2, settings.YTDL_WORKERS // 2),
+    thread_name_prefix="vk"
+)
 _vk_audio: object = None   # cached VkAudio instance
 
 
@@ -93,11 +98,16 @@ async def download_vk(url: str, dest: Path) -> Path:
             "(Android 11; SDK 30; x86_64; unknown Android SDK built for x86_64; ru; 1080x1920)"
         ),
     }
-    async with get_session().get(
-        url, headers=headers, timeout=aiohttp.ClientTimeout(total=90)
-    ) as resp:
-        resp.raise_for_status()
-        with dest.open("wb") as f:
-            async for chunk in resp.content.iter_chunked(64 * 1024):
-                f.write(chunk)
-    return dest
+    staged_dest = stage_path_for(dest, suffix=".vk")
+    try:
+        async with get_session().get(
+            url, headers=headers, timeout=aiohttp.ClientTimeout(total=90)
+        ) as resp:
+            resp.raise_for_status()
+            with staged_dest.open("wb") as f:
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    f.write(chunk)
+        return finalize_staged_file(staged_dest, dest)
+    except Exception:
+        cleanup_staged_files(staged_dest)
+        raise

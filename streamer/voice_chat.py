@@ -14,11 +14,49 @@ voice_chat.py — Pyrogram + pytgcalls стример для BLACK ROOM NIGHT CH
   3. Раскомментировать streamer service в docker-compose.yml
 """
 import asyncio
+import hashlib
 import json
 import logging
 from collections import defaultdict
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# ── Local file cache for stutter-free playback ────────────────────────────
+_STREAM_CACHE = Path("/tmp/music_bot_stream")
+_STREAM_CACHE.mkdir(parents=True, exist_ok=True)
+_prev_local: dict[int, str] = {}  # group_id → previous local file (for cleanup)
+
+
+async def _ensure_local(app, file_id: str) -> str:
+    """Download track to local disk if it's a Telegram file_id.
+
+    Returns a path usable by AudioPiped.  Falls back to *file_id* itself
+    when download is impossible (e.g. raw URL, already-local path).
+    """
+    if Path(file_id).exists():
+        return file_id
+    tag = hashlib.md5(file_id.encode()).hexdigest()[:16]
+    local = _STREAM_CACHE / f"{tag}.ogg"
+    if local.exists():
+        return str(local)
+    try:
+        result = await app.download_media(file_id, file_name=str(local))
+        if result:
+            return str(result)
+    except Exception as e:
+        logger.warning("Pre-download failed (%s), using direct stream", e)
+    return file_id
+
+
+def _cleanup_prev(group_id: int) -> None:
+    prev = _prev_local.pop(group_id, None)
+    if prev:
+        try:
+            Path(prev).unlink(missing_ok=True)
+        except Exception:
+            pass
+
 
 # Voting: {group_id: {"likes": set(user_ids), "dislikes": set(user_ids)}}
 _votes: dict[int, dict[str, set[int]]] = defaultdict(lambda: {"likes": set(), "dislikes": set()})
@@ -78,11 +116,16 @@ async def _run_group(app, tgcalls, group_id: int, cache) -> None:
         )
 
         try:
+            _cleanup_prev(group_id)
+            local_path = await _ensure_local(app, track["file_id"])
+            if local_path != track["file_id"]:
+                _prev_local[group_id] = local_path
+
             await tgcalls.play(
                 group_id,
                 AudioPiped(
-                    track["file_id"],
-                    audio_parameters=AudioQuality.HIGH,
+                    local_path,
+                    audio_parameters=AudioQuality.MEDIUM,
                 ),
             )
         except Exception as e:
@@ -157,4 +200,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
     asyncio.run(main())

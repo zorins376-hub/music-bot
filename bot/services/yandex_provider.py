@@ -11,13 +11,13 @@ import asyncio
 import itertools
 import logging
 import re
-import tempfile
 import aiohttp
 from datetime import datetime, timezone
 from pathlib import Path
 
 from bot.config import settings
 from bot.services.cache import cache
+from bot.services.downloader import cleanup_staged_files, finalize_staged_file, stage_path_for
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ def _load_token_expiries(tokens: list[str]) -> dict[str, int]:
 _tokens = _load_tokens()
 _token_cycle = itertools.cycle(_tokens) if _tokens else None
 _token_expiries = _load_token_expiries(_tokens)
+_token_lock = asyncio.Lock()
 
 
 def _token_expires_at(token: str) -> int | None:
@@ -165,10 +166,11 @@ async def _refresh_token_if_needed(token: str) -> str | None:
     return None
 
 
-def _next_token() -> str | None:
+async def _next_token() -> str | None:
     if _token_cycle is None:
         return None
-    return next(_token_cycle)
+    async with _token_lock:
+        return next(_token_cycle)
 
 
 # ── Client cache (one per token to avoid repeated init) ──────────────────
@@ -257,7 +259,7 @@ def _track_to_dict(track, source_id: str | None = None) -> dict | None:
 
 async def search_yandex(query: str, limit: int = 5) -> list[dict]:
     """Search Yandex Music. Returns [] on any failure."""
-    token = _next_token()
+    token = await _next_token()
     if not token:
         return []
     token = await _refresh_token_if_needed(token)
@@ -299,7 +301,7 @@ async def download_yandex(track_id: int, dest: Path, bitrate: int = 320, token: 
     If ``token`` is provided, reuse it to keep search+download on the same token.
     """
     if token is None:
-        token = _next_token()
+        token = await _next_token()
     if not token:
         raise RuntimeError("No Yandex token configured")
     token = await _refresh_token_if_needed(token)
@@ -337,10 +339,16 @@ async def download_yandex(track_id: int, dest: Path, bitrate: int = 320, token: 
             chosen = di
             break
 
-    await chosen.download_async(str(dest))
-    if not dest.exists() or dest.stat().st_size < 1024:
+    staged_dest = stage_path_for(dest, suffix=".yandex")
+    try:
+        await chosen.download_async(str(staged_dest))
+    except Exception:
+        cleanup_staged_files(staged_dest)
+        raise
+    if not staged_dest.exists() or staged_dest.stat().st_size < 1024:
+        cleanup_staged_files(staged_dest)
         raise RuntimeError(f"Downloaded file too small or missing: {dest}")
-    return dest
+    return finalize_staged_file(staged_dest, dest)
 
 
 # ── Yandex Music link resolver ───────────────────────────────────────────
@@ -365,7 +373,7 @@ async def resolve_yandex_url(url: str) -> dict | None:
         return None
     track_id = int(m.group(1))
 
-    token = _next_token()
+    token = await _next_token()
     if not token:
         logger.warning("resolve_yandex_url: no Yandex token configured")
         return None
@@ -393,7 +401,7 @@ async def resolve_yandex_url(url: str) -> dict | None:
 
 async def fetch_yandex_track(track_id: int) -> dict | None:
     """Fetch Yandex Music track metadata by numeric track ID."""
-    token = _next_token()
+    token = await _next_token()
     if not token:
         logger.warning("fetch_yandex_track: no Yandex token configured")
         return None

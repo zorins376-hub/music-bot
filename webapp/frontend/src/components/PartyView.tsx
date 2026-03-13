@@ -1381,7 +1381,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: textColor }}>{p.name}</div>
               <div style={{ fontSize: 12, color: hintColor, display: "flex", alignItems: "center", gap: 4 }}>
-                {p.tracks.length} треков · <IconUsers size={12} /> {p.member_count} online
+                {p.track_count ?? p.tracks.length} треков · <IconUsers size={12} /> {p.member_count} online
               </div>
             </div>
             <div style={{ fontSize: 12, color: hintColor }}>

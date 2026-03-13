@@ -150,6 +150,7 @@ class PartySchema(BaseModel):
     name: str = "Party 🎉"
     is_active: bool = True
     current_position: int = 0
+    track_count: int = 0
     tracks: list[PartyTrackSchema] = []
     member_count: int = 0
     skip_threshold: int = 3

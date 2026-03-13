@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Bot Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .stat-card { transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .loading { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .log-error { color: #ef4444; }
+        .log-warning { color: #f59e0b; }
+        .log-info { color: #3b82f6; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+        const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } = Recharts;
+
+        // API Base URL
+        const API = '/admin/api';
+        
+        // Auth token (from localStorage or prompt)
+        const getToken = () => localStorage.getItem('admin_token') || '';
+        const setToken = (t) => localStorage.setItem('admin_token', t);
+
+        // Fetch with auth
+        const apiFetch = async (path, options = {}) => {
+            const res = await fetch(`${API}${path}`, {
+                ...options,
+                headers: {
+                    'Authorization': `Bearer ${getToken()}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers,
+                },
+            });
+            if (res.status === 401 || res.status === 403) {
+                const token = prompt('Введите Admin Token:');
+                if (token) {
+                    setToken(token);
+                    return apiFetch(path, options);
+                }
+                throw new Error('Unauthorized');
+            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        };
+
+        // Format numbers
+        const fmt = (n) => n?.toLocaleString('ru-RU') ?? '0';
+        const fmtDate = (d) => d ? new Date(d).toLocaleDateString('ru-RU') : '-';
+        const fmtDateTime = (d) => d ? new Date(d).toLocaleString('ru-RU') : '-';
+
+        // Colors
+        const COLORS = ['#667eea', '#764ba2', '#f59e0b', '#10b981', '#ef4444', '#6366f1'];
+
+        // ── Components ──────────────────────────────────────────────────
+
+        const StatCard = ({ title, value, subtitle, icon, color = 'blue' }) => (
+            <div className={`card stat-card p-6 border-l-4 border-${color}-500`}>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <p className="text-gray-500 text-sm font-medium">{title}</p>
+                        <p className="text-3xl font-bold mt-1">{fmt(value)}</p>
+                        {subtitle && <p className="text-gray-400 text-xs mt-1">{subtitle}</p>}
+                    </div>
+                    <div className={`text-${color}-500 text-2xl`}>{icon}</div>
+                </div>
+            </div>
+        );
+
+        const SystemCard = ({ label, used, total, unit, percent }) => (
+            <div className="card p-4">
+                <div className="flex justify-between text-sm mb-2">
+                    <span className="font-medium">{label}</span>
+                    <span className="text-gray-500">{used.toFixed(1)} / {total.toFixed(1)} {unit}</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div 
+                        className={`h-3 rounded-full ${percent > 80 ? 'bg-red-500' : percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                        style={{ width: `${Math.min(percent, 100)}%` }}
+                    />
+                </div>
+                <p className="text-right text-xs text-gray-400 mt-1">{percent.toFixed(1)}%</p>
+            </div>
+        );
+
+        const Tabs = ({ tabs, active, onChange }) => (
+            <div className="flex space-x-1 bg-gray-200 p-1 rounded-lg">
+                {tabs.map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => onChange(tab.id)}
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+                            active === tab.id 
+                                ? 'bg-white shadow text-gray-900' 
+                                : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                    >
+                        {tab.icon} {tab.label}
+                    </button>
+                ))}
+            </div>
+        );
+
+        // ── Dashboard ───────────────────────────────────────────────────
+
+        const Dashboard = ({ stats, system, growth, sources }) => (
+            <div className="space-y-6">
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <StatCard title="Всего пользователей" value={stats?.total_users} subtitle={`+${stats?.users_today} сегодня`} icon="👥" color="blue" />
+                    <StatCard title="DAU / WAU / MAU" value={stats?.dau} subtitle={`${stats?.wau} / ${stats?.mau}`} icon="📊" color="green" />
+                    <StatCard title="Треков в базе" value={stats?.total_tracks} subtitle={`${fmt(stats?.total_downloads)} скачиваний`} icon="🎵" color="purple" />
+                    <StatCard title="Прослушиваний" value={stats?.total_plays} subtitle={`+${stats?.plays_today} сегодня`} icon="▶️" color="indigo" />
+                </div>
+
+                {/* System Stats */}
+                {system && (
+                    <div className="card p-6">
+                        <h3 className="font-semibold mb-4">📊 Ресурсы сервера</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <SystemCard label="CPU" used={system.cpu_percent} total={100} unit="%" percent={system.cpu_percent} />
+                            <SystemCard label="RAM" used={system.memory_used_gb} total={system.memory_total_gb} unit="GB" percent={system.memory_percent} />
+                            <SystemCard label="Disk" used={system.disk_used_gb} total={system.disk_total_gb} unit="GB" percent={system.disk_percent} />
+                        </div>
+                        <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+                            <span>Load: {system.load_avg?.join(' / ')}</span>
+                            <span>Uptime: {(system.uptime_hours / 24).toFixed(1)} дней</span>
+                        </div>
+                        {system.containers?.length > 0 && (
+                            <div className="mt-4 border-t pt-4">
+                                <p className="text-sm font-medium mb-2">Контейнеры:</p>
+                                <div className="space-y-1">
+                                    {system.containers.map((c, i) => (
+                                        <div key={i} className="flex items-center text-sm">
+                                            <span className={`w-2 h-2 rounded-full mr-2 ${c.status?.includes('healthy') ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                                            <span className="font-mono">{c.name}</span>
+                                            <span className="text-gray-400 ml-2">{c.status}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Charts */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* User Growth */}
+                    {growth?.length > 0 && (
+                        <div className="card p-6">
+                            <h3 className="font-semibold mb-4">📈 Рост пользователей</h3>
+                            <ResponsiveContainer width="100%" height={250}>
+                                <LineChart data={growth}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} fontSize={12} />
+                                    <YAxis fontSize={12} />
+                                    <Tooltip />
+                                    <Line type="monotone" dataKey="cumulative" stroke="#667eea" strokeWidth={2} dot={false} />
+                                    <Line type="monotone" dataKey="count" stroke="#10b981" strokeWidth={2} dot={false} />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                    )}
+
+                    {/* Sources */}
+                    {sources?.plays_by_source && (
+                        <div className="card p-6">
+                            <h3 className="font-semibold mb-4">🎧 Источники прослушиваний</h3>
+                            <ResponsiveContainer width="100%" height={250}>
+                                <PieChart>
+                                    <Pie
+                                        data={Object.entries(sources.plays_by_source).map(([name, value]) => ({ name, value }))}
+                                        dataKey="value"
+                                        nameKey="name"
+                                        cx="50%"
+                                        cy="50%"
+                                        outerRadius={80}
+                                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    >
+                                        {Object.keys(sources.plays_by_source).map((_, i) => (
+                                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+
+        // ── Tracks ──────────────────────────────────────────────────────
+
+        const TracksPanel = () => {
+            const [tracks, setTracks] = useState([]);
+            const [total, setTotal] = useState(0);
+            const [page, setPage] = useState(1);
+            const [search, setSearch] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const load = useCallback(async () => {
+                setLoading(true);
+                try {
+                    const data = await apiFetch(`/tracks?page=${page}&per_page=20&search=${search}`);
+                    setTracks(data.items);
+                    setTotal(data.total);
+                } catch (e) { console.error(e); }
+                setLoading(false);
+            }, [page, search]);
+
+            useEffect(() => { load(); }, [load]);
+
+            const deleteTrack = async (id) => {
+                if (!confirm('Удалить трек?')) return;
+                try {
+                    await apiFetch(`/tracks/${id}`, { method: 'DELETE' });
+                    load();
+                } catch (e) { alert('Ошибка: ' + e.message); }
+            };
+
+            return (
+                <div className="card">
+                    <div className="p-4 border-b flex items-center justify-between">
+                        <input
+                            type="text"
+                            placeholder="Поиск треков..."
+                            value={search}
+                            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                            className="px-4 py-2 border rounded-lg w-64"
+                        />
+                        <span className="text-gray-500">Всего: {fmt(total)}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">ID</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Трек</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Источник</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Скачиваний</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Дата</th>
+                                    <th className="px-4 py-3"></th>
+                                </tr>
+                            </thead>
+                            <tbody className={loading ? 'loading' : ''}>
+                                {tracks.map(t => (
+                                    <tr key={t.id} className="border-t hover:bg-gray-50">
+                                        <td className="px-4 py-3 text-sm font-mono">{t.id}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="font-medium">{t.title}</div>
+                                            <div className="text-sm text-gray-500">{t.artist}</div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span className="px-2 py-1 bg-gray-100 rounded text-xs">{t.source || 'youtube'}</span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm">{fmt(t.downloads)}</td>
+                                        <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(t.created_at)}</td>
+                                        <td className="px-4 py-3">
+                                            <button onClick={() => deleteTrack(t.id)} className="text-red-500 hover:text-red-700">🗑</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="p-4 border-t flex justify-between items-center">
+                        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-gray-100 rounded disabled:opacity-50">← Назад</button>
+                        <span>Страница {page}</span>
+                        <button onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-gray-100 rounded">Далее →</button>
+                    </div>
+                </div>
+            );
+        };
+
+        // ── Users ───────────────────────────────────────────────────────
+
+        const UsersPanel = () => {
+            const [users, setUsers] = useState([]);
+            const [total, setTotal] = useState(0);
+            const [page, setPage] = useState(1);
+            const [search, setSearch] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const load = useCallback(async () => {
+                setLoading(true);
+                try {
+                    const data = await apiFetch(`/users?page=${page}&per_page=20&search=${search}`);
+                    setUsers(data.items);
+                    setTotal(data.total);
+                } catch (e) { console.error(e); }
+                setLoading(false);
+            }, [page, search]);
+
+            useEffect(() => { load(); }, [load]);
+
+            const toggleBan = async (id, isBanned) => {
+                try {
+                    await apiFetch(`/users/${id}/ban?unban=${isBanned}`, { method: 'POST' });
+                    load();
+                } catch (e) { alert('Ошибка: ' + e.message); }
+            };
+
+            const togglePremium = async (id, isPremium) => {
+                try {
+                    await apiFetch(`/users/${id}/premium?remove=${isPremium}`, { method: 'POST' });
+                    load();
+                } catch (e) { alert('Ошибка: ' + e.message); }
+            };
+
+            return (
+                <div className="card">
+                    <div className="p-4 border-b flex items-center justify-between">
+                        <input
+                            type="text"
+                            placeholder="Поиск пользователей..."
+                            value={search}
+                            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                            className="px-4 py-2 border rounded-lg w-64"
+                        />
+                        <span className="text-gray-500">Всего: {fmt(total)}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">ID</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Пользователь</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Статус</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Запросов</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Активность</th>
+                                    <th className="px-4 py-3"></th>
+                                </tr>
+                            </thead>
+                            <tbody className={loading ? 'loading' : ''}>
+                                {users.map(u => (
+                                    <tr key={u.id} className="border-t hover:bg-gray-50">
+                                        <td className="px-4 py-3 text-sm font-mono">{u.id}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="font-medium">{u.first_name || 'Anonymous'}</div>
+                                            <div className="text-sm text-gray-500">@{u.username || '-'}</div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {u.is_premium && <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs mr-1">⭐ Premium</span>}
+                                            {u.is_banned && <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">🚫 Ban</span>}
+                                            {!u.is_premium && !u.is_banned && <span className="text-gray-400 text-xs">-</span>}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm">{fmt(u.request_count)}</td>
+                                        <td className="px-4 py-3 text-sm text-gray-500">{fmtDateTime(u.last_active)}</td>
+                                        <td className="px-4 py-3 space-x-2">
+                                            <button onClick={() => togglePremium(u.id, u.is_premium)} className="text-yellow-600 hover:text-yellow-800">
+                                                {u.is_premium ? '⭐' : '☆'}
+                                            </button>
+                                            <button onClick={() => toggleBan(u.id, u.is_banned)} className="text-red-500 hover:text-red-700">
+                                                {u.is_banned ? '✓' : '🚫'}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="p-4 border-t flex justify-between items-center">
+                        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-gray-100 rounded disabled:opacity-50">← Назад</button>
+                        <span>Страница {page}</span>
+                        <button onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-gray-100 rounded">Далее →</button>
+                    </div>
+                </div>
+            );
+        };
+
+        // ── Logs ────────────────────────────────────────────────────────
+
+        const LogsPanel = () => {
+            const [logs, setLogs] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [level, setLevel] = useState('');
+
+            const load = useCallback(async () => {
+                setLoading(true);
+                try {
+                    const data = await apiFetch(`/logs?lines=200${level ? `&level=${level}` : ''}`);
+                    setLogs(data.logs || []);
+                } catch (e) { console.error(e); }
+                setLoading(false);
+            }, [level]);
+
+            useEffect(() => { load(); }, [load]);
+
+            return (
+                <div className="card">
+                    <div className="p-4 border-b flex items-center justify-between">
+                        <div className="flex space-x-2">
+                            {['', 'ERROR', 'WARNING', 'INFO'].map(l => (
+                                <button
+                                    key={l}
+                                    onClick={() => setLevel(l)}
+                                    className={`px-3 py-1 rounded text-sm ${level === l ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}
+                                >
+                                    {l || 'Все'}
+                                </button>
+                            ))}
+                        </div>
+                        <button onClick={load} className="px-4 py-2 bg-blue-500 text-white rounded">🔄 Обновить</button>
+                    </div>
+                    <div className={`p-4 font-mono text-xs space-y-1 max-h-[600px] overflow-y-auto bg-gray-900 text-gray-200 ${loading ? 'loading' : ''}`}>
+                        {logs.length === 0 && <p className="text-gray-500">Логов нет</p>}
+                        {logs.slice().reverse().map((log, i) => (
+                            <div key={i} className={`log-${log.level?.toLowerCase()}`}>
+                                <span className="text-gray-500">{log.timestamp}</span>
+                                {' '}
+                                <span className={`font-bold log-${log.level?.toLowerCase()}`}>[{log.level}]</span>
+                                {' '}
+                                <span className="text-gray-400">{log.logger}:</span>
+                                {' '}
+                                {log.message}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ── Main App ────────────────────────────────────────────────────
+
+        const App = () => {
+            const [tab, setTab] = useState('dashboard');
+            const [stats, setStats] = useState(null);
+            const [system, setSystem] = useState(null);
+            const [growth, setGrowth] = useState([]);
+            const [sources, setSources] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                const loadAll = async () => {
+                    try {
+                        const [st, sys, gr, src] = await Promise.all([
+                            apiFetch('/stats'),
+                            apiFetch('/system').catch(() => null),
+                            apiFetch('/users/growth?days=30'),
+                            apiFetch('/sources'),
+                        ]);
+                        setStats(st);
+                        setSystem(sys);
+                        setGrowth(gr.growth || []);
+                        setSources(src);
+                    } catch (e) {
+                        console.error(e);
+                    }
+                    setLoading(false);
+                };
+                loadAll();
+                const interval = setInterval(loadAll, 30000); // refresh every 30s
+                return () => clearInterval(interval);
+            }, []);
+
+            const tabs = [
+                { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+                { id: 'tracks', label: 'Треки', icon: '🎵' },
+                { id: 'users', label: 'Пользователи', icon: '👥' },
+                { id: 'logs', label: 'Логи', icon: '📋' },
+            ];
+
+            return (
+                <div className="min-h-screen">
+                    {/* Header */}
+                    <header className="gradient-bg text-white py-6 px-8 shadow-lg">
+                        <div className="max-w-7xl mx-auto flex items-center justify-between">
+                            <div>
+                                <h1 className="text-2xl font-bold">🎵 Music Bot Admin</h1>
+                                <p className="text-white/70 text-sm">Панель управления</p>
+                            </div>
+                            <div className="text-right text-sm">
+                                <div>v1.0.0</div>
+                                <div className="text-white/50">{new Date().toLocaleDateString('ru-RU')}</div>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation */}
+                    <div className="bg-white shadow">
+                        <div className="max-w-7xl mx-auto px-8 py-3">
+                            <Tabs tabs={tabs} active={tab} onChange={setTab} />
+                        </div>
+                    </div>
+
+                    {/* Content */}
+                    <main className="max-w-7xl mx-auto px-8 py-6">
+                        {loading ? (
+                            <div className="flex items-center justify-center h-64">
+                                <div className="text-gray-400 loading">Загрузка...</div>
+                            </div>
+                        ) : (
+                            <>
+                                {tab === 'dashboard' && <Dashboard stats={stats} system={system} growth={growth} sources={sources} />}
+                                {tab === 'tracks' && <TracksPanel />}
+                                {tab === 'users' && <UsersPanel />}
+                                {tab === 'logs' && <LogsPanel />}
+                            </>
+                        )}
+                    </main>
+
+                    {/* Footer */}
+                    <footer className="text-center py-4 text-gray-400 text-sm">
+                        Music Bot Admin Panel • VPS Optimized
+                    </footer>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

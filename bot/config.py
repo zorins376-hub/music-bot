@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     # ── Paths ─────────────────────────────────────────────────────────────
     DOWNLOAD_DIR: Path = _BASE / "downloads"
     DATA_DIR: Path = _BASE / "data"
+    TEMP_DOWNLOAD_DIR: Path = Path("/tmp/musicbot-downloads") if _IN_DOCKER else (_BASE / "downloads" / ".tmp")
 
     # ── Rate limiting ─────────────────────────────────────────────────────
     RATE_LIMIT_REGULAR: int = 10
@@ -68,8 +69,10 @@ class Settings(BaseSettings):
     COOLDOWN_REGULAR: int = 5
     COOLDOWN_PREMIUM: int = 1
 
-    # ── Thread pool ──────────────────────────────────────────────────────
-    YTDL_WORKERS: int = 4
+    # ── Thread pool (VPS-optimized: increase for dedicated servers) ─────
+    YTDL_WORKERS: int = 8  # Railway: 4, VPS: 8-12
+    YTDL_MAX_WORKERS_MULTIPLIER: int = 4  # MAX_WORKERS = YTDL_WORKERS * this
+    YTDL_CONCURRENT_FRAGMENTS: int = 8  # parallel fragment downloads per track
 
     # ── Pyrogram userbot (v1.1) ───────────────────────────────────────────
     PYROGRAM_API_ID: Optional[int] = None
@@ -94,6 +97,7 @@ class Settings(BaseSettings):
     YANDEX_TOKEN_EXPIRES_AT: Optional[str] = None  # single token expiry (unix ts / ISO8601)
     YANDEX_TOKENS_EXPIRES_AT: Optional[str] = None  # comma-separated expiries aligned with YANDEX_TOKENS
     YANDEX_ALERT_TELEGRAM: bool = True
+    CHART_YANDEX_ENABLED: bool = True  # False to skip Yandex chart (geo-blocked IPs)
     # ── VK Music ───────────────────────────────────────────────────────────────
     VK_TOKEN: Optional[str] = None       # Kate Mobile / VK Android token
     VK_LOGIN: Optional[str] = None
@@ -117,7 +121,21 @@ class Settings(BaseSettings):
     GENIUS_TOKEN: Optional[str] = None
 
     # ── Prometheus metrics ────────────────────────────────────────────
-    METRICS_PORT: int = 0   # 0 = disabled; set e.g. 9090 to enable
+    METRICS_PORT: int = 9090  # VPS: enabled (0 = disabled)
+
+    # ── HTTP Connection tuning (VPS-optimized) ──────────────────────────
+    HTTP_POOL_CONNECTIONS: int = 100  # TCP connection pool size
+    HTTP_POOL_KEEPALIVE: int = 30  # keepalive timeout seconds
+    HTTP_CONNECT_TIMEOUT: int = 10  # connection timeout
+    HTTP_READ_TIMEOUT: int = 60  # read timeout for downloads
+
+    # ── Database tuning (VPS-optimized) ────────────────────────────────
+    DB_POOL_SIZE: int = 20  # SQLAlchemy pool size (local PG only)
+    DB_MAX_OVERFLOW: int = 30  # additional connections above pool_size
+    DB_POOL_TIMEOUT: int = 30  # wait for connection
+    DB_COMMAND_TIMEOUT: int = 30  # query timeout (was 15 for Railway)
+    DB_CONNECT_TIMEOUT: int = 60  # connection timeout (was 30)
+
     # ── Premium (Telegram Stars) ─────────────────────────────────────────
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)
     PREMIUM_DAYS: int = 30
@@ -167,6 +185,7 @@ config = settings
 
 settings.DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+settings.TEMP_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Write YouTube cookies file from env var if provided
 _COOKIES_PATH = settings.DATA_DIR / "cookies.txt"

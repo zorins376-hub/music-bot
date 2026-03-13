@@ -111,6 +111,10 @@ class PartyEvent(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    __table_args__ = (
+        Index("ix_party_events_party_created", "party_id", "created_at"),
+    )
+
 
 class PartyPlaybackState(Base):
     """Состояние синхронизированного воспроизведения комнаты."""

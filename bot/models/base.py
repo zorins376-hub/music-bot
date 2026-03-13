@@ -3,27 +3,45 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 
 from bot.config import settings
 
 _logger = logging.getLogger(__name__)
 
 _is_pg = settings.DATABASE_URL.startswith("postgresql")
+_is_local_pg = _is_pg and ("localhost" in settings.DATABASE_URL or "postgres:" in settings.DATABASE_URL)
 _engine_kwargs: dict = {"echo": False}
+
 if _is_pg:
-    # Supabase uses PgBouncer in transaction mode (port 6543).
-    # SQLAlchemy's own pool + asyncpg = stale "ConnectionDoesNotExistError".
-    # NullPool: every async_session() gets a fresh PgBouncer connection;
-    # PgBouncer handles the actual server-side pool itself.
-    _engine_kwargs.update(
-        poolclass=NullPool,
-        connect_args={
-            "statement_cache_size": 0,
-            "command_timeout": 15,
-            "timeout": 30,  # asyncpg connection timeout (default is 60s)
-        },
-    )
+    if _is_local_pg:
+        # VPS local PostgreSQL: use connection pooling for performance
+        _engine_kwargs.update(
+            poolclass=AsyncAdaptedQueuePool,
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_timeout=settings.DB_POOL_TIMEOUT,
+            pool_pre_ping=True,  # check connection health before use
+            connect_args={
+                "command_timeout": settings.DB_COMMAND_TIMEOUT,
+                "timeout": settings.DB_CONNECT_TIMEOUT,
+            },
+        )
+        _logger.info(
+            "DB: local PostgreSQL pool (size=%d, overflow=%d)",
+            settings.DB_POOL_SIZE, settings.DB_MAX_OVERFLOW,
+        )
+    else:
+        # Supabase PgBouncer: NullPool (PgBouncer handles pooling)
+        _engine_kwargs.update(
+            poolclass=NullPool,
+            connect_args={
+                "statement_cache_size": 0,  # required for PgBouncer
+                "command_timeout": settings.DB_COMMAND_TIMEOUT,
+                "timeout": settings.DB_CONNECT_TIMEOUT,
+            },
+        )
+        _logger.info("DB: Supabase PgBouncer mode (NullPool)")
 
 engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
@@ -150,11 +168,23 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                             await _run_migration(conn, stmt)
                     # Regular btree indexes (don't need pg_trgm)
                     for stmt in (
+                        "CREATE INDEX IF NOT EXISTS ix_users_created_at ON users (created_at)",
+                        "CREATE INDEX IF NOT EXISTS ix_users_last_active ON users (last_active)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_created_at ON tracks (created_at)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_genre ON tracks (genre)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_release_year ON tracks (release_year)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_artist ON tracks (artist)",
+                        "CREATE INDEX IF NOT EXISTS ix_lh_action_created ON listening_history (action, created_at DESC)",
+                        "CREATE INDEX IF NOT EXISTS ix_payments_created_at ON payments (created_at)",
+                        "CREATE INDEX IF NOT EXISTS ix_party_events_party_created ON party_events (party_id, created_at DESC)",
                     ):
                         await _run_migration(conn, stmt)
+                    if has_trgm:
+                        await _run_migration(
+                            conn,
+                            "CREATE INDEX IF NOT EXISTS ix_tracks_artist_title_trgm "
+                            "ON tracks USING gin ((lower(coalesce(artist, '') || ' ' || coalesce(title, ''))) gin_trgm_ops)"
+                        )
             return
         except Exception as exc:
             last_exc = exc

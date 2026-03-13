@@ -3,6 +3,7 @@ import logging
 from aiogram.types import User as TgUser
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, desc, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 from bot.config import settings
@@ -60,16 +61,21 @@ async def get_or_create_user(tg_user: TgUser) -> User:
         user = result.scalar_one_or_none()
 
         if user is None:
-            user = User(
-                id=tg_user.id,
-                username=tg_user.username,
-                first_name=tg_user.first_name,
-                is_premium=admin,
-                is_admin=admin,
-            )
-            session.add(user)
-            await session.commit()
-            await session.refresh(user)
+            try:
+                user = User(
+                    id=tg_user.id,
+                    username=tg_user.username,
+                    first_name=tg_user.first_name,
+                    is_premium=admin,
+                    is_admin=admin,
+                )
+                session.add(user)
+                await session.commit()
+                await session.refresh(user)
+            except IntegrityError:
+                await session.rollback()
+                result = await session.execute(select(User).where(User.id == tg_user.id))
+                user = result.scalar_one()
         else:
             # Calculate all updates in one single query
             expired_premium = (
@@ -407,26 +413,52 @@ async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:
 
     async with async_session() as session:
         if _is_pg:
-            # PostgreSQL: use pg_trgm similarity for fuzzy matching
+            # PostgreSQL: use pg_trgm index (% operator), then fallback to ILIKE.
             combined = func.lower(func.concat(func.coalesce(Track.artist, ''), ' ', func.coalesce(Track.title, '')))
-            conditions = []
-            for q in queries:
-                conditions.append(func.similarity(combined, q) > 0.15)
-                conditions.append(combined.ilike(f"%{q}%"))
+            priority = case(
+                (Track.channel == "tequila", 0),
+                (Track.channel == "fullmoon", 1),
+                else_=2,
+            )
+            trigram_conditions = [combined.bool_op("%")(q) for q in queries if q]
+            similarity_scores = [func.similarity(combined, q) for q in queries if q]
+            rank_score = (
+                similarity_scores[0]
+                if len(similarity_scores) == 1
+                else func.greatest(*similarity_scores)
+            )
+
             result = await session.execute(
                 select(Track)
-                .where(or_(*conditions))
+                .where(or_(*trigram_conditions))
                 .order_by(
-                    case(
-                        (Track.channel == "tequila", 0),
-                        (Track.channel == "fullmoon", 1),
-                        else_=2,
-                    ),
-                    func.similarity(combined, norm).desc(),
+                    priority,
+                    rank_score.desc(),
                     Track.downloads.desc(),
                 )
                 .limit(limit)
             )
+            tracks = list(result.scalars().all())
+
+            if len(tracks) < limit:
+                fallback_conditions = []
+                for q in queries:
+                    pat = f"%{q}%"
+                    fallback_conditions.append(Track.title.ilike(pat))
+                    fallback_conditions.append(Track.artist.ilike(pat))
+
+                fallback_query = (
+                    select(Track)
+                    .where(or_(*fallback_conditions))
+                    .order_by(priority, Track.downloads.desc())
+                )
+                if tracks:
+                    fallback_query = fallback_query.where(~Track.id.in_([track.id for track in tracks]))
+                fallback_result = await session.execute(
+                    fallback_query.limit(limit - len(tracks))
+                )
+                tracks.extend(list(fallback_result.scalars().all()))
+            return tracks
         else:
             # SQLite fallback: ILIKE on all query variants
             conditions = []

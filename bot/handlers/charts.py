@@ -1,6 +1,7 @@
 """Top charts: Shazam · YouTube · VK — paginated lists with download."""
 
 import asyncio
+import itertools
 import json
 import logging
 import re
@@ -28,6 +29,7 @@ from bot.models.playlist import Playlist, PlaylistTrack
 from bot.services.downloader import cleanup_file, download_track, search_tracks
 from bot.services.cache import cache
 from bot.services.http_session import get_session
+from bot.services.proxy_pool import proxy_pool
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -258,58 +260,94 @@ async def _fetch_vk() -> list[dict]:
 
 async def _fetch_yandex_chart() -> list[dict]:
     """Официальный чарт Яндекс Музыки (Россия)."""
+    from bot.config import settings
+    if not settings.CHART_YANDEX_ENABLED:
+        return []  # Skip if disabled (geo-blocked IPs)
     try:
         from yandex_music import ClientAsync
     except ImportError:
         logger.warning("yandex-music package not installed")
         return []
 
-    from bot.config import settings
-    token = settings.YANDEX_MUSIC_TOKEN or None
-    try:
-        client = await ClientAsync(token).init()
-        # chart() returns ChartInfo; chart("russia") for Russian chart
-        chart_info = await client.chart("russia")
-        if not chart_info or not getattr(chart_info, "chart", None):
-            return []
+    tokens: list[str] = []
+    pool_raw = (settings.YANDEX_TOKENS or "").strip()
+    if pool_raw:
+        tokens.extend([t.strip() for t in pool_raw.split(",") if t.strip()])
+    single = (settings.YANDEX_MUSIC_TOKEN or "").strip()
+    if single and single not in tokens:
+        tokens.append(single)
+    if not tokens:
+        logger.warning("Yandex chart: no token configured, trying anonymous access")
+        tokens = [None]
 
-        tracks = []
-        for item in (chart_info.chart.tracks or [])[:100]:
-            track = getattr(item, "track", None) or item
-            if not track:
+    token_cycle = itertools.cycle(tokens)
+    try:
+        attempts = max(len(tokens), 1)
+        for _ in range(attempts):
+            token = next(token_cycle)
+            proxy_url = proxy_pool.get_next() if proxy_pool.size else None
+            try:
+                kwargs = {"proxy_url": proxy_url} if proxy_url else {}
+                if token:
+                    client = await ClientAsync(token, **kwargs).init()
+                else:
+                    client = await ClientAsync(**kwargs).init()
+                # chart() returns ChartInfo; chart("russia") for Russian chart
+                chart_info = await client.chart("russia")
+                if not chart_info or not getattr(chart_info, "chart", None):
+                    if proxy_url:
+                        proxy_pool.record_failure(proxy_url)
+                    continue
+
+                tracks = []
+                for item in (chart_info.chart.tracks or [])[:100]:
+                    track = getattr(item, "track", None) or item
+                    if not track:
+                        continue
+                    title = getattr(track, "title", None) or "Unknown"
+                    artists = getattr(track, "artists", []) or []
+                    artist = artists[0].name if artists else "Unknown"
+                    # Skip compilations (> 8 min)
+                    dur_ms = getattr(track, "duration_ms", 0) or 0
+                    if dur_ms and dur_ms > 480_000:
+                        continue
+                    # Build ym_ video_id for direct Yandex streaming
+                    track_id = getattr(track, "id", None) or getattr(track, "track_id", None)
+                    ym_video_id = f"ym_{track_id}" if track_id else ""
+                    # Extract cover art (try track → albums → og_image)
+                    cover_url = None
+                    cover_uri = getattr(track, "cover_uri", None) or ""
+                    if not cover_uri:
+                        # Try album cover
+                        albums = getattr(track, "albums", []) or []
+                        if albums:
+                            cover_uri = getattr(albums[0], "cover_uri", None) or ""
+                    if not cover_uri:
+                        cover_uri = getattr(track, "og_image", None) or ""
+                    if cover_uri:
+                        cover_url = "https://" + cover_uri.replace("%%", "400x400")
+                    tracks.append({
+                        "title": title,
+                        "artist": artist,
+                        "query": f"{artist} - {title}",
+                        "video_id": ym_video_id,
+                        "cover_url": cover_url,
+                        "source": "yandex",
+                        "duration": round(dur_ms / 1000) if dur_ms else 0,
+                    })
+
+                if tracks:
+                    if proxy_url:
+                        proxy_pool.record_success(proxy_url)
+                    return tracks
+                if proxy_url:
+                    proxy_pool.record_failure(proxy_url)
+            except Exception as inner_e:
+                if proxy_url:
+                    proxy_pool.record_failure(proxy_url)
+                logger.warning("Yandex chart attempt failed (proxy=%s): %s", bool(proxy_url), inner_e)
                 continue
-            title = getattr(track, "title", None) or "Unknown"
-            artists = getattr(track, "artists", []) or []
-            artist = artists[0].name if artists else "Unknown"
-            # Skip compilations (> 8 min)
-            dur_ms = getattr(track, "duration_ms", 0) or 0
-            if dur_ms and dur_ms > 480_000:
-                continue
-            # Build ym_ video_id for direct Yandex streaming
-            track_id = getattr(track, "id", None) or getattr(track, "track_id", None)
-            ym_video_id = f"ym_{track_id}" if track_id else ""
-            # Extract cover art (try track → albums → og_image)
-            cover_url = None
-            cover_uri = getattr(track, "cover_uri", None) or ""
-            if not cover_uri:
-                # Try album cover
-                albums = getattr(track, "albums", []) or []
-                if albums:
-                    cover_uri = getattr(albums[0], "cover_uri", None) or ""
-            if not cover_uri:
-                cover_uri = getattr(track, "og_image", None) or ""
-            if cover_uri:
-                cover_url = "https://" + cover_uri.replace("%%", "400x400")
-            tracks.append({
-                "title": title,
-                "artist": artist,
-                "query": f"{artist} - {title}",
-                "video_id": ym_video_id,
-                "cover_url": cover_url,
-                "source": "yandex",
-                "duration": round(dur_ms / 1000) if dur_ms else 0,
-            })
-        return tracks
+        return []
     except Exception as e:
         logger.error("Яндекс Музыка chart error: %s", e)
         return []

@@ -1,20 +1,35 @@
 services:
-  # ── Основной бот + TMA webapp ──────────────────────────────────────────
+  # ── Основной бот + TMA webapp (VPS-optimized) ──────────────────────────
   bot:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      TMPDIR: /tmp
     ports:
-      - "8080:8080"
+      - "8080:8080"   # TMA webapp
+      - "9090:9090"   # Prometheus metrics
     volumes:
       - ./data:/app/data
       - ./downloads:/app/downloads
       - ./logs:/app/logs
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    cpus: 1.50
+    mem_limit: 2g
+    mem_reservation: 512m
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 2G
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "python", "-c", "import redis, os; r = redis.Redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()"]
       interval: 30s
@@ -122,10 +137,18 @@ services:
   #     postgres:
   #       condition: service_healthy
 
-  # ── Redis ────────────────────────────────────────────────────────────────
+  # ── Redis (VPS-optimized) ─────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --tcp-keepalive 300
+      --timeout 0
     volumes:
       - redis_data:/data
     healthcheck:
@@ -134,7 +157,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  # ── PostgreSQL (VPS-optimized) ───────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -142,6 +165,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-musicbot}
       POSTGRES_USER: ${POSTGRES_USER:-musicbot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c maintenance_work_mem=128MB
+      -c work_mem=16MB
+      -c max_connections=100
+      -c wal_buffers=16MB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

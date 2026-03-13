@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, JSON, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Index, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.models.base import Base
@@ -60,4 +60,9 @@ class User(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_users_created_at", "created_at"),
+        Index("ix_users_last_active", "last_active"),
     )

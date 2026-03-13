@@ -34,6 +34,15 @@ _STREAM_URL_TTL = 1800  # 30 minutes (YouTube URLs valid ~6h)
 _stream_url_inflight: dict[str, asyncio.Future[str | None]] = {}
 _stream_url_lock = asyncio.Lock()
 _stream_url_resolve_semaphore = asyncio.Semaphore(1)
+
+# ── Download coalescing for non-YouTube tracks (ym_, sp_) ─────────────────
+_dl_inflight: dict[str, asyncio.Future[Path]] = {}
+_dl_inflight_lock = asyncio.Lock()
+_cover_url_cache: dict[str, tuple[str | None, float]] = {}
+_COVER_URL_TTL = 3600
+_LYRICS_CACHE_TTL = 86400 * 7
+_LYRICS_MISS_TTL = 3600 * 6
+_LYRICS_CACHE_MISS = "__MISS__"
 from webapp.auth import verify_init_data
 from webapp.schemas import (
     LyricsResponse,
@@ -114,8 +123,13 @@ async def lifespan(app: FastAPI):
             expired = [k for k, (_, exp) in _stream_url_cache.items() if exp < now]
             for k in expired:
                 _stream_url_cache.pop(k, None)
+            expired_covers = [k for k, (_, exp) in _cover_url_cache.items() if exp < now]
+            for k in expired_covers:
+                _cover_url_cache.pop(k, None)
             if expired:
                 logger.debug("Cleaned %d expired stream URL cache entries", len(expired))
+            if expired_covers:
+                logger.debug("Cleaned %d expired cover cache entries", len(expired_covers))
 
     cleanup_task = asyncio.create_task(_cleanup_url_cache())
     yield
@@ -133,6 +147,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Admin Panel API ─────────────────────────────────────────────────────
+from webapp.admin_api import router as admin_router
+app.include_router(admin_router)
 
 
 # ── Global exception handler ────────────────────────────────────────────
@@ -158,8 +176,8 @@ async def health():
 
 
 async def _get_or_create_webapp_user(tg_user: dict):
-    from datetime import datetime, timezone
-    from sqlalchemy import select, update
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
 
     from bot.db import is_admin
     from bot.models.base import async_session
@@ -170,6 +188,7 @@ async def _get_or_create_webapp_user(tg_user: dict):
     first_name = tg_user.get("first_name") or ""
     admin = is_admin(user_id, username)
     now = datetime.now(timezone.utc)
+    touch_interval = timedelta(seconds=60)
 
     async with async_session() as session:
         db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
@@ -186,12 +205,21 @@ async def _get_or_create_webapp_user(tg_user: dict):
             await session.refresh(db_user)
             return db_user
 
-        update_values = {
-            "username": username,
-            "first_name": first_name,
-            "last_active": now,
-            "is_admin": admin,
-        }
+        changed = False
+        if db_user.username != username:
+            db_user.username = username
+            changed = True
+        if db_user.first_name != first_name:
+            db_user.first_name = first_name
+            changed = True
+        if db_user.is_admin != admin:
+            db_user.is_admin = admin
+            changed = True
+
+        if db_user.last_active is None or (now - db_user.last_active) >= touch_interval:
+            db_user.last_active = now
+            changed = True
+
         expired_premium = (
             not admin
             and db_user.is_premium
@@ -199,15 +227,14 @@ async def _get_or_create_webapp_user(tg_user: dict):
             and db_user.premium_until < now
         )
         if admin and not db_user.is_premium:
-            update_values["is_premium"] = True
+            db_user.is_premium = True
+            changed = True
         if expired_premium:
-            update_values["is_premium"] = False
+            db_user.is_premium = False
+            changed = True
 
-        await session.execute(update(User).where(User.id == user_id).values(**update_values))
-        await session.commit()
-
-        for key, value in update_values.items():
-            setattr(db_user, key, value)
+        if changed:
+            await session.commit()
         return db_user
 
 
@@ -287,20 +314,40 @@ async def stream_audio(
     if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', video_id):
         raise HTTPException(status_code=400, detail="Invalid video_id")
 
-    # Check if already downloaded (and valid size > 10KB)
+    # Check if already downloaded (and has valid MP3 header)
     mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-    if mp3_path.exists() and mp3_path.stat().st_size < 10240:
-        # Corrupt file, delete and re-download
-        logger.warning("Removing corrupt file %s (size=%d)", mp3_path, mp3_path.stat().st_size)
-        mp3_path.unlink()
+    if mp3_path.exists():
+        try:
+            head = mp3_path.read_bytes()[:3]
+            if head not in (b'ID3', b'\xff\xfb', b'\xff\xf3', b'\xff\xf2') and mp3_path.stat().st_size < 10240:
+                logger.warning("Removing corrupt file %s (bad header, size=%d)", mp3_path, mp3_path.stat().st_size)
+                mp3_path.unlink()
+        except OSError:
+            pass
     if not mp3_path.exists():
         try:
             # Determine source by prefix
-            if video_id.startswith("ym_"):
-                # Yandex Music track
-                from bot.services.yandex_provider import download_yandex
-                track_id = int(video_id[3:])  # Remove "ym_" prefix
-                mp3_path = await download_yandex(track_id, mp3_path)
+            if video_id.startswith("ym_") or video_id.isdigit():
+                # Yandex Music track — coalesce concurrent requests
+                async with _dl_inflight_lock:
+                    existing = _dl_inflight.get(video_id)
+                    if existing is not None:
+                        mp3_path = await existing
+                    else:
+                        future: asyncio.Future[Path] = asyncio.get_running_loop().create_future()
+                        _dl_inflight[video_id] = future
+                if existing is None:
+                    try:
+                        from bot.services.yandex_provider import download_yandex
+                        track_id = int(video_id[3:]) if video_id.startswith("ym_") else int(video_id)
+                        mp3_path = await download_yandex(track_id, mp3_path)
+                        future.set_result(mp3_path)
+                    except BaseException as exc:
+                        future.set_exception(exc)
+                        raise
+                    finally:
+                        async with _dl_inflight_lock:
+                            _dl_inflight.pop(video_id, None)
             elif video_id.startswith("sp_"):
                 # Spotify track — search YouTube by metadata
                 sp_query = await _spotify_id_to_query(video_id)
@@ -314,20 +361,18 @@ async def stream_audio(
                 if not yt_id:
                     raise HTTPException(status_code=404, detail="No YouTube match for Spotify track")
                 mp3_path = await download_manager.download(yt_id)
-                # Symlink or copy so sp_ ID maps to the file
+                # Hardlink so sp_ ID maps to the same file (no copy, no extra disk)
                 sp_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
                 if not sp_path.exists() and mp3_path.exists():
-                    import shutil
-                    shutil.copy2(mp3_path, sp_path)
+                    try:
+                        sp_path.hardlink_to(mp3_path)
+                    except OSError:
+                        import shutil
+                        shutil.copy2(mp3_path, sp_path)
                 mp3_path = sp_path
             elif video_id.startswith("vk_"):
                 # VK Music — need to re-fetch URL (temporary links)
                 raise HTTPException(status_code=501, detail="VK streaming not supported in TMA yet")
-            elif video_id.isdigit():
-                # Pure digit ID — legacy Yandex Music track stored without ym_ prefix
-                from bot.services.yandex_provider import download_yandex
-                track_id = int(video_id)
-                mp3_path = await download_yandex(track_id, mp3_path)
             elif not _is_likely_youtube_id(video_id):
                 # Unknown source — reject early instead of sending junk to YouTube
                 raise HTTPException(status_code=400, detail=f"Unsupported track source: {video_id}")
@@ -352,7 +397,8 @@ async def stream_audio(
                     session = get_session()
                     upstream = await session.get(stream_url, headers=upstream_headers, allow_redirects=True)
                     if upstream.status in (200, 206):
-                        cache_tmp_path = settings.DOWNLOAD_DIR / f"{video_id}.part"
+                        import uuid as _uuid
+                        cache_tmp_path = settings.TEMP_DOWNLOAD_DIR / f"{video_id}.{_uuid.uuid4().hex[:8]}.part"
                         should_cache_stream = upstream.status == 200 and not range_header
 
                         async def _iter_upstream():
@@ -381,7 +427,8 @@ async def stream_audio(
                                     tmp_file = None
                                     is_complete = expected_size is None or bytes_written >= expected_size
                                     if is_complete and not mp3_path.exists():
-                                        cache_tmp_path.replace(mp3_path)
+                                        import shutil as _shutil
+                                        _shutil.move(str(cache_tmp_path), str(mp3_path))
                                     else:
                                         cache_tmp_path.unlink(missing_ok=True)
                             except Exception:
@@ -435,7 +482,7 @@ async def stream_audio(
             end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
             end = min(end, file_size - 1)
             
-            if start >= file_size:
+            if start >= file_size or start > end:
                 raise HTTPException(status_code=416, detail="Range not satisfiable")
             
             chunk_size = end - start + 1
@@ -616,12 +663,14 @@ def _state_key(user_id: int) -> str:
     return f"tma:player:{user_id}"
 
 
-async def _load_state(user_id: int) -> PlayerState:
+async def _load_state(user_id: int, *, hydrate_covers: bool = True) -> PlayerState:
     r = await _get_redis()
     raw = await r.get(_state_key(user_id))
     if raw:
         state = PlayerState.model_validate_json(raw)
-        return await _hydrate_state_covers(user_id, state)
+        if hydrate_covers:
+            return await _hydrate_state_covers(user_id, state)
+        return state
     return PlayerState()
 
 
@@ -630,9 +679,37 @@ async def _save_state(user_id: int, state: PlayerState) -> None:
     await r.setex(_state_key(user_id), 86400, state.model_dump_json())
 
 
+def _cover_cache_key(source_id: str, source: str | None) -> str:
+    return f"{(source or 'youtube').lower()}:{source_id}"
+
+
+def _get_cached_cover(source_id: str, source: str | None) -> str | None | object:
+    import time as _time
+    cached = _cover_url_cache.get(_cover_cache_key(source_id, source))
+    if not cached:
+        return _MISSING
+    value, expires_at = cached
+    if expires_at <= _time.time():
+        _cover_url_cache.pop(_cover_cache_key(source_id, source), None)
+        return _MISSING
+    return value
+
+
+def _set_cached_cover(source_id: str, source: str | None, cover_url: str | None) -> None:
+    import time as _time
+    _cover_url_cache[_cover_cache_key(source_id, source)] = (cover_url, _time.time() + _COVER_URL_TTL)
+
+
+_MISSING = object()
+
+
 async def _resolve_cover_url(source_id: str, source: str | None, current_cover: str | None = None) -> str | None:
     if current_cover:
         return current_cover
+
+    cached_cover = _get_cached_cover(source_id, source)
+    if cached_cover is not _MISSING:
+        return cached_cover
 
     # Check DB for cached cover_url
     try:
@@ -644,40 +721,106 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
                 select(_Track.cover_url).where(_Track.source_id == source_id)
             )).scalar_one_or_none()
             if row:
+                _set_cached_cover(source_id, source, row)
                 return row
     except Exception:
         pass
 
     normalized_source = (source or "youtube").lower()
     if normalized_source == "youtube" and source_id:
-        return f"https://i.ytimg.com/vi/{source_id}/hqdefault.jpg"
+        cover_url = f"https://i.ytimg.com/vi/{source_id}/hqdefault.jpg"
+        _set_cached_cover(source_id, source, cover_url)
+        return cover_url
 
     if normalized_source == "yandex" and source_id.startswith("ym_"):
         try:
             from bot.services.yandex_provider import fetch_yandex_track
 
             track_meta = await fetch_yandex_track(int(source_id[3:]))
-            return track_meta.get("cover_url") if track_meta else None
+            cover_url = track_meta.get("cover_url") if track_meta else None
+            _set_cached_cover(source_id, source, cover_url)
+            return cover_url
         except Exception:
             return None
 
+    _set_cached_cover(source_id, source, None)
     return None
 
 
-async def _refresh_missing_covers_in_state(user_id: int) -> None:
-    """Best-effort refresh for older queue entries without cover URLs."""
-    r = await _get_redis()
-    raw = await r.get(_state_key(user_id))
-    if not raw:
-        return
+async def _resolve_cover_urls_for_tracks(tracks: list[TrackSchema]) -> dict[str, str | None]:
+    result: dict[str, str | None] = {}
+    missing_tracks = [track for track in tracks if track.video_id and not track.cover_url]
+    if not missing_tracks:
+        return result
 
-    state = PlayerState.model_validate_json(raw)
-    refreshed = await _hydrate_state_covers(user_id, state)
-    await _save_state(user_id, refreshed)
+    unresolved: list[TrackSchema] = []
+    seen_unresolved: set[str] = set()
+    unresolved_sources: dict[str, str | None] = {}
+    for track in missing_tracks:
+        cache_key = _cover_cache_key(track.video_id, track.source)
+        cached_cover = _get_cached_cover(track.video_id, track.source)
+        if cached_cover is _MISSING:
+            if cache_key not in seen_unresolved:
+                unresolved.append(track)
+                seen_unresolved.add(cache_key)
+                unresolved_sources[track.video_id] = track.source
+        else:
+            result[track.video_id] = cached_cover
+
+    if unresolved:
+        try:
+            from sqlalchemy import select
+            from bot.models.base import async_session as _as
+            from bot.models.track import Track as _Track
+
+            source_ids = [track.video_id for track in unresolved]
+            async with _as() as _sess:
+                rows = (await _sess.execute(
+                    select(_Track.source_id, _Track.cover_url).where(_Track.source_id.in_(source_ids))
+                )).all()
+            for source_id, cover_url in rows:
+                if cover_url:
+                    result[source_id] = cover_url
+                    _set_cached_cover(source_id, unresolved_sources.get(source_id), cover_url)
+        except Exception:
+            pass
+
+    yandex_tracks: list[TrackSchema] = []
+    for track in unresolved:
+        if track.video_id in result:
+            continue
+        normalized_source = (track.source or "youtube").lower()
+        if normalized_source == "youtube" and track.video_id:
+            cover_url = f"https://i.ytimg.com/vi/{track.video_id}/hqdefault.jpg"
+            result[track.video_id] = cover_url
+            _set_cached_cover(track.video_id, track.source, cover_url)
+        elif normalized_source == "yandex" and track.video_id.startswith("ym_"):
+            yandex_tracks.append(track)
+        else:
+            _set_cached_cover(track.video_id, track.source, None)
+
+    if yandex_tracks:
+        async def _fetch_yandex_cover(track: TrackSchema) -> tuple[str, str | None]:
+            try:
+                from bot.services.yandex_provider import fetch_yandex_track
+                track_meta = await fetch_yandex_track(int(track.video_id[3:]))
+                cover_url = track_meta.get("cover_url") if track_meta else None
+                return track.video_id, cover_url
+            except Exception:
+                return track.video_id, None
+
+        yandex_results = await asyncio.gather(*(_fetch_yandex_cover(track) for track in yandex_tracks))
+        for source_id, cover_url in yandex_results:
+            result[source_id] = cover_url
+            _set_cached_cover(source_id, "yandex", cover_url)
+
+    return result
 
 
-async def _hydrate_track_cover(track: TrackSchema) -> tuple[TrackSchema, bool]:
-    cover_url = await _resolve_cover_url(track.video_id, track.source, track.cover_url)
+async def _hydrate_track_cover(track: TrackSchema, cover_map: dict[str, str | None] | None = None) -> tuple[TrackSchema, bool]:
+    cover_url = cover_map.get(track.video_id) if cover_map is not None else None
+    if cover_url is None:
+        cover_url = await _resolve_cover_url(track.video_id, track.source, track.cover_url)
     if cover_url and cover_url != track.cover_url:
         track.cover_url = cover_url
         return track, True
@@ -686,14 +829,18 @@ async def _hydrate_track_cover(track: TrackSchema) -> tuple[TrackSchema, bool]:
 
 async def _hydrate_state_covers(user_id: int, state: PlayerState) -> PlayerState:
     changed = False
+    tracks_to_hydrate = [*state.queue]
+    if state.current_track:
+        tracks_to_hydrate.append(state.current_track)
+    cover_map = await _resolve_cover_urls_for_tracks(tracks_to_hydrate)
 
     if state.queue:
-        hydrated_queue = await asyncio.gather(*(_hydrate_track_cover(track) for track in state.queue))
+        hydrated_queue = await asyncio.gather(*(_hydrate_track_cover(track, cover_map) for track in state.queue))
         state.queue = [track for track, _ in hydrated_queue]
         changed = changed or any(updated for _, updated in hydrated_queue)
 
     if state.current_track:
-        state.current_track, updated = await _hydrate_track_cover(state.current_track)
+        state.current_track, updated = await _hydrate_track_cover(state.current_track, cover_map)
         changed = changed or updated
     elif state.queue and 0 <= state.position < len(state.queue):
         state.current_track = state.queue[state.position]
@@ -710,14 +857,13 @@ async def _hydrate_state_covers(user_id: int, state: PlayerState) -> PlayerState
 async def get_player_state(user_id: int, user: dict = Depends(get_current_user)):
     if user.get("id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    await _refresh_missing_covers_in_state(user_id)
     return await _load_state(user_id)
 
 
 @app.post("/api/player/action", response_model=PlayerState)
 async def player_action(body: PlayerAction, user: dict = Depends(get_current_user)):
     user_id = user["id"]
-    state = await _load_state(user_id)
+    state = await _load_state(user_id, hydrate_covers=False)
 
     if body.action == "play":
         if body.track_id:
@@ -861,13 +1007,13 @@ async def play_playlist(playlist_id: int, user: dict = Depends(get_current_user)
             .order_by(PlaylistTrack.position)
         )
         db_tracks = (await session.execute(q)).scalars().all()
-        tracks = await asyncio.gather(*(_db_track_to_schema(t) for t in db_tracks))
+        tracks = await _db_tracks_to_schemas(db_tracks)
 
     if not tracks:
         raise HTTPException(status_code=400, detail="Playlist is empty")
 
     # Load current state, clear queue, add all tracks
-    state = await _load_state(user_id)
+    state = await _load_state(user_id, hydrate_covers=False)
     state.queue = list(tracks)
     state.position = 0
     state.current_track = tracks[0]
@@ -922,7 +1068,7 @@ async def get_playlist_tracks(playlist_id: int, user: dict = Depends(get_current
             .order_by(PlaylistTrack.position)
         )
         tracks = (await session.execute(q)).scalars().all()
-        return await asyncio.gather(*(_db_track_to_schema(t) for t in tracks))
+        return await _db_tracks_to_schemas(tracks)
 
 
 @app.get("/api/lyrics/{track_id}", response_model=LyricsResponse)
@@ -932,12 +1078,17 @@ async def get_lyrics(track_id: str, user: dict = Depends(get_current_user)):
     cache_key = f"lyrics:{track_id}"
     cached = await r.get(cache_key)
     if cached:
-        return LyricsResponse(track_id=track_id, lyrics=cached.decode() if isinstance(cached, bytes) else cached)
+        lyrics = cached.decode() if isinstance(cached, bytes) else cached
+        if lyrics == _LYRICS_CACHE_MISS:
+            return LyricsResponse(track_id=track_id, lyrics=None)
+        return LyricsResponse(track_id=track_id, lyrics=lyrics)
 
     # Fetch from Genius via search
     lyrics_text = await _fetch_lyrics(track_id)
     if lyrics_text:
-        await r.setex(cache_key, 86400 * 7, lyrics_text)
+        await r.setex(cache_key, _LYRICS_CACHE_TTL, lyrics_text)
+    else:
+        await r.setex(cache_key, _LYRICS_MISS_TTL, _LYRICS_CACHE_MISS)
 
     return LyricsResponse(track_id=track_id, lyrics=lyrics_text)
 
@@ -1276,22 +1427,37 @@ async def add_track_to_playlist(
     from bot.models.base import async_session
     from bot.models.playlist import Playlist, PlaylistTrack
     from bot.models.track import Track
-    from bot.db import upsert_track
 
     async with async_session() as session:
         pl = await session.get(Playlist, playlist_id)
         if not pl or pl.user_id != user["id"]:
             raise HTTPException(status_code=404, detail="Playlist not found")
 
-        # Upsert track in DB
-        track_data = {
-            "source_id": body.video_id,
-            "source": body.source,
-            "title": body.title,
-            "artist": body.artist,
-            "duration": body.duration,
-        }
-        db_track = await upsert_track(**track_data)
+        db_track = (
+            await session.execute(select(Track).where(Track.source_id == body.video_id))
+        ).scalar_one_or_none()
+        if db_track is None:
+            db_track = Track(
+                source_id=body.video_id,
+                source=body.source,
+                title=body.title,
+                artist=body.artist,
+                duration=body.duration,
+                cover_url=body.cover_url,
+                downloads=1,
+            )
+            session.add(db_track)
+            await session.flush()
+        else:
+            db_track.downloads = (db_track.downloads or 0) + 1
+            if body.title and not db_track.title:
+                db_track.title = body.title
+            if body.artist and not db_track.artist:
+                db_track.artist = body.artist
+            if body.duration and not db_track.duration:
+                db_track.duration = body.duration
+            if body.cover_url and not db_track.cover_url:
+                db_track.cover_url = body.cover_url
 
         # Check if already in playlist
         existing = (await session.execute(
@@ -1300,25 +1466,21 @@ async def add_track_to_playlist(
                 PlaylistTrack.track_id == db_track.id,
             )
         )).scalar_one_or_none()
-        if existing:
-            cnt = (await session.execute(
-                select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist_id)
-            )).scalar() or 0
-            return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt)
 
-        # Get max position
-        max_pos = (await session.execute(
-            select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
-        )).scalar() or 0
+        stats = await session.execute(
+            select(
+                func.coalesce(func.max(PlaylistTrack.position), -1),
+                func.count(PlaylistTrack.id),
+            ).where(PlaylistTrack.playlist_id == playlist_id)
+        )
+        max_pos, cnt = stats.one()
+        if existing:
+            return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt)
 
         pt = PlaylistTrack(playlist_id=playlist_id, track_id=db_track.id, position=max_pos + 1)
         session.add(pt)
         await session.commit()
-
-        cnt = (await session.execute(
-            select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist_id)
-        )).scalar() or 0
-        return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt)
+        return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt + 1)
 
 
 @app.delete("/api/playlist/{playlist_id}/tracks/{video_id}")
@@ -1393,14 +1555,14 @@ async def _get_track_by_source_id(source_id: str) -> TrackSchema | None:
     from sqlalchemy import select
     from bot.models.base import async_session
     from bot.models.track import Track
-    from bot.utils import fmt_duration
 
     async with async_session() as session:
         t = (await session.execute(
             select(Track).where(Track.source_id == source_id)
         )).scalar_one_or_none()
         if t:
-            return await _db_track_to_schema(t)
+            schemas = await _db_tracks_to_schemas([t])
+            return schemas[0] if schemas else None
     return None
 
 
@@ -1417,6 +1579,30 @@ async def _db_track_to_schema(t) -> TrackSchema:
         file_id=t.file_id,
         cover_url=cover_url,
     )
+
+
+async def _db_tracks_to_schemas(tracks) -> list[TrackSchema]:
+    from bot.utils import fmt_duration
+
+    schemas = [
+        TrackSchema(
+            video_id=track.source_id,
+            title=track.title or "Unknown",
+            artist=track.artist or "Unknown",
+            duration=track.duration or 0,
+            duration_fmt=fmt_duration(track.duration),
+            source=track.source or "youtube",
+            file_id=track.file_id,
+            cover_url=track.cover_url,
+        )
+        for track in tracks
+    ]
+    if not schemas:
+        return schemas
+
+    cover_map = await _resolve_cover_urls_for_tracks(schemas)
+    hydrated = await asyncio.gather(*(_hydrate_track_cover(track, cover_map) for track in schemas))
+    return [track for track, _ in hydrated]
 
 
 async def _fetch_lyrics(track_id: str) -> str | None:
@@ -1506,7 +1692,7 @@ class ReorderRequest(BaseModel):
 async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_user)):
     """Reorder a track in the queue."""
     user_id = user["id"]
-    state = await _load_state(user_id)
+    state = await _load_state(user_id, hydrate_covers=False)
     
     if not state.queue:
         raise HTTPException(status_code=400, detail="Queue is empty")
@@ -1536,13 +1722,14 @@ async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_u
 import math
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bot.models.base import async_session
 from bot.models.party import PartyChatMessage, PartyEvent, PartyMember, PartyPlaybackState, PartyReaction, PartySession, PartyTrack, PartyTrackVote
 
 # In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
 _party_subscribers: dict[str, list[asyncio.Queue]] = {}
+_PARTY_MEMBER_TOUCH_INTERVAL = timedelta(seconds=30)
 
 
 def _party_skip_threshold(member_count: int) -> int:
@@ -1620,11 +1807,16 @@ async def _ensure_party_member(session, party: PartySession, user: dict, *, mark
         )
         session.add(member)
     else:
-        member.display_name = name
-        member.last_seen_at = now
+        if member.display_name != name:
+            member.display_name = name
         if party.creator_id == user_id:
             member.role = "dj"
-        if mark_online:
+        should_touch_presence = mark_online or member.last_seen_at is None
+        if not should_touch_presence and member.last_seen_at is not None:
+            should_touch_presence = (now - member.last_seen_at) >= _PARTY_MEMBER_TOUCH_INTERVAL
+        if should_touch_presence:
+            member.last_seen_at = now
+        if mark_online and not member.is_online:
             member.is_online = True
     return member
 
@@ -1639,6 +1831,13 @@ async def _get_or_create_party_playback(session, party_id: int) -> PartyPlayback
         session.add(playback)
         await session.flush()
     return playback
+
+
+async def _get_party_playback(session, party_id: int) -> PartyPlaybackState | None:
+    from sqlalchemy import select
+
+    result = await session.execute(select(PartyPlaybackState).where(PartyPlaybackState.party_id == party_id))
+    return result.scalar_one_or_none()
 
 
 async def _normalize_party_positions(session, party_id: int):
@@ -1718,7 +1917,7 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
     ).scalars().all()
     chat_messages = list(reversed(chat_messages))
 
-    playback = await _get_or_create_party_playback(session, party.id)
+    playback = await _get_party_playback(session, party.id)
     online_count = sum(1 for member in members if member.is_online)
     viewer_role = "listener"
     if viewer_id is not None:
@@ -1771,11 +1970,11 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
             for message in chat_messages
         ],
         playback=PartyPlaybackStateSchema(
-            track_position=playback.track_position,
-            action=playback.action,
-            seek_position=playback.seek_position,
-            updated_by=playback.updated_by,
-            updated_at=_iso_dt(playback.updated_at),
+            track_position=playback.track_position if playback is not None else 0,
+            action=playback.action if playback is not None else "idle",
+            seek_position=playback.seek_position if playback is not None else 0,
+            updated_by=playback.updated_by if playback is not None else None,
+            updated_at=_iso_dt(playback.updated_at) if playback is not None else None,
         ),
         current_reactions=reaction_counts,
         tracks=[
@@ -1802,6 +2001,17 @@ async def _get_party_with_tracks(code: str, viewer_id: int | None = None) -> Par
     async with async_session() as session:
         party = await _get_party_or_404(session, code)
         return await _build_party_schema(session, party, viewer_id)
+
+
+async def _commit_and_build_party_schema(
+    session,
+    party: PartySession,
+    viewer_id: int | None = None,
+) -> PartySchema:
+    """Flush pending party changes when needed and reuse the same session to build the response."""
+    if session.new or session.dirty or session.deleted:
+        await session.commit()
+    return await _build_party_schema(session, party, viewer_id)
 
 
 async def _notify_party(code: str, event: str, data: dict | None = None):
@@ -1860,9 +2070,9 @@ async def create_party(body: PartyCreateRequest, user: dict = Depends(get_curren
             actor_id=user["id"],
             actor_name=user.get("first_name", "DJ"),
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.get("/api/party/{code}", response_model=PartySchema)
@@ -1872,8 +2082,8 @@ async def get_party(code: str, user: dict = Depends(get_current_user)):
     async with async_session() as session:
         party = await _get_party_or_404(session, code)
         await _ensure_party_member(session, party, user, mark_online=False)
-        await session.commit()
-    return await _get_party_with_tracks(code, int(user["id"]))
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/tracks", response_model=PartySchema)
@@ -1915,7 +2125,7 @@ async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = De
             actor_name=user.get("first_name", "User"),
             payload={"video_id": body.video_id, "title": body.title},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "track_added", {
         "video_id": body.video_id,
@@ -1923,7 +2133,7 @@ async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = De
         "artist": body.artist,
         "added_by_name": user.get("first_name", "User"),
     })
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/tracks/{video_id}/play-next", response_model=PartySchema)
@@ -1965,10 +2175,10 @@ async def play_next_party_track(code: str, video_id: str, user: dict = Depends(g
             actor_name=user.get("first_name", "DJ"),
             payload={"video_id": video_id, "mode": "play_next"},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "queue_reordered", {"video_id": video_id, "mode": "play_next"})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/reorder", response_model=PartySchema)
@@ -2012,10 +2222,10 @@ async def reorder_party_tracks(code: str, body: PartyReorderRequest, user: dict 
             actor_name=user.get("first_name", "DJ"),
             payload={"from_position": body.from_position, "to_position": body.to_position},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "queue_reordered", {"from_position": body.from_position, "to_position": body.to_position})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.delete("/api/party/{code}/tracks/{video_id}")
@@ -2154,14 +2364,14 @@ async def skip_party_track(code: str, user: dict = Depends(get_current_user)):
                 payload={"position": party.current_position},
             )
 
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     if skip:
         await _notify_party_state(code, "next", {"position": party.current_position})
     else:
         await _notify_party_state(code, "vote_skip", {"votes": votes, "threshold": threshold})
 
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/members/{member_user_id}/role", response_model=PartySchema)
@@ -2206,10 +2416,10 @@ async def update_party_member_role(
             actor_name=user.get("first_name", "DJ"),
             payload={"user_id": member_user_id, "role": body.role},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "role_updated", {"user_id": member_user_id, "role": body.role})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/playback", response_model=PartySchema)
@@ -2246,7 +2456,7 @@ async def sync_party_playback(code: str, body: PartyPlaybackRequest, user: dict 
                 "seek_position": body.seek_position,
             },
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(
         code,
@@ -2258,7 +2468,7 @@ async def sync_party_playback(code: str, body: PartyPlaybackRequest, user: dict 
             "updated_by": user["id"],
         },
     )
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/close")
@@ -2369,10 +2579,10 @@ async def send_party_chat_message(code: str, body: PartyChatRequest, user: dict 
             actor_name=user.get("first_name", "User"),
             payload={"message": message[:400]},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "chat", {"message": message[:400], "actor_name": user.get("first_name", "User")})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.delete("/api/party/{code}/chat/{message_id}", response_model=PartySchema)
@@ -2408,10 +2618,10 @@ async def delete_party_chat_message(code: str, message_id: int, user: dict = Dep
             actor_name=user.get("first_name", "User"),
             payload={"message_id": message_id, "preview": deleted_preview},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "chat_delete", {"message_id": message_id})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/chat/clear", response_model=PartySchema)
@@ -2434,10 +2644,10 @@ async def clear_party_chat(code: str, user: dict = Depends(get_current_user)):
             actor_id=user["id"],
             actor_name=user.get("first_name", "User"),
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "chat_clear", {})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/react", response_model=PartySchema)
@@ -2487,10 +2697,12 @@ async def react_to_party_track(code: str, body: PartyReactionRequest, user: dict
                 actor_name=user.get("first_name", "User"),
                 payload={"emoji": emoji, "video_id": current_track.video_id},
             )
-            await session.commit()
+            party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
+        else:
+            party_schema = await _build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "reaction", {"emoji": emoji, "user_id": user["id"]})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.post("/api/party/{code}/auto-dj", response_model=PartySchema)
@@ -2575,10 +2787,10 @@ async def auto_dj_fill_party(code: str, limit: int = Query(default=5, ge=1, le=1
             actor_name=user.get("first_name", "DJ"),
             payload={"added": added},
         )
-        await session.commit()
+        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
 
     await _notify_party_state(code, "auto_dj", {"added": added})
-    return await _get_party_with_tracks(code, int(user["id"]))
+    return party_schema
 
 
 @app.get("/api/party/{code}/recap", response_model=PartyRecapSchema)
@@ -2738,7 +2950,8 @@ async def party_events(
 async def my_parties(user: dict = Depends(get_current_user)):
     """List user's active parties."""
     async with async_session() as session:
-        from sqlalchemy import select
+        from sqlalchemy import func, select
+
         result = await session.execute(
             select(PartySession).where(
                 PartySession.creator_id == user["id"],
@@ -2746,16 +2959,65 @@ async def my_parties(user: dict = Depends(get_current_user)):
             ).order_by(PartySession.created_at.desc())
         )
         parties = result.scalars().all()
+        if not parties:
+            return []
 
-    schemas = []
-    for p in parties:
-        schemas.append(await _build_party_schema(session, p, int(user["id"])))
-    return schemas
+        party_ids = [party.id for party in parties]
+        track_rows = await session.execute(
+            select(PartyTrack.party_id, func.count(PartyTrack.id))
+            .where(PartyTrack.party_id.in_(party_ids))
+            .group_by(PartyTrack.party_id)
+        )
+        track_counts = {party_id: count for party_id, count in track_rows.all()}
+
+        member_rows = await session.execute(
+            select(PartyMember.party_id, func.count(PartyMember.id))
+            .where(
+                PartyMember.party_id.in_(party_ids),
+                PartyMember.is_online == True,
+            )
+            .group_by(PartyMember.party_id)
+        )
+        online_counts = {party_id: count for party_id, count in member_rows.all()}
+
+        return [
+            PartySchema(
+                id=party.id,
+                invite_code=party.invite_code,
+                creator_id=party.creator_id,
+                name=party.name,
+                is_active=party.is_active,
+                current_position=party.current_position,
+                track_count=int(track_counts.get(party.id, 0)),
+                tracks=[],
+                member_count=int(online_counts.get(party.id, 0)),
+                skip_threshold=_party_skip_threshold(int(online_counts.get(party.id, 0))),
+                viewer_role="dj",
+                members=[],
+                events=[],
+                chat_messages=[],
+                playback=PartyPlaybackStateSchema(),
+                current_reactions={},
+            )
+            for party in parties
+        ]
 
 
 # ── Frontend SPA serving ────────────────────────────────────────────────
 
 _FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
+_ADMIN_DIR = Path(__file__).resolve().parent / "admin"
+
+# ── Admin Panel static serving ──────────────────────────────────────────
+@app.get("/admin")
+@app.get("/admin/")
+async def serve_admin():
+    """Serve admin panel index.html."""
+    admin_html = _ADMIN_DIR / "index.html"
+    if admin_html.is_file():
+        return FileResponse(admin_html, media_type="text/html")
+    return HTMLResponse("<h1>Admin panel not found</h1>", status_code=404)
+
 
 if _FRONTEND_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="static_assets")
@@ -2763,6 +3025,9 @@ if _FRONTEND_DIST.is_dir():
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
         """Serve index.html for any non-API route (SPA fallback)."""
+        # Don't intercept API routes
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="API route not found")
         file_path = _FRONTEND_DIST / full_path
         if full_path and file_path.is_file() and _FRONTEND_DIST in file_path.resolve().parents:
             return FileResponse(file_path)

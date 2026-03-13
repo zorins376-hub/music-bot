@@ -373,6 +373,7 @@ export interface Party {
   name: string;
   is_active: boolean;
   current_position: number;
+  track_count?: number;
   tracks: PartyTrack[];
   member_count: number;
   skip_threshold: number;
