@@ -28,6 +28,41 @@ from bot.services.downloader import download_track, resolve_youtube_audio_stream
 from bot.services.download_manager import download_manager
 from bot.models.base import init_db
 
+
+def _is_valid_mp3(path: Path) -> bool:
+    """Lightweight MP3 sanity check: header magic + minimum size."""
+    try:
+        if not path.exists():
+            return False
+        if path.stat().st_size < 16 * 1024:  # too small to be a full track
+            return False
+        head = path.read_bytes()[:3]
+        return head in (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+    except OSError:
+        return False
+
+
+def _select_bitrate(pref: str | None, premium: bool) -> int:
+    """Map stored quality preference to bitrate for yt-dlp pipeline."""
+    if pref == "auto" or not pref:
+        return settings.DEFAULT_BITRATE
+    if pref == "320" and premium:
+        return 320
+    if pref in {"128", "192", "320"}:
+        return int(pref)
+    return settings.DEFAULT_BITRATE
+
+
+def _schedule_background_download(video_id: str, bitrate: int) -> None:
+    """Fire-and-forget mp3 download so next play hits cache."""
+    async def _run():
+        try:
+            await download_manager.download(video_id, bitrate=bitrate)
+        except Exception:
+            logger.warning("Background download failed for %s", video_id)
+
+    asyncio.create_task(_run())
+
 # ── In-memory stream URL cache (avoids repeated yt-dlp resolves) ─────────
 _stream_url_cache: dict[str, tuple[str, float]] = {}  # video_id -> (url, expires_at)
 _STREAM_URL_TTL = 1800  # 30 minutes (YouTube URLs valid ~6h)
@@ -309,6 +344,13 @@ async def stream_audio(
     if not init_data or verify_init_data(init_data) is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    user = verify_init_data(init_data)
+    db_user = await _get_or_create_webapp_user(user) if user else None
+    preferred_bitrate = _select_bitrate(
+        getattr(db_user, "quality", None),
+        bool(getattr(db_user, "is_premium", False) or getattr(db_user, "is_admin", False)),
+    )
+
     # Sanitize video_id to prevent path traversal
     import re
     if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', video_id):
@@ -316,14 +358,9 @@ async def stream_audio(
 
     # Check if already downloaded (and has valid MP3 header)
     mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-    if mp3_path.exists():
-        try:
-            head = mp3_path.read_bytes()[:3]
-            if head not in (b'ID3', b'\xff\xfb', b'\xff\xf3', b'\xff\xf2') and mp3_path.stat().st_size < 10240:
-                logger.warning("Removing corrupt file %s (bad header, size=%d)", mp3_path, mp3_path.stat().st_size)
-                mp3_path.unlink()
-        except OSError:
-            pass
+    if mp3_path.exists() and not _is_valid_mp3(mp3_path):
+        logger.warning("Removing corrupt or invalid file %s", mp3_path)
+        mp3_path.unlink()
     if not mp3_path.exists():
         try:
             # Determine source by prefix
@@ -360,7 +397,7 @@ async def stream_audio(
                 yt_id = results[0].get("video_id", "")
                 if not yt_id:
                     raise HTTPException(status_code=404, detail="No YouTube match for Spotify track")
-                mp3_path = await download_manager.download(yt_id)
+                mp3_path = await download_manager.download(yt_id, bitrate=preferred_bitrate)
                 # Hardlink so sp_ ID maps to the same file (no copy, no extra disk)
                 sp_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
                 if not sp_path.exists() and mp3_path.exists():
@@ -397,48 +434,10 @@ async def stream_audio(
                     session = get_session()
                     upstream = await session.get(stream_url, headers=upstream_headers, allow_redirects=True)
                     if upstream.status in (200, 206):
-                        import uuid as _uuid
-                        cache_tmp_path = settings.TEMP_DOWNLOAD_DIR / f"{video_id}.{_uuid.uuid4().hex[:8]}.part"
-                        should_cache_stream = upstream.status == 200 and not range_header
-
                         async def _iter_upstream():
-                            tmp_file = None
-                            bytes_written = 0
-                            expected_size = None
-                            if should_cache_stream:
-                                try:
-                                    expected_size = int(upstream.headers.get("Content-Length", "0")) or None
-                                except Exception:
-                                    expected_size = None
-                                try:
-                                    tmp_file = open(cache_tmp_path, "wb")
-                                except Exception as e:
-                                    logger.warning("Cannot open temp cache file for %s: %s", video_id, e)
-                                    tmp_file = None
                             try:
                                 async for chunk in upstream.content.iter_chunked(64 * 1024):
-                                    if tmp_file is not None:
-                                        tmp_file.write(chunk)
-                                        bytes_written += len(chunk)
                                     yield chunk
-                                if tmp_file is not None:
-                                    tmp_file.flush()
-                                    tmp_file.close()
-                                    tmp_file = None
-                                    is_complete = expected_size is None or bytes_written >= expected_size
-                                    if is_complete and not mp3_path.exists():
-                                        import shutil as _shutil
-                                        _shutil.move(str(cache_tmp_path), str(mp3_path))
-                                    else:
-                                        cache_tmp_path.unlink(missing_ok=True)
-                            except Exception:
-                                if tmp_file is not None:
-                                    try:
-                                        tmp_file.close()
-                                    except Exception:
-                                        pass
-                                cache_tmp_path.unlink(missing_ok=True)
-                                raise
                             finally:
                                 upstream.close()
 
@@ -453,6 +452,9 @@ async def stream_audio(
                         if content_range:
                             response_headers["Content-Range"] = content_range
 
+                        if not mp3_path.exists():
+                            _schedule_background_download(video_id, preferred_bitrate)
+
                         return StreamingResponse(
                             _iter_upstream(),
                             status_code=upstream.status,
@@ -462,7 +464,7 @@ async def stream_audio(
                     upstream.close()
 
                 # Fallback: coalesced download via download manager
-                mp3_path = await download_manager.download(video_id)
+                mp3_path = await download_manager.download(video_id, bitrate=preferred_bitrate)
         except HTTPException:
             raise
         except Exception as e:
