@@ -3,7 +3,6 @@ import logging
 from aiogram.types import User as TgUser
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, desc, or_, select, text, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 from bot.config import settings
@@ -61,21 +60,23 @@ async def get_or_create_user(tg_user: TgUser) -> User:
         user = result.scalar_one_or_none()
 
         if user is None:
+            user = User(
+                id=tg_user.id,
+                username=tg_user.username,
+                first_name=tg_user.first_name,
+                is_premium=admin,
+                is_admin=admin,
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+            # Mirror new user to Supabase
             try:
-                user = User(
-                    id=tg_user.id,
-                    username=tg_user.username,
-                    first_name=tg_user.first_name,
-                    is_premium=admin,
-                    is_admin=admin,
-                )
-                session.add(user)
-                await session.commit()
-                await session.refresh(user)
-            except IntegrityError:
-                await session.rollback()
-                result = await session.execute(select(User).where(User.id == tg_user.id))
-                user = result.scalar_one()
+                from bot.services.supabase_mirror import mirror_user
+                mirror_user(user.id, username=user.username, first_name=user.first_name,
+                            is_premium=user.is_premium, is_admin=user.is_admin)
+            except Exception:
+                pass
         else:
             # Calculate all updates in one single query
             expired_premium = (
@@ -103,6 +104,14 @@ async def get_or_create_user(tg_user: TgUser) -> User:
                 update(User).where(User.id == tg_user.id).values(**update_values)
             )
             await session.commit()
+            # Mirror user update to Supabase
+            try:
+                from bot.services.supabase_mirror import mirror_user
+                mirror_user(tg_user.id, username=tg_user.username, first_name=tg_user.first_name,
+                            is_premium=update_values.get("is_premium", user.is_premium),
+                            is_admin=update_values.get("is_admin", user.is_admin))
+            except Exception:
+                pass
 
             # Reflect changes on the in-memory object
             if "is_premium" in update_values:
@@ -141,17 +150,27 @@ async def record_listening_event(
 ) -> None:
     try:
         async with async_session() as session:
-            session.add(
-                ListeningHistory(
+            lh = ListeningHistory(
                     user_id=user_id,
                     track_id=track_id,
                     query=query,
                     action=action,
                     source=source,
                     listen_duration=listen_duration,
-                )
             )
+            session.add(lh)
             await session.commit()
+            await session.refresh(lh)
+            # Mirror to Supabase REST (fire-and-forget)
+            try:
+                from bot.services.supabase_mirror import mirror_listening_event
+                mirror_listening_event(
+                    event_id=lh.id, user_id=user_id, action=action,
+                    track_id=track_id, query=query, source=source,
+                    listen_duration=listen_duration,
+                )
+            except Exception:
+                pass
         # Mirror event to Supabase AI (fire-and-forget)
         try:
             from bot.config import settings as _s
@@ -345,6 +364,17 @@ async def upsert_track(
             )
         await session.commit()
         await session.refresh(track)
+        # Mirror track to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_track
+            mirror_track(
+                track.id, track.source_id, track.source or "youtube",
+                title=track.title, artist=track.artist,
+                genre=track.genre, duration=track.duration,
+                cover_url=track.cover_url, album=track.album,
+            )
+        except Exception:
+            pass
         return track
 
 
@@ -413,52 +443,26 @@ async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:
 
     async with async_session() as session:
         if _is_pg:
-            # PostgreSQL: use pg_trgm index (% operator), then fallback to ILIKE.
+            # PostgreSQL: use pg_trgm similarity for fuzzy matching
             combined = func.lower(func.concat(func.coalesce(Track.artist, ''), ' ', func.coalesce(Track.title, '')))
-            priority = case(
-                (Track.channel == "tequila", 0),
-                (Track.channel == "fullmoon", 1),
-                else_=2,
-            )
-            trigram_conditions = [combined.bool_op("%")(q) for q in queries if q]
-            similarity_scores = [func.similarity(combined, q) for q in queries if q]
-            rank_score = (
-                similarity_scores[0]
-                if len(similarity_scores) == 1
-                else func.greatest(*similarity_scores)
-            )
-
+            conditions = []
+            for q in queries:
+                conditions.append(func.similarity(combined, q) > 0.15)
+                conditions.append(combined.ilike(f"%{q}%"))
             result = await session.execute(
                 select(Track)
-                .where(or_(*trigram_conditions))
+                .where(or_(*conditions))
                 .order_by(
-                    priority,
-                    rank_score.desc(),
+                    case(
+                        (Track.channel == "tequila", 0),
+                        (Track.channel == "fullmoon", 1),
+                        else_=2,
+                    ),
+                    func.similarity(combined, norm).desc(),
                     Track.downloads.desc(),
                 )
                 .limit(limit)
             )
-            tracks = list(result.scalars().all())
-
-            if len(tracks) < limit:
-                fallback_conditions = []
-                for q in queries:
-                    pat = f"%{q}%"
-                    fallback_conditions.append(Track.title.ilike(pat))
-                    fallback_conditions.append(Track.artist.ilike(pat))
-
-                fallback_query = (
-                    select(Track)
-                    .where(or_(*fallback_conditions))
-                    .order_by(priority, Track.downloads.desc())
-                )
-                if tracks:
-                    fallback_query = fallback_query.where(~Track.id.in_([track.id for track in tracks]))
-                fallback_result = await session.execute(
-                    fallback_query.limit(limit - len(tracks))
-                )
-                tracks.extend(list(fallback_result.scalars().all()))
-            return tracks
         else:
             # SQLite fallback: ILIKE on all query variants
             conditions = []
@@ -524,8 +528,16 @@ async def add_favorite_track(user_id: int, track_id: int) -> bool:
         )
         if exists:
             return False
-        session.add(FavoriteTrack(user_id=user_id, track_id=track_id))
+        fav = FavoriteTrack(user_id=user_id, track_id=track_id)
+        session.add(fav)
         await session.commit()
+        await session.refresh(fav)
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_favorite_add
+            mirror_favorite_add(fav.id, user_id, track_id)
+        except Exception:
+            pass
         return True
 
 
@@ -543,6 +555,12 @@ async def remove_favorite_track(user_id: int, track_id: int) -> bool:
             return False
         await session.delete(fav)
         await session.commit()
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_favorite_remove
+            mirror_favorite_remove(user_id, track_id)
+        except Exception:
+            pass
         return True
 
 

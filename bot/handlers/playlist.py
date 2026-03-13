@@ -204,6 +204,13 @@ async def create_playlist_name(message: Message, state: FSMContext) -> None:
         pl = Playlist(user_id=user.id, name=name)
         session.add(pl)
         await session.commit()
+        await session.refresh(pl)
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_playlist_create
+            mirror_playlist_create(pl.id, user.id, name)
+        except Exception:
+            pass
     await state.clear()
     try:
         from bot.services.achievements import check_and_award_badges
@@ -289,6 +296,12 @@ async def cb_delete_exec(callback: CallbackQuery, callback_data: PlCb) -> None:
         )
         await session.delete(pl)
         await session.commit()
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_playlist_delete
+            mirror_playlist_delete(pl.id)
+        except Exception:
+            pass
     await callback.answer(t(user.language, "pl_deleted"))
     await _show_playlists(callback.message, user.id, user.language, edit=True)
 
@@ -306,8 +319,15 @@ async def cb_remove_track(callback: CallbackQuery, callback_data: PlCb) -> None:
             playlist_id = pt.playlist_id
             pl = await session.get(Playlist, pt.playlist_id)
             if pl and pl.user_id == user.id:
+                pt_id = pt.id
                 await session.delete(pt)
                 await session.commit()
+                # Mirror to Supabase
+                try:
+                    from bot.services.supabase_mirror import mirror_playlist_track_remove
+                    mirror_playlist_track_remove(pt_id)
+                except Exception:
+                    pass
     await callback.answer(t(user.language, "pl_track_removed"))
     # Refresh view using server-side playlist_id
     cb2 = PlCb(act="view", id=playlist_id)
@@ -586,6 +606,13 @@ async def cb_add_to_playlist(callback: CallbackQuery, callback_data: AddToPlCb) 
         )
         session.add(pt)
         await session.commit()
+        await session.refresh(pt)
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_playlist_track_add
+            mirror_playlist_track_add(pt.id, pl.id, callback_data.tid, cnt)
+        except Exception:
+            pass
     await callback.answer(t(user.language, "pl_track_added", name=pl.name), show_alert=True)
     await callback.message.delete()
 

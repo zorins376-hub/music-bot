@@ -1414,6 +1414,12 @@ async def create_playlist(body: CreatePlaylistRequest, user: dict = Depends(get_
         session.add(pl)
         await session.commit()
         await session.refresh(pl)
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_playlist_create
+            mirror_playlist_create(pl.id, user["id"], name)
+        except Exception:
+            pass
         return PlaylistSchema(id=pl.id, name=pl.name, track_count=0)
 
 
@@ -1480,6 +1486,15 @@ async def add_track_to_playlist(
         pt = PlaylistTrack(playlist_id=playlist_id, track_id=db_track.id, position=max_pos + 1)
         session.add(pt)
         await session.commit()
+        await session.refresh(pt)
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_playlist_track_add, mirror_track
+            mirror_track(db_track.id, db_track.source_id, db_track.source or "youtube",
+                         title=db_track.title, artist=db_track.artist)
+            mirror_playlist_track_add(pt.id, playlist_id, db_track.id, max_pos + 1)
+        except Exception:
+            pass
         return PlaylistSchema(id=pl.id, name=pl.name, track_count=cnt + 1)
 
 
@@ -1510,6 +1525,12 @@ async def remove_track_from_playlist(
                 )
             )
             await session.commit()
+            # Mirror to Supabase
+            try:
+                from bot.services.supabase_mirror import mirror_playlist_track_remove_by_ids
+                mirror_playlist_track_remove_by_ids(playlist_id, track.id)
+            except Exception:
+                pass
     return {"ok": True}
 
 
@@ -1546,6 +1567,12 @@ async def delete_playlist(playlist_id: int, user: dict = Depends(get_current_use
         )
         await session.delete(pl)
         await session.commit()
+        # Mirror to Supabase
+        try:
+            from bot.services.supabase_mirror import mirror_playlist_delete
+            mirror_playlist_delete(playlist_id)
+        except Exception:
+            pass
     return {"ok": True}
 
 

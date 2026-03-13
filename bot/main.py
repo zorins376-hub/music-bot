@@ -3,12 +3,6 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
-try:
-    import uvloop
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except ImportError:
-    pass
-
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -56,17 +50,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _DL_DIR = Path("/app/downloads") if Path("/app").exists() else Path("downloads")
-_TMP_DL_DIR = app_settings.TEMP_DOWNLOAD_DIR
 
 
-def _cleanup_stale_files(directory: Path, max_age_sec: int = 3600) -> int:
-    """Remove stale files from directory older than max_age_sec."""
+def _cleanup_stale_downloads(max_age_sec: int = 3600) -> None:
+    """Remove temp files from downloads/ older than max_age_sec."""
     import time
-    if not directory.exists():
-        return 0
+    if not _DL_DIR.exists():
+        return
     now = time.time()
     removed = 0
-    for f in directory.iterdir():
+    for f in _DL_DIR.iterdir():
         if f.is_file():
             try:
                 if now - f.stat().st_mtime > max_age_sec:
@@ -74,22 +67,16 @@ def _cleanup_stale_files(directory: Path, max_age_sec: int = 3600) -> int:
                     removed += 1
             except Exception:
                 pass
-    return removed
+    if removed:
+        logger.info("Cleaned up %d stale download(s)", removed)
 
 
 async def on_startup(bot: Bot) -> None:
     from bot.services.downloader import log_runtime_info
     log_runtime_info()
 
-    # Cleanup stale downloads from previous runs, including tmp staging files.
-    removed_downloads = _cleanup_stale_files(_DL_DIR)
-    removed_tmp = _cleanup_stale_files(_TMP_DL_DIR)
-    if removed_downloads or removed_tmp:
-        logger.info(
-            "Cleaned up %d stale download(s) and %d staged temp file(s)",
-            removed_downloads,
-            removed_tmp,
-        )
+    # Cleanup stale downloads from previous runs
+    _cleanup_stale_downloads()
 
     await init_db()
 
@@ -209,6 +196,13 @@ async def on_shutdown(bot: Bot) -> None:
     if app_settings.SUPABASE_AI_ENABLED:
         from bot.services.supabase_ai import close as close_supabase
         await close_supabase()
+
+    # Close Supabase mirror session
+    try:
+        from bot.services.supabase_mirror import close as close_mirror
+        await close_mirror()
+    except Exception:
+        pass
 
     # Gracefully shutdown thread pools
     from bot.services.downloader import _ytdl_pool
