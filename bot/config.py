@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     DISPATCHER_TOKEN: Optional[str] = None
     NODE_TOKENS: Optional[str] = None  # comma-separated bot tokens for nodes
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
