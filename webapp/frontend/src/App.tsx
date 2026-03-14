@@ -184,6 +184,12 @@ export function App() {
   const stereoWidenLRRef = useRef<GainNode | null>(null);
   const stereoWidenRLRef = useRef<GainNode | null>(null);
   const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
+  // DJ dual-deck crossfade for party mode
+  const mixDeckRef = useRef<HTMLAudioElement | null>(null);
+  const mixDeckSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const mixDeckGainRef = useRef<GainNode | null>(null);
+  const djCrossfadeActiveRef = useRef(false);
+  const djCrossfadeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const nav = navCarouselRef.current;
@@ -198,6 +204,8 @@ export function App() {
   const loudnessTimerRef = useRef<number | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const autoplayCountRef = useRef(0);
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
@@ -241,6 +249,11 @@ export function App() {
     preload.preload = "auto";
     preloadRef.current = preload;
 
+    // Mix deck for DJ crossfade (party mode)
+    const mixDeck = new Audio();
+    mixDeck.preload = "auto";
+    mixDeckRef.current = mixDeck;
+
     // Keep OS media notification in sync with playback position
     const updatePositionState = () => {
       if ("mediaSession" in navigator && isFinite(audio.duration) && audio.duration > 0) {
@@ -270,6 +283,8 @@ export function App() {
     });
 
     audio.addEventListener("ended", async () => {
+      // DJ crossfade already handled the transition — skip double-advance
+      if (djCrossfadeActiveRef.current) return;
       // Don't swap audio elements — it breaks AudioContext source connection.
       // Cache + prefetch ensures the next track loads almost instantly.
       const s = stateRef.current;
@@ -310,6 +325,51 @@ export function App() {
           }
         }
         if (nextIds.length) prefetchTracks(nextIds);
+      }
+
+      // ── DJ Crossfade: party mode auto-mix with 5s true dual-deck overlap ──
+      const remaining = audio.duration ? audio.duration - audio.currentTime : Infinity;
+      const isPartyActive = stateRef.current.queue.length > 1 && viewRef.current === "party";
+      if (isPartyActive && remaining <= 5 && remaining > 0.5 && audio.duration > 15 && !djCrossfadeActiveRef.current) {
+        const s = stateRef.current;
+        const nextIdx = (s.position + 1) % s.queue.length;
+        const nextTrack = s.queue[nextIdx];
+        if (nextTrack && nextTrack.video_id !== s.current_track?.video_id) {
+          djCrossfadeActiveRef.current = true;
+          const mix = mixDeckRef.current;
+          const mixGain = mixDeckGainRef.current;
+          const cfGain = crossfadeGainRef.current;
+          const ctx = audioContextRef.current;
+          if (mix && mixGain && cfGain && ctx) {
+            // Load and play next track on mix deck
+            const apiUrl = getStreamUrl(nextTrack.video_id);
+            mix.src = apiUrl;
+            mix.load();
+            // Check cache in parallel
+            getCachedStreamUrl(nextTrack.video_id, apiUrl).then((cached) => {
+              if (cached !== apiUrl) mix.src = cached;
+            });
+            mix.play().catch(() => {});
+            // Crossfade: main deck down, mix deck up over 4.5 seconds
+            const now = ctx.currentTime;
+            cfGain.gain.setValueAtTime(cfGain.gain.value, now);
+            cfGain.gain.exponentialRampToValueAtTime(0.001, now + 4.5);
+            mixGain.gain.setValueAtTime(0.001, now);
+            mixGain.gain.exponentialRampToValueAtTime(1, now + 4.5);
+            // After crossfade completes: advance to next track on main deck
+            djCrossfadeTimerRef.current = window.setTimeout(() => {
+              // Stop mix deck
+              mix.pause();
+              mix.src = "";
+              if (ctx) mixGain.gain.setValueAtTime(0, ctx.currentTime);
+              // Restore main deck gain
+              if (ctx) cfGain.gain.setValueAtTime(1, ctx.currentTime);
+              djCrossfadeActiveRef.current = false;
+              // Advance queue — this loads next track into main deck
+              sendAction("next").then(setState).catch(() => {});
+            }, 4600);
+          }
+        }
       }
 
       // Gapless: preload next track 30 seconds before end
@@ -476,6 +536,18 @@ export function App() {
       crossfadeGainRef.current = crossfadeGain;
       analyserRef.current = analyser;
       pannerRef.current = panner;
+
+      // ── DJ Mix Deck: second audio source for true dual-deck crossfade ──
+      const mixAudio = mixDeckRef.current;
+      if (mixAudio && !mixDeckSourceRef.current) {
+        const mixSource = ctx.createMediaElementSource(mixAudio);
+        const mixGain = ctx.createGain();
+        mixGain.gain.value = 0; // silent by default
+        mixSource.connect(mixGain);
+        mixGain.connect(loudnessGain); // sums with main deck at loudnessGain
+        mixDeckSourceRef.current = mixSource;
+        mixDeckGainRef.current = mixGain;
+      }
     }
   }, []);
 
