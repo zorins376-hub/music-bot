@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     VK_LOGIN: Optional[str] = None
     VK_PASSWORD: Optional[str] = None
 
+    # ── Deezer ────────────────────────────────────────────────────────────────
+    DEEZER_ARL: Optional[str] = None     # browser cookie from deezer.com
+
     # ── OpenAI (Prompt-to-Playlist) ──────────────────────────────────────
     OPENAI_API_KEY: Optional[str] = None
 

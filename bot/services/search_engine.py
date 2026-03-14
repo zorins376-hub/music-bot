@@ -96,10 +96,10 @@ def detect_script(text: str) -> str:
 
 _FEAT_RE = re.compile(r"\s*[\(\[]?\s*(?:feat\.?|ft\.?)\s*[^)\]]*[\)\]]?", re.IGNORECASE)
 # Source quality ranking (higher = better)
-_SOURCE_RANK = {"yandex": 5, "spotify": 4, "vk": 3, "soundcloud": 2, "youtube": 1, "channel": 6}
-# Language-aware: Russian queries prioritize Yandex/VK; English → Spotify/YouTube
-_SOURCE_RANK_CYR = {"yandex": 6, "vk": 5, "spotify": 3, "channel": 6, "soundcloud": 2, "youtube": 1}
-_SOURCE_RANK_LAT = {"spotify": 6, "youtube": 5, "soundcloud": 4, "yandex": 3, "vk": 2, "channel": 6}
+_SOURCE_RANK = {"yandex": 5, "spotify": 4, "deezer": 4, "apple": 3, "vk": 3, "soundcloud": 2, "youtube": 1, "channel": 6}
+# Language-aware: Russian queries prioritize Yandex/VK; English → Spotify/Deezer/YouTube
+_SOURCE_RANK_CYR = {"yandex": 6, "vk": 5, "deezer": 4, "spotify": 3, "apple": 3, "channel": 6, "soundcloud": 2, "youtube": 1}
+_SOURCE_RANK_LAT = {"spotify": 6, "deezer": 5, "apple": 5, "youtube": 4, "soundcloud": 3, "yandex": 3, "vk": 2, "channel": 6}
 
 
 def _normalize_for_dedup(artist: str, title: str) -> str:
@@ -309,6 +309,18 @@ async def perform_search(query: str, limit: int = 10) -> list[dict]:
     try:
         from bot.services.vk_provider import search_vk
         tasks.append(search_vk(query, limit=limit))
+    except Exception:
+        pass
+
+    try:
+        from bot.services.deezer_provider import search_deezer
+        tasks.append(search_deezer(query, limit=limit))
+    except Exception:
+        pass
+
+    try:
+        from bot.services.apple_provider import search_apple
+        tasks.append(search_apple(query, limit=limit))
     except Exception:
         pass
 

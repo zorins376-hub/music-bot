@@ -450,19 +450,38 @@ async def stream_audio(
                     finally:
                         async with _dl_inflight_lock:
                             _dl_inflight.pop(video_id, None)
+            elif video_id.startswith("dz_"):
+                # Deezer track — download with ARL + Blowfish decryption
+                dz_id = int(video_id[3:])
+                dz_quality = "MP3_320" if preferred_bitrate >= 320 else "MP3_128"
+                try:
+                    from bot.services.deezer_provider import download_deezer
+                    result = await download_deezer(dz_id, mp3_path, quality=dz_quality)
+                    if result:
+                        mp3_path = result
+                    else:
+                        raise Exception("Deezer download returned None")
+                except Exception:
+                    # Fallback: resolve metadata → search Yandex → YouTube
+                    logger.info("Deezer download failed for %s, trying fallback", video_id)
+                    mp3_path = await _fallback_download(video_id, "dz_", preferred_bitrate)
             elif video_id.startswith("sp_"):
-                # Spotify track — search YouTube by metadata
+                # Spotify track — fallback chain: Yandex → YouTube
                 sp_query = await _spotify_id_to_query(video_id)
                 if not sp_query:
                     raise HTTPException(status_code=404, detail="Spotify track not found")
-                from bot.services.downloader import search_tracks
-                results = await search_tracks(sp_query, max_results=1, source="youtube")
-                if not results:
-                    raise HTTPException(status_code=404, detail="No YouTube match for Spotify track")
-                yt_id = results[0].get("video_id", "")
-                if not yt_id:
-                    raise HTTPException(status_code=404, detail="No YouTube match for Spotify track")
-                mp3_path = await download_manager.download(yt_id, bitrate=preferred_bitrate)
+                # Try Yandex first (better quality, especially for Russian music)
+                mp3_path = await _try_yandex_fallback(sp_query, mp3_path)
+                if not mp3_path or not mp3_path.exists():
+                    # Fallback to YouTube
+                    from bot.services.downloader import search_tracks
+                    results = await search_tracks(sp_query, max_results=1, source="youtube")
+                    if not results:
+                        raise HTTPException(status_code=404, detail="No match for Spotify track")
+                    yt_id = results[0].get("video_id", "")
+                    if not yt_id:
+                        raise HTTPException(status_code=404, detail="No match for Spotify track")
+                    mp3_path = await download_manager.download(yt_id, bitrate=preferred_bitrate)
                 # Hardlink so sp_ ID maps to the same file (no copy, no extra disk)
                 sp_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
                 if not sp_path.exists() and mp3_path.exists():
@@ -472,9 +491,21 @@ async def stream_audio(
                         import shutil
                         shutil.copy2(mp3_path, sp_path)
                 mp3_path = sp_path
+            elif video_id.startswith("am_"):
+                # Apple Music — metadata-only, fallback: Yandex → YouTube
+                mp3_path = await _fallback_download(video_id, "am_", preferred_bitrate)
             elif video_id.startswith("vk_"):
-                # VK Music — need to re-fetch URL (temporary links)
-                raise HTTPException(status_code=501, detail="VK streaming not supported in TMA yet")
+                # VK Music — re-search to get fresh URL, then download
+                from bot.services.vk_provider import search_vk, download_vk
+                vk_query = await _source_id_to_query(video_id)
+                if vk_query:
+                    vk_results = await search_vk(vk_query, limit=1)
+                    if vk_results and vk_results[0].get("vk_url"):
+                        mp3_path = await download_vk(vk_results[0]["vk_url"], mp3_path)
+                    else:
+                        mp3_path = await _fallback_download(video_id, "vk_", preferred_bitrate)
+                else:
+                    raise HTTPException(status_code=404, detail="VK track not found")
             elif not _is_likely_youtube_id(video_id):
                 # Unknown source — reject early instead of sending junk to YouTube
                 raise HTTPException(status_code=400, detail=f"Unsupported track source: {video_id}")
@@ -595,7 +626,7 @@ def _is_likely_youtube_id(video_id: str) -> bool:
     """Check if video_id looks like a real YouTube ID (11 alphanumeric/dash/underscore chars)."""
     import re as _re
     # Reject known non-YouTube prefixes
-    if video_id.startswith(("ym_", "sp_", "vk_", "sc_", "dz_")):
+    if video_id.startswith(("ym_", "sp_", "vk_", "sc_", "dz_", "am_")):
         return False
     # Reject pure digits (old Yandex IDs leaked as video_id)
     if video_id.isdigit():
@@ -622,6 +653,80 @@ async def _spotify_id_to_query(video_id: str) -> str | None:
         pass
     # Fallback: strip sp_ prefix and use as-is (Spotify ID won't work, but at least we tried)
     return None
+
+
+async def _source_id_to_query(video_id: str) -> str | None:
+    """Look up any track metadata from DB by source_id and return search query."""
+    try:
+        from bot.db import async_session, Track
+        async with async_session() as session:
+            from sqlalchemy import select
+            result = await session.execute(
+                select(Track).where(Track.source_id == video_id).limit(1)
+            )
+            track = result.scalar_one_or_none()
+            if track:
+                return f"{track.artist} - {track.title}"
+    except Exception:
+        pass
+    # Try Deezer/Apple public API for metadata
+    if video_id.startswith("dz_"):
+        try:
+            from bot.services.deezer_provider import resolve_deezer_track
+            info = await resolve_deezer_track(int(video_id[3:]))
+            if info:
+                return f"{info['uploader']} - {info['title']}"
+        except Exception:
+            pass
+    if video_id.startswith("am_"):
+        # Apple tracks have yt_query from charts, but we can't look up by ID without API
+        pass
+    return None
+
+
+async def _try_yandex_fallback(query: str, dest: Path) -> Path | None:
+    """Try to find and download track from Yandex Music. Returns path or None."""
+    try:
+        from bot.services.yandex_provider import search_yandex, download_yandex
+        results = await search_yandex(query, limit=1)
+        if results:
+            ym_id = results[0].get("ym_track_id")
+            if ym_id:
+                return await download_yandex(ym_id, dest)
+    except Exception as e:
+        logger.debug("Yandex fallback failed for %r: %s", query, e)
+    return None
+
+
+async def _fallback_download(video_id: str, prefix: str, bitrate: int) -> Path:
+    """Universal fallback: resolve query → try Yandex → try YouTube."""
+    query = await _source_id_to_query(video_id)
+    if not query:
+        raise HTTPException(status_code=404, detail=f"Track not found: {video_id}")
+
+    dest = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+    # 1. Try Yandex Music
+    result = await _try_yandex_fallback(query, dest)
+    if result and result.exists():
+        return result
+
+    # 2. Fallback to YouTube
+    from bot.services.downloader import search_tracks
+    results = await search_tracks(query, max_results=1, source="youtube")
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No match found for: {query}")
+    yt_id = results[0].get("video_id", "")
+    if not yt_id:
+        raise HTTPException(status_code=404, detail=f"No match found for: {query}")
+    mp3_path = await download_manager.download(yt_id, bitrate=bitrate)
+    # Hardlink so original ID maps to same file
+    if not dest.exists() and mp3_path.exists():
+        try:
+            dest.hardlink_to(mp3_path)
+        except OSError:
+            import shutil
+            shutil.copy2(mp3_path, dest)
+    return dest
 
 
 # ── Helper: Redis player state ──────────────────────────────────────────

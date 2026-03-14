@@ -27,6 +27,9 @@ shazamio>=0.4.0
 # ── VK Music ─────────────────────────────────────────────
 vk_api
 
+# ── Deezer (Blowfish decryption for downloads) ──────────
+pycryptodome>=3.19.0
+
 # ── Monitoring ────────────────────────────────────────────
 sentry-sdk[asyncio]>=1.40.0
 prometheus-client>=0.20.0
