@@ -145,20 +145,15 @@ export async function getStreamUrl(videoId: string, apiUrl: string): Promise<str
     // Check cache first
     const cached = await getCachedTrack(videoId);
     if (cached) {
-      console.log(`[Cache] Hit: ${videoId}`);
       return URL.createObjectURL(cached);
     }
-    
+
     // No cache — return direct API stream URL for immediate playback
-    // The browser will start playing as data arrives (no waiting for full download)
-    console.log(`[Cache] Miss, streaming direct: ${videoId}`);
-    
-    // Cache in background (don't block playback)
     backgroundCache(videoId, apiUrl);
-    
+
     return apiUrl;
-  } catch (e) {
-    console.error("[Cache] Error:", e);
+  } catch {
+    // Fallback silently
   }
   
   // Fallback to direct URL
@@ -171,7 +166,7 @@ const _bgCacheInFlight = new Set<string>();
 function backgroundCache(videoId: string, apiUrl: string) {
   if (_bgCacheInFlight.has(videoId)) return;
   _bgCacheInFlight.add(videoId);
-  // Wait 8 seconds so the audio element finishes loading first
+  // Wait 2 seconds so the audio element starts buffering first
   setTimeout(() => {
     fetch(apiUrl)
       .then(r => r.ok ? r.blob() : null)
@@ -182,7 +177,7 @@ function backgroundCache(videoId: string, apiUrl: string) {
       })
       .catch(() => {})
       .finally(() => _bgCacheInFlight.delete(videoId));
-  }, 8000);
+  }, 2000);
 }
 
 // Prefetch stream URLs for upcoming tracks (tells backend to resolve URLs in advance)
@@ -232,4 +227,4 @@ export async function clearCache(): Promise<void> {
 }
 
 // Initialize on module load
-initCache().catch(console.error);
+initCache().catch(() => {});

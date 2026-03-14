@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useState, useRef, useCallback } from "preact/hooks";
 import { searchTracks, type Track } from "../api";
 import { SkeletonTrack } from "./Skeleton";
 import { IconSpinner, IconSearch } from "./Icons";
@@ -18,20 +18,39 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const doSearch = async () => {
-    if (!query.trim()) return;
+  const doSearch = useCallback(async (q?: string) => {
+    const term = (q ?? query).trim();
+    if (!term) return;
     haptic("light");
+
+    // Cancel previous in-flight request
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
     setLoading(true);
     try {
-      const tracks = await searchTracks(query.trim());
+      const tracks = await searchTracks(term);
       setResults(tracks);
     } catch {
       setResults([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [query]);
+
+  const handleInput = useCallback((e: Event) => {
+    const value = (e.target as HTMLInputElement).value;
+    setQuery(value);
+
+    // Auto-search with 350ms debounce (3+ chars)
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length >= 3) {
+      debounceRef.current = window.setTimeout(() => doSearch(value), 350);
+    }
+  }, [doSearch]);
 
   return (
     <div>
@@ -39,8 +58,8 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
         <input
           type="text"
           value={query}
-          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
-          onKeyDown={(e) => e.key === "Enter" && doSearch()}
+          onInput={handleInput}
+          onKeyDown={(e) => { if (e.key === "Enter") { if (debounceRef.current) clearTimeout(debounceRef.current); doSearch(); } }}
           placeholder="Поиск треков..."
           style={{
             flex: 1,
@@ -55,7 +74,7 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
           }}
         />
         <button
-          onClick={doSearch}
+          onClick={() => doSearch()}
           disabled={loading}
           style={{
             padding: isTequila ? "8px 18px" : "8px 16px",
@@ -94,12 +113,14 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
             background: isTequila ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)",
             border: isTequila ? "1px solid rgba(255, 213, 79, 0.1)" : "none",
             backdropFilter: isTequila ? "blur(12px)" : undefined,
+            touchAction: "manipulation",
           }}
         >
           {t.cover_url && (
             <img
               src={t.cover_url}
               alt=""
+              loading="lazy"
               style={{ width: 44, height: 44, borderRadius: 8, marginRight: 12, objectFit: "cover" }}
             />
           )}

@@ -122,18 +122,18 @@ class Settings(BaseSettings):
     # ── Prometheus metrics ────────────────────────────────────────────
     METRICS_PORT: int = 9090  # VPS: enabled (0 = disabled)
 
-    # ── HTTP Connection tuning (VPS-optimized) ──────────────────────────
-    HTTP_POOL_CONNECTIONS: int = 100  # TCP connection pool size
+    # ── HTTP Connection tuning (VPS-optimized for high load) ─────────
+    HTTP_POOL_CONNECTIONS: int = 200  # TCP connection pool size
     HTTP_POOL_KEEPALIVE: int = 30  # keepalive timeout seconds
     HTTP_CONNECT_TIMEOUT: int = 10  # connection timeout
     HTTP_READ_TIMEOUT: int = 60  # read timeout for downloads
 
-    # ── Database tuning (VPS-optimized) ────────────────────────────────
-    DB_POOL_SIZE: int = 20  # SQLAlchemy pool size (local PG only)
-    DB_MAX_OVERFLOW: int = 30  # additional connections above pool_size
+    # ── Database tuning (VPS-optimized for high load) ──────────────────
+    DB_POOL_SIZE: int = 50  # SQLAlchemy pool size (local PG only)
+    DB_MAX_OVERFLOW: int = 50  # additional connections above pool_size
     DB_POOL_TIMEOUT: int = 30  # wait for connection
-    DB_COMMAND_TIMEOUT: int = 30  # query timeout (was 15 for Railway)
-    DB_CONNECT_TIMEOUT: int = 60  # connection timeout (was 30)
+    DB_COMMAND_TIMEOUT: int = 30  # query timeout
+    DB_CONNECT_TIMEOUT: int = 60  # connection timeout
 
     # ── Premium (Telegram Stars) ─────────────────────────────────────────
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)

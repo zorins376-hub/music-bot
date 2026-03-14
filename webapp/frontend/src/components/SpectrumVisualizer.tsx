@@ -101,35 +101,41 @@ function drawBars(
   const barWidth = (w - gap * (barCount - 1)) / barCount;
   const step = Math.floor(len / barCount);
 
+  // Single gradient for all bars (vertical, full height) — avoids 48 gradient creations/frame
+  const grad = ctx.createLinearGradient(0, h, 0, 0);
+  if (warm) {
+    grad.addColorStop(0, "rgba(255, 109, 0, 0.9)");
+    grad.addColorStop(0.5, "rgba(255, 167, 38, 0.8)");
+    grad.addColorStop(1, "rgba(255, 213, 79, 0.95)");
+  } else {
+    grad.addColorStop(0, accent);
+    grad.addColorStop(0.5, "#b388ff");
+    grad.addColorStop(1, "#e040fb");
+  }
+
+  // Draw all bars with shared gradient
+  ctx.fillStyle = grad;
   for (let i = 0; i < barCount; i++) {
     const val = data[i * step] / 255;
     const barH = Math.max(2, val * h * 0.92);
     const x = i * (barWidth + gap);
     const y = h - barH;
-
-    const grad = ctx.createLinearGradient(x, y + barH, x, y);
-    if (warm) {
-      grad.addColorStop(0, "rgba(255, 109, 0, 0.9)");
-      grad.addColorStop(0.5, "rgba(255, 167, 38, 0.8)");
-      grad.addColorStop(1, "rgba(255, 213, 79, 0.95)");
-    } else {
-      grad.addColorStop(0, accent);
-      grad.addColorStop(0.5, "#b388ff");
-      grad.addColorStop(1, "#e040fb");
-    }
-    ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.roundRect(x, y, barWidth, barH, [barWidth / 2, barWidth / 2, 0, 0]);
     ctx.fill();
+  }
 
-    // Reflection
-    ctx.globalAlpha = 0.15;
-    ctx.fillStyle = grad;
+  // Batch reflections with single alpha switch
+  ctx.globalAlpha = 0.15;
+  for (let i = 0; i < barCount; i++) {
+    const val = data[i * step] / 255;
+    const barH = Math.max(2, val * h * 0.92);
+    const x = i * (barWidth + gap);
     ctx.beginPath();
     ctx.roundRect(x, h, barWidth, barH * 0.25, [0, 0, barWidth / 2, barWidth / 2]);
     ctx.fill();
-    ctx.globalAlpha = 1;
   }
+  ctx.globalAlpha = 1;
 }
 
 function drawWave(

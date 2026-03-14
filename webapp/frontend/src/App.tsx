@@ -80,6 +80,35 @@ function dbToGain(value: number): number {
   return Math.pow(10, value / 20);
 }
 
+// ── Luxury Audio: WaveShaper curve generators ──
+const LINEAR_CURVE = new Float32Array([-1, 1]);
+
+function createTapeCurve(samples = 8192): Float32Array {
+  const curve = new Float32Array(samples);
+  const k = 1.5;
+  const norm = Math.tanh(k);
+  for (let i = 0; i < samples; i++) {
+    const x = (2 * i) / (samples - 1) - 1;
+    curve[i] = Math.tanh(k * x) / norm;
+  }
+  return curve;
+}
+
+function createSoftClipCurve(samples = 8192): Float32Array {
+  const curve = new Float32Array(samples);
+  const ceil = 0.944; // -0.5 dBFS
+  for (let i = 0; i < samples; i++) {
+    const x = (2 * i) / (samples - 1) - 1;
+    if (Math.abs(x) <= ceil) {
+      curve[i] = x;
+    } else {
+      const over = (Math.abs(x) - ceil) / (1 - ceil);
+      curve[i] = (x > 0 ? 1 : -1) * (ceil + (1 - ceil) * (over / (1 + over)));
+    }
+  }
+  return curve;
+}
+
 function getSavedEqPreset(): EqPreset {
   try {
     const value = localStorage.getItem(EQ_STORAGE_KEY);
@@ -139,12 +168,22 @@ export function App() {
   const [partyMode, setPartyMode] = useState(false);
   const [moodFilter, setMoodFilter] = useState<string | null>(null);
   const [bypassProcessing, setBypassProcessing] = useState(false);
+  const [tapeWarmth, setTapeWarmth] = useState(false);
+  const [airBand, setAirBand] = useState(false);
+  const [stereoWiden, setStereoWiden] = useState(false);
+  const [softClip, setSoftClip] = useState(false);
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [a2pPlaylists, setA2pPlaylists] = useState<Playlist[]>([]);
   const [a2pAdding, setA2pAdding] = useState<number | null>(null);
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
   const loudnessGainRef = useRef<GainNode | null>(null);
+  const tapeWarmthRef = useRef<WaveShaperNode | null>(null);
+  const airBandRef = useRef<BiquadFilterNode | null>(null);
+  const softClipRef = useRef<WaveShaperNode | null>(null);
+  const stereoWidenLRRef = useRef<GainNode | null>(null);
+  const stereoWidenRLRef = useRef<GainNode | null>(null);
+  const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
 
   useEffect(() => {
     const nav = navCarouselRef.current;
@@ -365,16 +404,51 @@ export function App() {
       compressor.release.value = 0.15;   // 150ms - smooth release
       compressorRef.current = compressor;
 
+      // ── Tape Saturation (WaveShaperNode) — warm analog character ──
+      const tapeSat = ctx.createWaveShaper();
+      tapeSat.curve = LINEAR_CURVE as Float32Array;
+      tapeSat.oversample = "2x";
+      tapeWarmthRef.current = tapeSat;
+
+      // ── Air Band — high shelf +2dB at 12kHz for sparkle/detail ──
+      const airFilter = ctx.createBiquadFilter();
+      airFilter.type = "highshelf";
+      airFilter.frequency.value = 12000;
+      airFilter.gain.value = 0;
+      airBandRef.current = airFilter;
+
       // ── Stereo panner for 3D spatial audio ──
       const panner = ctx.createStereoPanner();
       panner.pan.value = 0;
+
+      // ── Stereo Widener (mid/side crossfeed matrix) ──
+      const splitter = ctx.createChannelSplitter(2);
+      const merger = ctx.createChannelMerger(2);
+      const gainLL = ctx.createGain(); gainLL.gain.value = 1;
+      const gainRR = ctx.createGain(); gainRR.gain.value = 1;
+      const gainLR = ctx.createGain(); gainLR.gain.value = 0; // R→L crossfeed (OFF)
+      const gainRL = ctx.createGain(); gainRL.gain.value = 0; // L→R crossfeed (OFF)
+      splitter.connect(gainLL, 0); splitter.connect(gainRL, 0); // L channel
+      splitter.connect(gainRR, 1); splitter.connect(gainLR, 1); // R channel
+      gainLL.connect(merger, 0, 0); gainLR.connect(merger, 0, 0); // → L out
+      gainRR.connect(merger, 0, 1); gainRL.connect(merger, 0, 1); // → R out
+      stereoWidenLRRef.current = gainLR;
+      stereoWidenRLRef.current = gainRL;
+      stereoMergerRef.current = merger;
 
       // ── Real-time analyser for spectrum visualizer ──
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.82;
 
-      // ── Signal chain: source → loudness → crossfade → preamp → HPF → EQ → compressor → panner → analyser → output ──
+      // ── Soft Clipper — true peak limiter at -0.5dBFS ──
+      const clipper = ctx.createWaveShaper();
+      clipper.curve = LINEAR_CURVE as Float32Array;
+      clipper.oversample = "2x";
+      softClipRef.current = clipper;
+
+      // ── Signal chain: source → loudness → crossfade → preamp → HPF → EQ
+      //    → compressor → tapeSat → airBand → panner → widener → analyser → clipper → output ──
       source.connect(loudnessGain);
       loudnessGain.connect(crossfadeGain);
       crossfadeGain.connect(inputGain);
@@ -386,9 +460,13 @@ export function App() {
         node = filter;
       });
       node.connect(compressor);
-      compressor.connect(panner);
-      panner.connect(analyser);
-      analyser.connect(outputGain);
+      compressor.connect(tapeSat);
+      tapeSat.connect(airFilter);
+      airFilter.connect(panner);
+      panner.connect(splitter);
+      merger.connect(analyser);
+      analyser.connect(clipper);
+      clipper.connect(outputGain);
       outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
@@ -500,13 +578,17 @@ export function App() {
           const t2 = ctx.currentTime;
           pannerRef.current.pan.setValueAtTime(panValue, t2);
         }
+        // Restore luxury audio states
+        if (tapeWarmthRef.current) tapeWarmthRef.current.curve = (tapeWarmth ? createTapeCurve() : LINEAR_CURVE) as Float32Array;
+        if (airBandRef.current) airBandRef.current.gain.value = airBand ? 2 : 0;
+        if (softClipRef.current) softClipRef.current.curve = (softClip ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array;
       }
       const t2 = ctx.currentTime;
       // Fade in using setTargetAtTime
       outputGain.gain.setValueAtTime(0.0001, t2);
       outputGain.gain.setTargetAtTime(1, t2, 0.025);
     }, 100); // Increased delay for safer switching
-  }, [ensureEqualizerGraph, applyEqPreset, eqPreset, panValue]);
+  }, [ensureEqualizerGraph, applyEqPreset, eqPreset, panValue, tapeWarmth, airBand, softClip]);
 
   useEffect(() => {
     try {
@@ -514,6 +596,13 @@ export function App() {
     } catch {}
     applyEqPreset(eqPreset);
   }, [eqPreset, applyEqPreset]);
+
+  // Persist luxury audio settings
+  useEffect(() => {
+    try {
+      localStorage.setItem("tma:luxury-audio", JSON.stringify({ tapeWarmth, airBand, stereoWiden, softClip }));
+    } catch {}
+  }, [tapeWarmth, airBand, stereoWiden, softClip]);
 
   // Listen for media control actions from Service Worker notifications
   useEffect(() => {
@@ -965,18 +1054,75 @@ export function App() {
     }
   }, [ensureEqualizerGraph, eqPreset]);
 
-  // Party Mode — bass boost + club EQ + slight speed up
+  // ── Luxury Audio toggles ──
+  const handleTapeWarmth = useCallback((on: boolean) => {
+    setTapeWarmth(on);
+    const node = tapeWarmthRef.current;
+    if (node) node.curve = (on ? createTapeCurve() : LINEAR_CURVE) as Float32Array;
+  }, []);
+
+  const handleAirBand = useCallback((on: boolean) => {
+    setAirBand(on);
+    const node = airBandRef.current;
+    const ctx = audioContextRef.current;
+    if (node && ctx) {
+      const now = ctx.currentTime;
+      node.gain.setValueAtTime(node.gain.value, now);
+      node.gain.setTargetAtTime(on ? 2 : 0, now, 0.15);
+    }
+  }, []);
+
+  const handleStereoWiden = useCallback((on: boolean) => {
+    setStereoWiden(on);
+    const ctx = audioContextRef.current;
+    const lr = stereoWidenLRRef.current;
+    const rl = stereoWidenRLRef.current;
+    if (ctx && lr && rl) {
+      const now = ctx.currentTime;
+      const v = on ? -0.15 : 0;
+      lr.gain.setValueAtTime(lr.gain.value, now);
+      lr.gain.setTargetAtTime(v, now, 0.15);
+      rl.gain.setValueAtTime(rl.gain.value, now);
+      rl.gain.setTargetAtTime(v, now, 0.15);
+    }
+  }, []);
+
+  const handleSoftClip = useCallback((on: boolean) => {
+    setSoftClip(on);
+    const node = softClipRef.current;
+    if (node) node.curve = (on ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array;
+  }, []);
+
+  // Restore luxury audio settings from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("tma:luxury-audio");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.tapeWarmth) handleTapeWarmth(true);
+        if (s.airBand) handleAirBand(true);
+        if (s.stereoWiden) handleStereoWiden(true);
+        if (s.softClip) handleSoftClip(true);
+      }
+    } catch {}
+  }, [handleTapeWarmth, handleAirBand, handleStereoWiden, handleSoftClip]);
+
+  // Party Mode — bass boost + club EQ + slight speed up + luxury warmth & air
   const handlePartyMode = useCallback((on: boolean) => {
     setPartyMode(on);
     if (on) {
       setEqPreset("club");
       handleBassBoost(true);
       handleSpeedChange(1.02);
+      handleTapeWarmth(true);
+      handleAirBand(true);
     } else {
       handleBassBoost(false);
       handleSpeedChange(1);
+      handleTapeWarmth(false);
+      handleAirBand(false);
     }
-  }, [handleBassBoost, handleSpeedChange]);
+  }, [handleBassBoost, handleSpeedChange, handleTapeWarmth, handleAirBand]);
 
   const showLyrics = (trackId: string) => {
     setLyricsTrackId(trackId);
@@ -1326,7 +1472,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (

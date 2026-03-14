@@ -26,7 +26,7 @@ def _make_connector():
     # VPS-optimized TCP connector
     return aiohttp.TCPConnector(
         limit=settings.HTTP_POOL_CONNECTIONS,
-        limit_per_host=50,  # max connections per single host
+        limit_per_host=100,  # max connections per single host
         keepalive_timeout=settings.HTTP_POOL_KEEPALIVE,
         enable_cleanup_closed=True,
         force_close=False,  # keep connections alive
