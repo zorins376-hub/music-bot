@@ -9,10 +9,11 @@ import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
 import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic } from "./components/Icons";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
+import { ToastContainer, showToast } from "./components/Toast";
 
 type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics";
 
@@ -277,9 +278,13 @@ export function App() {
     audio.addEventListener("canplay", () => setBuffering(false));
     audio.addEventListener("error", () => {
       setBuffering(false);
-      // Auto-skip to next track on playback error (e.g. unavailable stream)
-      console.warn("Audio error, auto-skipping to next track");
-      sendAction("next").then(setState).catch(() => {});
+      // Only auto-skip if user was actually playing — prevents ghost state on cold start
+      const s = stateRef.current;
+      if (s.is_playing && s.current_track) {
+        console.warn("Audio error during playback, auto-skipping to next track");
+        showToast(`Track unavailable, skipping...`, "warning", 2500);
+        sendAction("next").then(setState).catch(() => {});
+      }
     });
 
     audio.addEventListener("ended", async () => {
@@ -974,6 +979,18 @@ export function App() {
       }
     }
   }, [userId]);
+
+  // ── Network status monitor ──
+  useEffect(() => {
+    return onNetworkChange((online) => {
+      if (online) {
+        showToast("Back online", "success", 2000);
+      } else {
+        showToast("No internet connection", "warning", 5000);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     elapsedRef.current = 0;
     setElapsed(0);
@@ -1035,6 +1052,13 @@ export function App() {
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
       try {
+        // ── Optimistic UI: instantly toggle play/pause icon ──
+        if (act === "play" && !trackId) {
+          setState((prev) => ({ ...prev, is_playing: true }));
+        } else if (act === "pause") {
+          setState((prev) => ({ ...prev, is_playing: false }));
+        }
+
         if (act === "play") {
           // Show buffering spinner immediately if switching to a new track
           if (trackId && trackId !== currentTrackIdRef.current) {
@@ -1067,14 +1091,21 @@ export function App() {
             ingestEvent("skip", state.current_track, listened, "wave");
           }
         }
-        
+
         const s = await sendAction(act, trackId, seekPos, track);
         if (act === "seek" && seekPos !== undefined && audioRef.current) {
           audioRef.current.currentTime = seekPos;
         }
         setState(s);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error("Action error:", act, e);
+        // Revert optimistic update on failure
+        if (act === "play") setState((prev) => ({ ...prev, is_playing: false }));
+        if (act === "pause") setState((prev) => ({ ...prev, is_playing: true }));
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        if (msg.includes("timed out") || msg.includes("Failed to fetch")) {
+          showToast("Connection lost — try again", "error");
+        }
       }
     },
     [ensureEqualizerGraph, softPlay, softPause, state.current_track]
@@ -1206,6 +1237,7 @@ export function App() {
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
+      <ToastContainer />
       {isTequila && (
         <>
           <div

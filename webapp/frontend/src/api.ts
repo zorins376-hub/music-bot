@@ -7,6 +7,69 @@ function getHeaders(): Record<string, string> {
   };
 }
 
+// ── Resilient fetch with timeout + retry ────────────────────────────────
+
+const DEFAULT_TIMEOUT = 15_000; // 15s
+const STREAM_TIMEOUT = 60_000; // 60s for stream/download
+
+async function fetchWithTimeout(
+  input: RequestInfo,
+  init?: RequestInit & { timeout?: number },
+): Promise<Response> {
+  const timeout = init?.timeout ?? DEFAULT_TIMEOUT;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  // If caller provided an external signal, forward its abort
+  if (init?.signal) {
+    init.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  try {
+    const resp = await fetch(input, { ...init, signal: controller.signal });
+    return resp;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+async function fetchWithRetry(
+  input: RequestInfo,
+  init?: RequestInit & { timeout?: number; retries?: number },
+): Promise<Response> {
+  const retries = init?.retries ?? 1;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetchWithTimeout(input, init);
+    } catch (e: unknown) {
+      lastError = e;
+      // Only retry on network / timeout errors, not HTTP errors
+      if (e instanceof DOMException && e.name === "AbortError") {
+        if (attempt < retries) continue;
+        throw new Error("Request timed out");
+      }
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  throw lastError;
+}
+
+// ── Network status ──────────────────────────────────────────────────────
+
+let _isOnline = navigator.onLine;
+const _onlineListeners: Array<(online: boolean) => void> = [];
+
+window.addEventListener("online", () => { _isOnline = true; _onlineListeners.forEach((l) => l(true)); });
+window.addEventListener("offline", () => { _isOnline = false; _onlineListeners.forEach((l) => l(false)); });
+
+export function isOnline(): boolean { return _isOnline; }
+export function onNetworkChange(cb: (online: boolean) => void): () => void {
+  _onlineListeners.push(cb);
+  return () => { const i = _onlineListeners.indexOf(cb); if (i >= 0) _onlineListeners.splice(i, 1); };
+}
+
 export interface Track {
   video_id: string;
   title: string;
@@ -45,7 +108,7 @@ export interface UserProfile {
 }
 
 export async function fetchPlayerState(userId: number): Promise<PlayerState> {
-  const r = await fetch(`${API_BASE}/player/state/${userId}`, { headers: getHeaders() });
+  const r = await fetchWithRetry(`${API_BASE}/player/state/${userId}`, { headers: getHeaders(), retries: 2 });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`State ${r.status}: ${text || r.statusText}`);
@@ -64,10 +127,11 @@ export async function sendAction(action: string, trackId?: string, seekPos?: num
     body.track_source = track.source;
     body.track_cover_url = track.cover_url;
   }
-  const r = await fetch(`${API_BASE}/player/action`, {
+  const r = await fetchWithRetry(`${API_BASE}/player/action`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(body),
+    retries: 1,
   });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
@@ -123,9 +187,9 @@ export async function fetchLyrics(trackId: string): Promise<string | null> {
   return data.lyrics;
 }
 
-export async function searchTracks(query: string, limit = 10): Promise<Track[]> {
+export async function searchTracks(query: string, limit = 10, signal?: AbortSignal): Promise<Track[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  const r = await fetch(`${API_BASE}/search?${params}`, { headers: getHeaders() });
+  const r = await fetchWithTimeout(`${API_BASE}/search?${params}`, { headers: getHeaders(), timeout: 20_000, signal });
   if (!r.ok) return [];
   const data = await r.json();
   return data.tracks;
