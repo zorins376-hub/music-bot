@@ -1,5 +1,15 @@
 import { render } from "preact";
 import { App } from "./App";
+import { initCache } from "./offlineCache";
+
+// Preconnect to API server for faster first request
+const preconnect = document.createElement("link");
+preconnect.rel = "preconnect";
+preconnect.href = window.location.origin;
+document.head.appendChild(preconnect);
+
+// Initialize IndexedDB cache immediately (don't block first play)
+initCache().catch(() => {});
 
 // Telegram WebApp SDK
 declare global {

@@ -602,9 +602,16 @@ export function App() {
         outGain.gain.setValueAtTime(0, ctx.currentTime);
       }
       const apiUrl = getStreamUrl(track.video_id);
-      const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
-      audio.src = cachedUrl;
+      // Start loading immediately with API URL (no blocking on cache check)
+      audio.src = apiUrl;
       audio.load();
+      
+      // Check cache in parallel — if hit, swap src (will use cached blob)
+      getCachedStreamUrl(track.video_id, apiUrl).then((cachedUrl) => {
+        if (cachedUrl !== apiUrl && audio.src.includes(track.video_id)) {
+          audio.src = cachedUrl;
+        }
+      });
       
       if (state.is_playing) {
         await audio.play().catch(() => {});

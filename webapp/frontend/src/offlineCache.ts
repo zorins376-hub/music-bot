@@ -34,8 +34,15 @@ export async function initCache(): Promise<void> {
   });
 }
 
+// Promise for init in progress (allows single await instead of blocking getCachedTrack)
+let _initPromise: Promise<void> | null = null;
+
 export async function getCachedTrack(videoId: string): Promise<Blob | null> {
-  if (!db) await initCache();
+  if (!db) {
+    if (!_initPromise) _initPromise = initCache();
+    await _initPromise;
+  }
+  if (!db) return null; // init failed
   
   return new Promise((resolve, reject) => {
     const transaction = db!.transaction(STORE_NAME, "readonly");
@@ -51,7 +58,11 @@ export async function getCachedTrack(videoId: string): Promise<Blob | null> {
 }
 
 export async function cacheTrack(videoId: string, blob: Blob): Promise<void> {
-  if (!db) await initCache();
+  if (!db) {
+    if (!_initPromise) _initPromise = initCache();
+    await _initPromise;
+  }
+  if (!db) return; // init failed
   
   // Check total cache size and evict old entries if needed
   await evictIfNeeded(blob.size);
