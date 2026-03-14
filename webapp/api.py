@@ -583,7 +583,7 @@ async def stream_audio(
 
                         response_headers = {
                             "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
-                            "Cache-Control": "no-store",
+                            "Cache-Control": "public, max-age=3600",  # let browser cache stream chunks
                         }
                         content_length = upstream.headers.get("Content-Length")
                         content_range = upstream.headers.get("Content-Range")
