@@ -1,10 +1,10 @@
 import { useState, useEffect } from "preact/hooks";
 import {
   fetchChartSources, fetchChart, fetchPlaylists, addTrackToPlaylist,
-  searchTracks,
+  createPlaylist, searchTracks,
   type ChartSource, type Track, type Playlist,
 } from "../api";
-import { IconMusic, IconSpinner, IconPlus } from "./Icons";
+import { IconMusic, IconSpinner, IconPlus, IconSave } from "./Icons";
 
 interface Props {
   userId: number;
@@ -26,6 +26,11 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
   const [addMenuTrack, setAddMenuTrack] = useState<Track | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [addingTo, setAddingTo] = useState<number | null>(null);
+  const [showSaveChart, setShowSaveChart] = useState(false);
+  const [saveChartName, setSaveChartName] = useState("");
+  const [savingChart, setSavingChart] = useState(false);
+  const [saveProgress, setSaveProgress] = useState<{ done: number; total: number } | null>(null);
+  const [showSaveMenu, setShowSaveMenu] = useState(false);
 
   const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
   const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
@@ -97,6 +102,64 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
     onPlayTrack(track);
   };
 
+  // Save entire chart as new playlist
+  const handleSaveChartAsNew = async () => {
+    if (!saveChartName.trim() || tracks.length === 0) return;
+    haptic("medium");
+    setSavingChart(true);
+    setSaveProgress({ done: 0, total: tracks.length });
+    try {
+      const pl = await createPlaylist(saveChartName.trim());
+      for (let i = 0; i < tracks.length; i++) {
+        let t = tracks[i];
+        // Resolve video_id for Apple chart tracks
+        if (!t.video_id) {
+          try {
+            const results = await searchTracks(`${t.artist} - ${t.title}`, 1);
+            if (results.length > 0) {
+              t = { ...t, video_id: results[0].video_id, source: results[0].source || "youtube",
+                duration: t.duration || results[0].duration, duration_fmt: t.duration_fmt || results[0].duration_fmt,
+                cover_url: t.cover_url || results[0].cover_url };
+            } else { setSaveProgress({ done: i + 1, total: tracks.length }); continue; }
+          } catch { setSaveProgress({ done: i + 1, total: tracks.length }); continue; }
+        }
+        try { await addTrackToPlaylist(pl.id, t); } catch {}
+        setSaveProgress({ done: i + 1, total: tracks.length });
+      }
+      haptic("heavy");
+    } catch {}
+    setSavingChart(false);
+    setSaveProgress(null);
+    setShowSaveChart(false);
+  };
+
+  // Save chart to existing playlist
+  const handleSaveChartToExisting = async (playlistId: number) => {
+    if (tracks.length === 0) return;
+    haptic("medium");
+    setAddingTo(playlistId);
+    setSaveProgress({ done: 0, total: tracks.length });
+    for (let i = 0; i < tracks.length; i++) {
+      let t = tracks[i];
+      if (!t.video_id) {
+        try {
+          const results = await searchTracks(`${t.artist} - ${t.title}`, 1);
+          if (results.length > 0) {
+            t = { ...t, video_id: results[0].video_id, source: results[0].source || "youtube",
+              duration: t.duration || results[0].duration, duration_fmt: t.duration_fmt || results[0].duration_fmt,
+              cover_url: t.cover_url || results[0].cover_url };
+          } else { setSaveProgress({ done: i + 1, total: tracks.length }); continue; }
+        } catch { setSaveProgress({ done: i + 1, total: tracks.length }); continue; }
+      }
+      try { await addTrackToPlaylist(playlistId, t); } catch {}
+      setSaveProgress({ done: i + 1, total: tracks.length });
+    }
+    haptic("heavy");
+    setAddingTo(null);
+    setSaveProgress(null);
+    setShowSaveMenu(false);
+  };
+
   return (
     <div>
       <div style={{ fontSize: 15, fontWeight: 600, color: textColor, letterSpacing: 0.4, marginBottom: 10 }}>Чарты</div>
@@ -119,6 +182,37 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
           </button>
         ))}
       </div>
+
+      {/* Save chart as playlist button */}
+      {tracks.length > 0 && !loading && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <button onClick={() => {
+            haptic("light");
+            const label = sources.find(s => s.id === activeSource)?.label || "Chart";
+            setSaveChartName(label);
+            setShowSaveChart(true);
+          }} style={{
+            flex: 1, padding: "8px 14px", borderRadius: 12, border: cardBorder,
+            background: cardBg, backdropFilter: warm ? "blur(12px)" : undefined,
+            color: warm ? "#ffd54f" : accentColor, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          }}>
+            <IconSave size={14} color={warm ? "#ffd54f" : accentColor} /> Новый плейлист из чарта
+          </button>
+          <button onClick={() => {
+            haptic("light");
+            setShowSaveMenu(true);
+            fetchPlaylists(userId).then(setPlaylists).catch(() => setPlaylists([]));
+          }} style={{
+            padding: "8px 14px", borderRadius: 12, border: cardBorder,
+            background: cardBg, backdropFilter: warm ? "blur(12px)" : undefined,
+            color: warm ? "#ffd54f" : accentColor, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          }}>
+            <IconPlus size={14} color={warm ? "#ffd54f" : accentColor} /> В существующий
+          </button>
+        </div>
+      )}
 
       {/* Track list */}
       {loading ? (
@@ -173,6 +267,115 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             ) : (
               playlists.map((p) => (
                 <button key={p.id} onClick={() => handleAdd(p.id)} disabled={addingTo === p.id}
+                  style={{
+                    display: "flex", alignItems: "center", width: "100%", padding: "10px 14px",
+                    borderRadius: 12, border: cardBorder, background: cardBg,
+                    marginBottom: 6, cursor: "pointer", textAlign: "left",
+                    opacity: addingTo === p.id ? 0.5 : 1,
+                  }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: activeBg, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, flexShrink: 0 }}>
+                    <IconMusic size={16} color="#fff" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, color: textColor }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: hintColor }}>{p.track_count} треков</div>
+                  </div>
+                  {addingTo === p.id ? <IconSpinner size={16} color={hintColor} /> : <IconPlus size={16} color={warm ? "#ffd54f" : accentColor} />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Save chart as NEW playlist modal */}
+      {showSaveChart && (
+        <div onClick={() => { if (!savingChart) setShowSaveChart(false); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 420, padding: "16px 16px 24px",
+              borderRadius: "20px 20px 0 0",
+              background: warm ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
+              border: warm ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(255,255,255,0.08)",
+              backdropFilter: "blur(20px)",
+            }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: textColor, marginBottom: 4 }}>Сохранить чарт как плейлист</div>
+            <div style={{ fontSize: 12, color: hintColor, marginBottom: 14 }}>{tracks.length} треков</div>
+            <input
+              type="text" value={saveChartName} disabled={savingChart}
+              onInput={(e) => setSaveChartName((e.target as HTMLInputElement).value)}
+              placeholder="Название плейлиста"
+              style={{
+                width: "100%", padding: "10px 14px", borderRadius: 12, fontSize: 14,
+                border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(255,255,255,0.1)",
+                background: warm ? "rgba(30, 18, 10, 0.6)" : "rgba(255,255,255,0.05)",
+                color: textColor, outline: "none", marginBottom: 12, boxSizing: "border-box",
+              }}
+            />
+            {saveProgress && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: hintColor, marginBottom: 4 }}>
+                  {saveProgress.done}/{saveProgress.total}
+                </div>
+                <div style={{ width: "100%", height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
+                  <div style={{
+                    width: `${(saveProgress.done / saveProgress.total) * 100}%`, height: "100%", borderRadius: 2,
+                    background: warm ? "linear-gradient(90deg, #ff8f00, #ffd54f)" : accentColor,
+                    transition: "width 0.2s ease",
+                  }} />
+                </div>
+              </div>
+            )}
+            <button onClick={handleSaveChartAsNew} disabled={savingChart || !saveChartName.trim()}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 12, border: "none",
+                background: warm ? "linear-gradient(135deg, #ff8f00, #ffb300)" : accentColor,
+                color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                opacity: savingChart || !saveChartName.trim() ? 0.5 : 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}>
+              {savingChart ? <><IconSpinner size={16} color="#fff" /> Сохраняю...</> : <><IconSave size={16} color="#fff" /> Сохранить</>}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Save chart to EXISTING playlist modal */}
+      {showSaveMenu && (
+        <div onClick={() => { if (!addingTo) setShowSaveMenu(false); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 420, maxHeight: "60vh", overflowY: "auto", padding: "16px 16px 24px",
+              borderRadius: "20px 20px 0 0",
+              background: warm ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
+              border: warm ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(255,255,255,0.08)",
+              backdropFilter: "blur(20px)",
+            }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: textColor, marginBottom: 4 }}>Добавить чарт в плейлист</div>
+            <div style={{ fontSize: 12, color: hintColor, marginBottom: 14 }}>{tracks.length} треков</div>
+            {saveProgress && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: hintColor, marginBottom: 4 }}>
+                  {saveProgress.done}/{saveProgress.total}
+                </div>
+                <div style={{ width: "100%", height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
+                  <div style={{
+                    width: `${(saveProgress.done / saveProgress.total) * 100}%`, height: "100%", borderRadius: 2,
+                    background: warm ? "linear-gradient(90deg, #ff8f00, #ffd54f)" : accentColor,
+                    transition: "width 0.2s ease",
+                  }} />
+                </div>
+              </div>
+            )}
+            {playlists.length === 0 ? (
+              <div style={{ textAlign: "center", color: hintColor, padding: 20 }}>Нет плейлистов</div>
+            ) : (
+              playlists.map((p) => (
+                <button key={p.id} onClick={() => handleSaveChartToExisting(p.id)} disabled={addingTo !== null}
                   style={{
                     display: "flex", alignItems: "center", width: "100%", padding: "10px 14px",
                     borderRadius: 12, border: cardBorder, background: cardBg,
