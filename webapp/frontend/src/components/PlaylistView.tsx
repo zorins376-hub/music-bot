@@ -5,6 +5,7 @@ import {
   type Playlist, type Track,
 } from "../api";
 import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit } from "./Icons";
+import { showToast } from "./Toast";
 
 interface Props {
   userId: number;
@@ -71,8 +72,11 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
       await createPlaylist(name);
       setNewName("");
       setShowCreate(false);
+      showToast("Playlist created", "success", 2000);
       reload();
-    } catch {}
+    } catch {
+      showToast("Failed to create playlist", "error");
+    }
   };
 
   const handleRename = async (id: number) => {
@@ -92,8 +96,11 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
       await deletePlaylist(id);
       setConfirmDeleteId(null);
       if (selectedId === id) { setSelectedId(null); setTracks([]); }
+      showToast("Playlist deleted", "success", 2000);
       reload();
-    } catch {}
+    } catch {
+      showToast("Failed to delete playlist", "error");
+    }
   };
 
   const handleRemoveTrack = async (videoId: string) => {

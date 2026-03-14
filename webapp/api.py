@@ -272,9 +272,49 @@ async def catch_exceptions_middleware(request: Request, call_next):
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+# ── Simple in-memory rate limiter ──────────────────────────────────────
+
+import time as _time_module
+
+class _RateLimiter:
+    """Token-bucket rate limiter per user_id."""
+    __slots__ = ("_buckets", "_rate", "_burst", "_maxusers")
+    def __init__(self, rate: float = 2.0, burst: int = 10, maxusers: int = 10000):
+        self._buckets: dict[int, list[float]] = {}  # uid -> [tokens, last_ts]
+        self._rate = rate     # tokens per second
+        self._burst = burst   # max tokens
+        self._maxusers = maxusers
+    def allow(self, uid: int) -> bool:
+        now = _time_module.monotonic()
+        if uid not in self._buckets:
+            if len(self._buckets) >= self._maxusers:
+                oldest = min(self._buckets, key=lambda k: self._buckets[k][1])
+                del self._buckets[oldest]
+            self._buckets[uid] = [float(self._burst - 1), now]
+            return True
+        tokens, last = self._buckets[uid]
+        tokens = min(self._burst, tokens + (now - last) * self._rate)
+        self._buckets[uid] = [tokens - 1, now]
+        return tokens >= 1
+
+_action_limiter = _RateLimiter(rate=3.0, burst=15)  # player actions
+_search_limiter = _RateLimiter(rate=1.5, burst=8)    # search
+_stream_limiter = _RateLimiter(rate=2.0, burst=6)    # stream downloads
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    import os
+    try:
+        import resource
+        mem_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+    except ImportError:
+        mem_mb = round(os.getpid() / 1, 1)  # fallback: not meaningful on Windows
+    return {
+        "status": "ok",
+        "uptime_s": int(_time_module.monotonic()),
+        "stream_cache_size": len(_stream_url_cache),
+        "cover_cache_size": len(_cover_url_cache),
+    }
 
 
 async def _get_or_create_webapp_user(tg_user: dict):
@@ -412,6 +452,10 @@ async def stream_audio(
     user = verify_init_data(init_data) if init_data else None
     if user is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    uid = int(user.get("id", 0))
+    if not _stream_limiter.allow(uid):
+        raise HTTPException(status_code=429, detail="Too many stream requests")
 
     quality, premium = await _resolve_user_audio_profile(user)
     preferred_bitrate = _select_bitrate(quality, premium)
@@ -1041,6 +1085,8 @@ async def get_player_state(user_id: int, user: dict = Depends(get_current_user))
 @app.post("/api/player/action", response_model=PlayerState)
 async def player_action(body: PlayerAction, user: dict = Depends(get_current_user)):
     user_id = user["id"]
+    if not _action_limiter.allow(user_id):
+        raise HTTPException(status_code=429, detail="Too many actions, slow down")
     state = await _load_state(user_id, hydrate_covers=False)
 
     if body.action == "play":
@@ -1277,6 +1323,9 @@ async def search_tracks(
     limit: int = Query(default=10, ge=1, le=50),
     user: dict = Depends(get_current_user),
 ):
+    uid = int(user.get("id", 0))
+    if not _search_limiter.allow(uid):
+        raise HTTPException(status_code=429, detail="Too many searches, slow down")
     from bot.services.search_engine import perform_search
 
     results = await perform_search(q, limit=limit)

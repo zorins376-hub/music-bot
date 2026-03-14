@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "preact/hooks";
-import { searchTracks, type Track } from "../api";
+import { searchTracks, isOnline, type Track } from "../api";
 import { SkeletonTrack } from "./Skeleton";
 import { IconSpinner, IconSearch } from "./Icons";
+import { showToast } from "./Toast";
 
 const haptic = (s: "light" | "medium" | "heavy" = "light") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(s); } catch {}
@@ -30,12 +31,25 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
+    if (!isOnline()) {
+      showToast("No internet connection", "warning");
+      return;
+    }
+
     setLoading(true);
     try {
-      const tracks = await searchTracks(term);
+      const tracks = await searchTracks(term, 10, abortRef.current.signal);
       setResults(tracks);
-    } catch {
+      if (tracks.length === 0) showToast("Nothing found", "info", 2000);
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // user typed more
       setResults([]);
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("429")) {
+        showToast("Too many searches, wait a moment", "warning");
+      } else if (msg.includes("timed out")) {
+        showToast("Search timed out — try again", "error");
+      }
     } finally {
       setLoading(false);
     }

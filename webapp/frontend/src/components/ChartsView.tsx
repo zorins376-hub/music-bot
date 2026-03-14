@@ -5,6 +5,7 @@ import {
   type ChartSource, type Track, type Playlist,
 } from "../api";
 import { IconMusic, IconSpinner, IconPlus, IconSave } from "./Icons";
+import { showToast } from "./Toast";
 
 interface Props {
   userId: number;
@@ -127,7 +128,10 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
         setSaveProgress({ done: i + 1, total: tracks.length });
       }
       haptic("heavy");
-    } catch {}
+      showToast("Chart saved as playlist!", "success");
+    } catch {
+      showToast("Failed to save chart", "error");
+    }
     setSavingChart(false);
     setSaveProgress(null);
     setShowSaveChart(false);
