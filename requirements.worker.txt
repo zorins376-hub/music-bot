@@ -8,9 +8,6 @@ TgCrypto>=1.2.3
 # pytgcalls — проверяй совместимость с pyrogram на https://pytgcalls.github.io
 pytgcalls>=0.1.0
 
-# ── Event loop acceleration (Linux only) ─────────────────────────────────
-uvloop>=0.19.0; sys_platform != "win32"
-
 # ── Audio analysis / mixing (v1.2–v1.3) ──────────────────────────────────
 librosa>=0.10.0
 numpy>=1.26.0

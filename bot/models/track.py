@@ -36,7 +36,6 @@ class Track(Base):
 
     __table_args__ = (
         Index("ix_tracks_downloads", "downloads"),
-        Index("ix_tracks_created_at", "created_at"),
         Index("ix_tracks_genre", "genre"),
         Index("ix_tracks_release_year", "release_year"),
         Index("ix_tracks_artist", "artist"),
@@ -63,7 +62,6 @@ class ListeningHistory(Base):
 
     __table_args__ = (
         Index("ix_lh_user_action_created", "user_id", "action", created_at.desc()),
-        Index("ix_lh_action_created", "action", created_at.desc()),
     )
 
 
@@ -79,8 +77,4 @@ class Payment(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
-    )
-
-    __table_args__ = (
-        Index("ix_payments_created_at", "created_at"),
     )

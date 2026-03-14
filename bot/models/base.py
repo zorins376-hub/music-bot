@@ -168,23 +168,11 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                             await _run_migration(conn, stmt)
                     # Regular btree indexes (don't need pg_trgm)
                     for stmt in (
-                        "CREATE INDEX IF NOT EXISTS ix_users_created_at ON users (created_at)",
-                        "CREATE INDEX IF NOT EXISTS ix_users_last_active ON users (last_active)",
-                        "CREATE INDEX IF NOT EXISTS ix_tracks_created_at ON tracks (created_at)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_genre ON tracks (genre)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_release_year ON tracks (release_year)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_artist ON tracks (artist)",
-                        "CREATE INDEX IF NOT EXISTS ix_lh_action_created ON listening_history (action, created_at DESC)",
-                        "CREATE INDEX IF NOT EXISTS ix_payments_created_at ON payments (created_at)",
-                        "CREATE INDEX IF NOT EXISTS ix_party_events_party_created ON party_events (party_id, created_at DESC)",
                     ):
                         await _run_migration(conn, stmt)
-                    if has_trgm:
-                        await _run_migration(
-                            conn,
-                            "CREATE INDEX IF NOT EXISTS ix_tracks_artist_title_trgm "
-                            "ON tracks USING gin ((lower(coalesce(artist, '') || ' ' || coalesce(title, ''))) gin_trgm_ops)"
-                        )
             return
         except Exception as exc:
             last_exc = exc
