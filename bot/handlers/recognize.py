@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -17,6 +18,30 @@ router = Router()
 
 _MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 _MIN_DURATION = 5  # seconds
+
+# Keywords that trigger recognition in groups
+_TRIGGER_KEYWORDS = re.compile(
+    r"\b(трек|песня|песню|музыка|музыку|track|song|music|шазам|shazam|найди|распознай|что за)\b",
+    re.IGNORECASE,
+)
+
+
+def _should_recognize(message: Message) -> bool:
+    """Check if recognition should run. Always True for private chats.
+    For groups, requires trigger keywords in caption or reply."""
+    if message.chat.type == "private":
+        return True
+    # Group/supergroup: check for trigger keywords
+    text_to_check = ""
+    if message.caption:
+        text_to_check += message.caption + " "
+    if message.reply_to_message:
+        reply = message.reply_to_message
+        if reply.text:
+            text_to_check += reply.text + " "
+        if reply.caption:
+            text_to_check += reply.caption + " "
+    return bool(_TRIGGER_KEYWORDS.search(text_to_check))
 
 
 async def _tg_download(bot, file_id: str, suffix: str) -> Path:
@@ -130,6 +155,8 @@ async def _recognize_and_search(message: Message, file_id: str, suffix: str) -> 
 
 @router.message(F.voice)
 async def handle_voice(message: Message) -> None:
+    if not _should_recognize(message):
+        return
     v = message.voice
     if (v.duration or 0) < _MIN_DURATION:
         user = await get_or_create_user(message.from_user)
@@ -144,6 +171,8 @@ async def handle_voice(message: Message) -> None:
 
 @router.message(F.audio)
 async def handle_audio(message: Message) -> None:
+    if not _should_recognize(message):
+        return
     a = message.audio
     duration = a.duration or 0
     if 0 < duration < _MIN_DURATION:
@@ -159,6 +188,8 @@ async def handle_audio(message: Message) -> None:
 
 @router.message(F.video_note)
 async def handle_video_note(message: Message) -> None:
+    if not _should_recognize(message):
+        return
     vn = message.video_note
     if (vn.duration or 0) < _MIN_DURATION:
         user = await get_or_create_user(message.from_user)
@@ -173,6 +204,8 @@ async def handle_video_note(message: Message) -> None:
 
 @router.message(F.video)
 async def handle_video(message: Message) -> None:
+    if not _should_recognize(message):
+        return
     v = message.video
     if (v.duration or 0) < _MIN_DURATION:
         user = await get_or_create_user(message.from_user)
