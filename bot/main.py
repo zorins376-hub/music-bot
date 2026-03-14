@@ -114,6 +114,10 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.track_indexer import start_indexer_scheduler
     await start_indexer_scheduler()
 
+    # Chart track prefetcher — downloads all chart tracks to local cache
+    from bot.services.chart_prefetcher import start_prefetch_scheduler
+    await start_prefetch_scheduler()
+
     # Deep crawler — runs on separate VPS, not here
     # from bot.services.deep_crawler import start_deep_crawler
     # await start_deep_crawler()
