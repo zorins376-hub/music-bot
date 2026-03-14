@@ -2194,6 +2194,17 @@ async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = De
         party = await _get_party_or_404(session, code)
         await _ensure_party_member(session, party, user, mark_online=False)
 
+        # Prevent duplicate tracks in queue (same video_id that hasn't played yet)
+        existing_dup = await session.execute(
+            select(PartyTrack.id).where(
+                PartyTrack.party_id == party.id,
+                PartyTrack.video_id == body.video_id,
+                PartyTrack.position >= party.current_position,
+            ).limit(1)
+        )
+        if existing_dup.scalar() is not None:
+            raise HTTPException(status_code=409, detail="Track already in queue")
+
         # Get max position
         max_pos_result = await session.execute(
             select(func.coalesce(func.max(PartyTrack.position), -1))

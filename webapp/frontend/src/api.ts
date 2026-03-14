@@ -415,7 +415,10 @@ export async function addPartyTrack(code: string, track: Track): Promise<Party> 
       cover_url: track.cover_url,
     }),
   });
-  if (!r.ok) throw new Error("Failed to add track");
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    throw new Error(`${r.status}: ${detail}`);
+  }
   return r.json();
 }
 

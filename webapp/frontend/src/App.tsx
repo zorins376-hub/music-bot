@@ -81,9 +81,9 @@ function dbToGain(value: number): number {
 }
 
 // ── Luxury Audio: WaveShaper curve generators ──
-const LINEAR_CURVE = new Float32Array([-1, 1]);
+const LINEAR_CURVE = new Float32Array([-1, 1]) as Float32Array<ArrayBuffer>;
 
-function createTapeCurve(samples = 8192): Float32Array {
+function createTapeCurve(samples = 8192): Float32Array<ArrayBuffer> {
   const curve = new Float32Array(samples);
   const k = 1.5;
   const norm = Math.tanh(k);
@@ -91,10 +91,10 @@ function createTapeCurve(samples = 8192): Float32Array {
     const x = (2 * i) / (samples - 1) - 1;
     curve[i] = Math.tanh(k * x) / norm;
   }
-  return curve;
+  return curve as Float32Array<ArrayBuffer>;
 }
 
-function createSoftClipCurve(samples = 8192): Float32Array {
+function createSoftClipCurve(samples = 8192): Float32Array<ArrayBuffer> {
   const curve = new Float32Array(samples);
   const ceil = 0.944; // -0.5 dBFS
   for (let i = 0; i < samples; i++) {
@@ -106,7 +106,7 @@ function createSoftClipCurve(samples = 8192): Float32Array {
       curve[i] = (x > 0 ? 1 : -1) * (ceil + (1 - ceil) * (over / (1 + over)));
     }
   }
-  return curve;
+  return curve as Float32Array<ArrayBuffer>;
 }
 
 function getSavedEqPreset(): EqPreset {
@@ -406,7 +406,7 @@ export function App() {
 
       // ── Tape Saturation (WaveShaperNode) — warm analog character ──
       const tapeSat = ctx.createWaveShaper();
-      tapeSat.curve = LINEAR_CURVE as Float32Array;
+      tapeSat.curve = LINEAR_CURVE as Float32Array<ArrayBuffer>;
       tapeSat.oversample = "2x";
       tapeWarmthRef.current = tapeSat;
 
@@ -443,7 +443,7 @@ export function App() {
 
       // ── Soft Clipper — true peak limiter at -0.5dBFS ──
       const clipper = ctx.createWaveShaper();
-      clipper.curve = LINEAR_CURVE as Float32Array;
+      clipper.curve = LINEAR_CURVE as Float32Array<ArrayBuffer>;
       clipper.oversample = "2x";
       softClipRef.current = clipper;
 
@@ -579,9 +579,9 @@ export function App() {
           pannerRef.current.pan.setValueAtTime(panValue, t2);
         }
         // Restore luxury audio states
-        if (tapeWarmthRef.current) tapeWarmthRef.current.curve = (tapeWarmth ? createTapeCurve() : LINEAR_CURVE) as Float32Array;
+        if (tapeWarmthRef.current) tapeWarmthRef.current.curve = (tapeWarmth ? createTapeCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
         if (airBandRef.current) airBandRef.current.gain.value = airBand ? 2 : 0;
-        if (softClipRef.current) softClipRef.current.curve = (softClip ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array;
+        if (softClipRef.current) softClipRef.current.curve = (softClip ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
       }
       const t2 = ctx.currentTime;
       // Fade in using setTargetAtTime
@@ -1058,7 +1058,7 @@ export function App() {
   const handleTapeWarmth = useCallback((on: boolean) => {
     setTapeWarmth(on);
     const node = tapeWarmthRef.current;
-    if (node) node.curve = (on ? createTapeCurve() : LINEAR_CURVE) as Float32Array;
+    if (node) node.curve = (on ? createTapeCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
   }, []);
 
   const handleAirBand = useCallback((on: boolean) => {
@@ -1090,7 +1090,7 @@ export function App() {
   const handleSoftClip = useCallback((on: boolean) => {
     setSoftClip(on);
     const node = softClipRef.current;
-    if (node) node.curve = (on ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array;
+    if (node) node.curve = (on ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
   }, []);
 
   // Restore luxury audio settings from localStorage on mount
