@@ -49,7 +49,7 @@ export const themes: Theme[] = [
     hintColor: "#c8a882",
     accent: "rgb(255, 167, 38)",
     accentAlpha: "rgba(255, 167, 38, 0.4)",
-    bgImage: "/tequila-bg.png",
+    bgImage: "/tequila-bg.webp",
     bgOverlay: "linear-gradient(180deg, rgba(26,18,11,0.55) 0%, rgba(26,18,11,0.85) 100%)",
     visualizerGradient: ["#ff6d00", "#ffd54f"],
     glassBg: "rgba(40, 25, 15, 0.88)",

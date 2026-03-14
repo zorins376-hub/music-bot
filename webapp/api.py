@@ -65,10 +65,10 @@ def _schedule_background_download(video_id: str, bitrate: int) -> None:
 
 # ── In-memory stream URL cache (avoids repeated yt-dlp resolves) ─────────
 _stream_url_cache: dict[str, tuple[str, float]] = {}  # video_id -> (url, expires_at)
-_STREAM_URL_TTL = 1800  # 30 minutes (YouTube URLs valid ~6h)
+_STREAM_URL_TTL = 18000  # 5 hours (YouTube URLs valid ~6h)
 _stream_url_inflight: dict[str, asyncio.Future[str | None]] = {}
 _stream_url_lock = asyncio.Lock()
-_stream_url_resolve_semaphore = asyncio.Semaphore(1)
+_stream_url_resolve_semaphore = asyncio.Semaphore(3)
 
 # ── Download coalescing for non-YouTube tracks (ym_, sp_) ─────────────────
 _dl_inflight: dict[str, asyncio.Future[Path]] = {}
@@ -78,7 +78,7 @@ _COVER_URL_TTL = 3600
 _user_audio_cache: dict[int, tuple[str, bool, float]] = {}  # user_id -> (quality, premium, expires_at)
 _USER_AUDIO_CACHE_TTL = 60
 _LYRICS_CACHE_TTL = 86400 * 7
-_LYRICS_MISS_TTL = 3600 * 6
+_LYRICS_MISS_TTL = 86400  # 24h — tracks without lyrics rarely gain them
 _LYRICS_CACHE_MISS = "__MISS__"
 from webapp.auth import verify_init_data
 from webapp.schemas import (
@@ -200,9 +200,28 @@ async def lifespan(app: FastAPI):
             if expired_covers:
                 logger.debug("Cleaned %d expired cover cache entries", len(expired_covers))
 
+    # Periodic cleanup of stale .part downloads (every 30 min)
+    async def _cleanup_stale_downloads():
+        import time as _time
+        dl_dir = settings.DOWNLOAD_DIR
+        while True:
+            await asyncio.sleep(1800)  # every 30 min
+            try:
+                now = _time.time()
+                for p in dl_dir.glob("*.part"):
+                    try:
+                        if now - p.stat().st_mtime > 3600:  # older than 1h
+                            p.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            except Exception:
+                logger.debug("stale download cleanup error", exc_info=True)
+
     cleanup_task = asyncio.create_task(_cleanup_url_cache())
+    dl_cleanup_task = asyncio.create_task(_cleanup_stale_downloads())
     yield
     cleanup_task.cancel()
+    dl_cleanup_task.cancel()
     await download_manager.shutdown()
 
 
@@ -1148,6 +1167,11 @@ async def search_tracks(
         )
         for r in results
     ]
+    # Fire-and-forget: prefetch stream URLs for first 3 YouTube results
+    yt_ids = [t.video_id for t in tracks if _is_likely_youtube_id(t.video_id)][:3]
+    for vid in yt_ids:
+        asyncio.create_task(_prefetch_stream_url(vid))
+
     return SearchResult(tracks=tracks, total=len(tracks))
 
 

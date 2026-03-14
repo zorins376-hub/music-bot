@@ -358,8 +358,8 @@ export function App() {
 
       // ── Very gentle glue compressor — high threshold + low ratio for transparent limiting ──
       const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -8;   // Only catch peaks, not normal signal
-      compressor.knee.value = 40;        // Very soft knee for transparent compression
+      compressor.threshold.value = -4;   // Only catch true peaks — transparent on quiet material
+      compressor.knee.value = 30;        // Soft knee for transparent compression
       compressor.ratio.value = 1.5;      // Gentle ratio (almost limiter)
       compressor.attack.value = 0.02;    // 20ms - fast enough to catch transients
       compressor.release.value = 0.15;   // 150ms - smooth release
@@ -633,7 +633,7 @@ export function App() {
       if (ctx && cfGain) {
         const t = ctx.currentTime;
         cfGain.gain.setValueAtTime(0.001, t);
-        cfGain.gain.exponentialRampToValueAtTime(1, t + 0.3);
+        cfGain.gain.exponentialRampToValueAtTime(1, t + 0.2);
       }
       if (ctx && outGain) {
         const t = ctx.currentTime;
@@ -647,7 +647,7 @@ export function App() {
       if (ctx && lg) {
         lg.gain.setValueAtTime(1, ctx.currentTime);
       }
-      setTimeout(() => measureLoudness(), 500);
+      setTimeout(() => measureLoudness(), 50);
 
       // Prefetch next 2 tracks in queue so they start instantly
       if (state.queue.length > 1) {

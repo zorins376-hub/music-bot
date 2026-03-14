@@ -19,7 +19,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 3G
         reservations:
           memory: 512M
     healthcheck:
@@ -135,7 +135,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 512mb
+      --maxmemory 1024mb
       --maxmemory-policy allkeys-lru
       --appendonly yes
       --appendfsync everysec
@@ -159,8 +159,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     command: >
       postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=768MB
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
       -c maintenance_work_mem=128MB
       -c work_mem=16MB
       -c max_connections=100
