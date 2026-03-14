@@ -486,6 +486,18 @@ async def search_local_tracks(query: str, limit: int = 5) -> list[Track]:
         return list(result.scalars().all())
 
 
+async def get_random_popular_track() -> "Track | None":
+    """Return a random track from top-100 most downloaded (for 'play random' intent)."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Track)
+            .where(Track.file_id.isnot(None))
+            .order_by(func.random())
+            .limit(1)
+        )
+        return result.scalars().first()
+
+
 async def get_popular_titles(limit: int = 500) -> list[str]:
     """Return popular 'artist - title' strings for suggestion corpus."""
     async with async_session() as session:

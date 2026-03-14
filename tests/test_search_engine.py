@@ -24,8 +24,11 @@ class TestNormalizeQuery:
     def test_collapse_spaces(self):
         assert normalize_query("a   b     c") == "a b c"
 
-    def test_strip_the_prefix(self):
-        assert normalize_query("The Beatles") == "beatles"
+    def test_preserves_the_prefix(self):
+        assert normalize_query("The Beatles") == "the beatles"
+
+    def test_the_weeknd(self):
+        assert normalize_query("The Weeknd") == "the weeknd"
 
     def test_no_strip_the_mid(self):
         assert normalize_query("Something the way") == "something the way"

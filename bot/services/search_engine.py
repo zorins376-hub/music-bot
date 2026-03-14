@@ -68,9 +68,6 @@ def normalize_query(query: str) -> str:
     q = query.strip().lower()
     q = _JUNK_RE.sub(" ", q)
     q = _MULTI_SPACE.sub(" ", q)
-    # Strip "the " prefix for better matching
-    if q.startswith("the "):
-        q = q[4:]
     return q.strip()
 
 
@@ -126,24 +123,64 @@ def _jaccard_similarity(a: str, b: str) -> float:
 
 
 def _relevance_score(query_norm: str, artist: str, title: str) -> float:
-    """Score how relevant a track is to the search query (0.0 - 1.0).
+    """Score how relevant a track is to the search query (0.0 - 2.0+).
 
-    Checks if query words appear in artist+title. Exact word matches
-    score higher than partial/substring matches.
+    Multi-signal scoring:
+    1. Word overlap (exact + substring)
+    2. Artist match bonus (query matches artist name specifically)
+    3. Position bonus (match at start of title/artist)
+    4. RapidFuzz token_sort_ratio (catches typos & word reorder)
+    5. Title brevity bonus (shorter = less junk = more precise)
     """
-    query_words = set(query_norm.split())
-    track_text = f"{artist} {title}".lower()
-    track_words = set(track_text.split())
+    query_words = query_norm.split()
     if not query_words:
         return 0.0
-    # Exact word overlap
-    exact = len(query_words & track_words)
-    # Substring matches for words not matched exactly
+    query_set = set(query_words)
+
+    artist_lower = artist.lower().strip()
+    title_lower = title.lower().strip()
+    track_text = f"{artist_lower} {title_lower}"
+    track_words = set(track_text.split())
+
+    # 1. Word overlap (0.0 - 1.0)
+    exact = len(query_set & track_words)
     substring = 0
-    for qw in query_words - track_words:
+    for qw in query_set - track_words:
         if qw in track_text:
             substring += 0.5
-    return (exact + substring) / len(query_words)
+    word_score = (exact + substring) / len(query_words)
+
+    # 2. Artist match bonus (0.0 - 0.3)
+    # If the query contains the artist name or vice versa — boost
+    artist_bonus = 0.0
+    artist_words = set(artist_lower.split())
+    if artist_words and query_set:
+        artist_overlap = len(query_set & artist_words) / max(len(artist_words), len(query_set))
+        if artist_overlap >= 0.5:
+            artist_bonus = 0.3 * artist_overlap
+
+    # 3. Position bonus (0.0 - 0.15): query found at start of artist or title
+    position_bonus = 0.0
+    if artist_lower.startswith(query_norm) or title_lower.startswith(query_norm):
+        position_bonus = 0.15
+    elif track_text.startswith(query_norm):
+        position_bonus = 0.1
+
+    # 4. RapidFuzz bonus (0.0 - 0.4): catches typos and word reorder
+    fuzz_bonus = 0.0
+    if _rf_fuzz is not None:
+        ratio = float(_rf_fuzz.token_sort_ratio(query_norm, track_text)) / 100.0
+        fuzz_bonus = ratio * 0.4
+
+    # 5. Title brevity bonus (0.0 - 0.1): shorter titles = more precise match
+    total_words = len(track_text.split())
+    if total_words > 0:
+        brevity = max(0.0, 1.0 - (total_words - len(query_words)) / 10.0)
+        brevity_bonus = brevity * 0.1
+    else:
+        brevity_bonus = 0.0
+
+    return word_score + artist_bonus + position_bonus + fuzz_bonus + brevity_bonus
 
 
 def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: str = "mixed", query: str = "") -> list[dict]:
@@ -173,7 +210,12 @@ def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: 
         )
         is_dup = False
         for existing_key in kept_keys:
-            if _jaccard_similarity(key, existing_key) >= threshold:
+            # Use rapidfuzz token_sort_ratio if available (better than Jaccard for music titles)
+            if _rf_fuzz is not None:
+                sim = float(_rf_fuzz.token_sort_ratio(key, existing_key)) / 100.0
+            else:
+                sim = _jaccard_similarity(key, existing_key)
+            if sim >= threshold:
                 is_dup = True
                 break
         if not is_dup:
@@ -249,12 +291,24 @@ async def perform_search(query: str, limit: int = 10) -> list[dict]:
     """Search across all providers, deduplicate and return merged results."""
     from bot.services.downloader import search_tracks as yt_search
 
-    tasks = [yt_search(query, max_results=limit)]
+    tasks: list[asyncio.Task] = [yt_search(query, max_results=limit)]
 
-    # Add Yandex Music search if available
+    # Add all available providers (same as bot handler)
     try:
         from bot.services.yandex_provider import search_yandex
         tasks.append(search_yandex(query, limit=limit))
+    except Exception:
+        pass
+
+    try:
+        from bot.services.spotify_provider import search_spotify
+        tasks.append(search_spotify(query, limit=limit))
+    except Exception:
+        pass
+
+    try:
+        from bot.services.vk_provider import search_vk
+        tasks.append(search_vk(query, limit=limit))
     except Exception:
         pass
 
