@@ -18,7 +18,7 @@ from aiogram.types import (
 )
 
 from bot.config import settings
-from bot.db import get_or_create_user, get_popular_titles, increment_request_count, record_listening_event, search_local_tracks, upsert_track
+from bot.db import get_or_create_user, get_popular_titles, get_random_popular_track, increment_request_count, record_listening_event, search_local_tracks, upsert_track
 from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, search_tracks, is_youtube_url, extract_youtube_video_id, resolve_youtube_url
@@ -475,9 +475,20 @@ async def _do_search(message: Message, query: str) -> None:
         user_id=user.id, query=query[:500], action="search", source="search"
     )
 
-    # Groups: auto-play first track immediately
+    # Groups: auto-play first track — prefer cached tracks for instant delivery
     if is_group:
-        await _group_auto_play(message, status, user, results[0])
+        best = results[0]
+        # Check top-3 results: if any has file_id or redis cache, use it instead
+        for candidate in results[:3]:
+            if candidate.get("file_id"):
+                best = candidate
+                break
+            fid = await cache.get_file_id(candidate.get("video_id", ""), bitrate=192)
+            if fid:
+                candidate["file_id"] = fid
+                best = candidate
+                break
+        await _group_auto_play(message, status, user, best)
         return
 
     session_id = secrets.token_urlsafe(6)
@@ -751,6 +762,32 @@ async def handle_text(message: Message) -> None:
 
     if not text:
         return
+
+    # Intent detection: "random", "рандом", "что-нибудь", "любой трек", etc.
+    _RANDOM_INTENTS = (
+        "рандом", "случайный", "что-нибудь", "что нибудь", "любой трек",
+        "любую песню", "любой", "что угодно", "наугад", "сюрприз",
+        "random", "anything", "surprise", "any track", "whatever",
+    )
+    if text.lower().strip() in _RANDOM_INTENTS:
+        track = await get_random_popular_track()
+        if track and track.source_id:
+            track_info = {
+                "video_id": track.source_id,
+                "title": track.title or "Unknown",
+                "uploader": track.artist or "Unknown",
+                "duration": track.duration or 0,
+                "duration_fmt": fmt_duration(track.duration) if track.duration else "?:??",
+                "source": track.source or "channel",
+                "file_id": track.file_id,
+            }
+            if is_group:
+                user = await get_or_create_user(message.from_user)
+                status = await message.answer("🎲")
+                await _group_auto_play(message, status, user, track_info)
+                return
+            # DM: still do normal search but with a popular artist
+            pass
 
     await _do_search(message, text)
 
