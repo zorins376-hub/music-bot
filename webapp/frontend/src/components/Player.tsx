@@ -41,6 +41,14 @@ interface Props {
   onMoodChange?: (mood: string | null) => void;
   bypassProcessing?: boolean;
   onBypassToggle?: (on: boolean) => void;
+  tapeWarmth?: boolean;
+  onTapeWarmth?: (on: boolean) => void;
+  airBand?: boolean;
+  onAirBand?: (on: boolean) => void;
+  stereoWiden?: boolean;
+  onStereoWiden?: (on: boolean) => void;
+  softClip?: boolean;
+  onSoftClip?: (on: boolean) => void;
   onAddToPlaylist?: () => void;
   onPlayTrack?: (track: Track) => void;
   onPlayAll?: (tracks: Track[]) => void;
@@ -223,7 +231,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -592,6 +600,50 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             animation: partyMode ? "partyPulse 1.5s ease-in-out infinite" : "none",
           }}>
             <IconParty size={14} color={partyMode ? "#fff" : hlColor} /> Party
+          </button>
+        </div>
+
+        {/* Luxury Audio Toggles */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          <button onClick={() => onTapeWarmth?.(!tapeWarmth)} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: tapeWarmth ? `1px solid ${hlColor}` : panelBorder,
+            background: tapeWarmth ? (warm ? "linear-gradient(135deg, #ff8f00, #ffb300)" : activeGrad) : inactiveBg,
+            color: tapeWarmth ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconFire size={14} color={tapeWarmth ? "#fff" : hlColor} /> Warmth
+          </button>
+          <button onClick={() => onAirBand?.(!airBand)} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: airBand ? `1px solid ${hlColor}` : panelBorder,
+            background: airBand ? activeGrad : inactiveBg,
+            color: airBand ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconHiRes size={14} color={airBand ? "#fff" : hlColor} /> Air
+          </button>
+          <button onClick={() => onStereoWiden?.(!stereoWiden)} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: stereoWiden ? `1px solid ${hlColor}` : panelBorder,
+            background: stereoWiden ? activeGrad : inactiveBg,
+            color: stereoWiden ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconSpatial size={14} color={stereoWiden ? "#fff" : hlColor} /> Wide
+          </button>
+          <button onClick={() => onSoftClip?.(!softClip)} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: softClip ? `1px solid ${hlColor}` : panelBorder,
+            background: softClip ? activeGrad : inactiveBg,
+            color: softClip ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconMood size={14} color={softClip ? "#fff" : hlColor} /> Limiter
           </button>
         </div>
 

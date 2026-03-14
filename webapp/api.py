@@ -63,19 +63,33 @@ def _schedule_background_download(video_id: str, bitrate: int) -> None:
 
     asyncio.create_task(_run())
 
+# ── Bounded LRU dict (evicts oldest when maxsize exceeded) ────────────────
+class _BoundedDict(dict):
+    """Dict with maxsize — removes oldest entries when limit is reached."""
+    def __init__(self, maxsize: int = 5000):
+        super().__init__()
+        self._maxsize = maxsize
+    def __setitem__(self, key, value):
+        if len(self) >= self._maxsize and key not in self:
+            # Remove oldest 10%
+            to_remove = max(1, self._maxsize // 10)
+            for k in list(self.keys())[:to_remove]:
+                dict.__delitem__(self, k)
+        super().__setitem__(key, value)
+
 # ── In-memory stream URL cache (avoids repeated yt-dlp resolves) ─────────
-_stream_url_cache: dict[str, tuple[str, float]] = {}  # video_id -> (url, expires_at)
+_stream_url_cache: dict[str, tuple[str, float]] = _BoundedDict(5000)
 _STREAM_URL_TTL = 18000  # 5 hours (YouTube URLs valid ~6h)
 _stream_url_inflight: dict[str, asyncio.Future[str | None]] = {}
 _stream_url_lock = asyncio.Lock()
-_stream_url_resolve_semaphore = asyncio.Semaphore(3)
+_stream_url_resolve_semaphore = asyncio.Semaphore(6)
 
 # ── Download coalescing for non-YouTube tracks (ym_, sp_) ─────────────────
 _dl_inflight: dict[str, asyncio.Future[Path]] = {}
 _dl_inflight_lock = asyncio.Lock()
-_cover_url_cache: dict[str, tuple[str | None, float]] = {}
+_cover_url_cache: dict[str, tuple[str | None, float]] = _BoundedDict(2000)
 _COVER_URL_TTL = 3600
-_user_audio_cache: dict[int, tuple[str, bool, float]] = {}  # user_id -> (quality, premium, expires_at)
+_user_audio_cache: dict[int, tuple[str, bool, float]] = _BoundedDict(5000)
 _USER_AUDIO_CACHE_TTL = 60
 _LYRICS_CACHE_TTL = 86400 * 7
 _LYRICS_MISS_TTL = 86400  # 24h — tracks without lyrics rarely gain them
@@ -540,13 +554,14 @@ async def stream_audio(
             
             chunk_size = end - start + 1
             
-            def iter_file():
-                with open(mp3_path, "rb") as f:
-                    f.seek(start)
+            async def iter_file():
+                import aiofiles
+                async with aiofiles.open(mp3_path, "rb") as f:
+                    await f.seek(start)
                     remaining = chunk_size
                     while remaining > 0:
-                        read_size = min(8192, remaining)
-                        data = f.read(read_size)
+                        read_size = min(65536, remaining)
+                        data = await f.read(read_size)
                         if not data:
                             break
                         remaining -= len(data)
