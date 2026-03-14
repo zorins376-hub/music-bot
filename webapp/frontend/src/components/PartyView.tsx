@@ -41,7 +41,11 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [lyrics, setLyrics] = useState<string[]>([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [transitionFx, setTransitionFx] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [showConfirmClose, setShowConfirmClose] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionBurstIdRef = useRef(0);
   const lastTrackIdRef = useRef<string | null>(null);
@@ -380,8 +384,42 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     }
     return () => {
       eventSourceRef.current?.close();
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
     };
   }, [initialCode, connectSSE]);
+
+  // Periodic playback re-sync: refresh party state every 15s to catch drift
+  useEffect(() => {
+    if (!party) {
+      if (syncIntervalRef.current) { clearInterval(syncIntervalRef.current); syncIntervalRef.current = null; }
+      return;
+    }
+    syncIntervalRef.current = setInterval(() => {
+      fetchParty(party.invite_code).then(setParty).catch(() => {});
+    }, 15000);
+    return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current); };
+  }, [party?.invite_code]);
+
+  // Track transition animation — detect track change
+  useEffect(() => {
+    if (!party) return;
+    const ct = party.tracks.find(t => t.position === party.current_position);
+    const newId = ct?.video_id || null;
+    if (lastTrackIdRef.current && newId && newId !== lastTrackIdRef.current) {
+      setTransitionFx(true);
+      setTimeout(() => setTransitionFx(false), 600);
+    }
+    lastTrackIdRef.current = newId;
+  }, [party?.current_position]);
+
+  // Mark offline on tab close
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      if (eventSourceRef.current) eventSourceRef.current.close();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -435,8 +473,13 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       setShowSearch(false);
       setSearchQuery("");
       setSearchResults([]);
-    } catch {
-      showToast("❌ Ошибка при добавлении");
+    } catch (err: any) {
+      const detail = err?.message || "";
+      if (detail.includes("409") || detail.includes("already")) {
+        showToast("⚠️ Этот трек уже в очереди");
+      } else {
+        showToast("❌ Ошибка при добавлении");
+      }
     }
   };
 
@@ -462,7 +505,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
 
   const handleClose = async () => {
     if (!party) return;
+    if (!showConfirmClose) {
+      setShowConfirmClose(true);
+      return;
+    }
     haptic("heavy");
+    setShowConfirmClose(false);
     try {
       await closeParty(party.invite_code);
       setParty(null);
@@ -634,38 +682,38 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 background: "rgba(0,0,0,0.22)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6
               }}><IconUpload size={14} /> Поделиться</button>
-              <button onClick={handleShareTv} style={{
-                padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
-              }}><IconTV size={14} /> Share TV</button>
-              {currentTrack && (
-                <button onClick={() => setShowStageMode(true)} style={{
-                  padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
-                }}><IconSparkles size={14} /> Stage</button>
-              )}
-              {currentTrack && (
-                <button onClick={() => setShowTvMode(true)} style={{
-                  padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.10)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
-                }}><IconTV size={14} /> TV</button>
-              )}
               {canControl && (
                 <button onClick={handleAutoDj} style={{
                   padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
                   background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
                 }}><IconRobot size={14} /> Auto-DJ</button>
               )}
-              {!readOnlyMode && <button onClick={handleSavePlaylist} style={{
-                padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
-              }}><IconSave size={14} /> Save</button>}
-              {isDJ && (
-                <button onClick={handleClose} style={{
+              <div style={{ position: "relative" }}>
+                <button onClick={() => setShowMoreMenu(!showMoreMenu)} style={{
                   padding: "10px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(229,57,53,0.82)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
-                }}><IconFlag size={14} /> Закрыть</button>
-              )}
+                  background: showMoreMenu ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
+                }}>⋯</button>
+                {showMoreMenu && (
+                  <div style={{
+                    position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20,
+                    background: warm ? "rgba(40, 24, 14, 0.96)" : "rgba(20, 18, 35, 0.96)",
+                    border: cardBorder, borderRadius: 16, padding: 6, minWidth: 170,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
+                    backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+                  }}>
+                    <button onClick={() => { handleShareTv(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> Share TV</button>
+                    {currentTrack && <button onClick={() => { setShowStageMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSparkles size={14} /> Stage mode</button>}
+                    {currentTrack && <button onClick={() => { setShowTvMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> TV mode</button>}
+                    {!readOnlyMode && <button onClick={() => { handleSavePlaylist(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSave size={14} /> Сохранить плейлист</button>}
+                    {isDJ && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
+                    {isDJ && (
+                      showConfirmClose
+                        ? <button onClick={() => { handleClose(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "rgba(229,57,53,0.3)", color: "#ff5252", fontSize: 12, fontWeight: 800, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconFlag size={14} /> Точно закрыть?</button>
+                        : <button onClick={handleClose} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#ff5252", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconFlag size={14} /> Закрыть пати</button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -701,6 +749,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             border: warm ? "1px solid rgba(255,109,0,0.25)" : "1px solid rgba(124,77,255,0.2)",
             boxShadow: warm ? "0 14px 34px rgba(255,109,0,0.12)" : "0 14px 34px rgba(124,77,255,0.12)",
             backdropFilter: "blur(16px) saturate(135%)",
+            transition: "transform 0.3s ease, opacity 0.3s ease",
+            transform: transitionFx ? "scale(0.97)" : "scale(1)",
+            opacity: transitionFx ? 0.7 : 1,
             WebkitBackdropFilter: "blur(16px) saturate(135%)",
             position: "relative",
             overflow: "hidden",
@@ -776,8 +827,19 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               <button onClick={handleSkip} style={{
                 flex: 1, padding: "9px 0", borderRadius: 12, border: cardBorder,
                 background: "rgba(255,255,255,0.03)", color: hintColor, fontSize: 12, cursor: "pointer", fontWeight: 700,
+                position: "relative", overflow: "hidden",
               }}>
-                {canControl ? "⏭ Пропустить" : `⏭ Vote Skip (${currentTrack.skip_votes}/${party.skip_threshold})`}
+                {!canControl && currentTrack.skip_votes > 0 && (
+                  <div style={{
+                    position: "absolute", left: 0, top: 0, bottom: 0,
+                    width: `${Math.min(100, (currentTrack.skip_votes / party.skip_threshold) * 100)}%`,
+                    background: warm ? "rgba(255,109,0,0.15)" : "rgba(124,77,255,0.15)",
+                    transition: "width 0.3s ease",
+                  }} />
+                )}
+                <span style={{ position: "relative", zIndex: 1 }}>
+                  {canControl ? "⏭ Пропустить" : `⏭ Skip ${currentTrack.skip_votes}/${party.skip_threshold}`}
+                </span>
               </button>
               {canControl && (
                 <>
@@ -1391,8 +1453,21 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
         ))
       )}
 
-      <div style={{ marginTop: 16, padding: 14, borderRadius: 16, ...softCard, fontSize: 12, color: hintColor, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-        Или присоединись по ссылке от друга — треки синхронизируются в реальном времени <IconSync size={12} />
+      <div style={{ marginTop: 12, padding: 14, borderRadius: 16, ...softCard }}>
+        <div style={{ ...sectionLabel, marginBottom: 10, fontSize: 10 }}>Присоединиться по коду</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="text" placeholder="Вставь код пати" maxLength={16} value={joinCode}
+            onInput={(e: any) => setJoinCode(e.target.value.trim())}
+            onKeyDown={(e: any) => { if (e.key === "Enter" && joinCode) handleJoinParty(joinCode); }}
+            style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none", fontFamily: "monospace" }} />
+          <button onClick={() => { if (joinCode) handleJoinParty(joinCode); }} disabled={!joinCode} style={{
+            padding: "10px 16px", borderRadius: 12, border: "none",
+            background: joinCode ? partyGradient : "rgba(255,255,255,0.06)",
+            color: joinCode ? "#000" : hintColor,
+            fontSize: 13, fontWeight: 800, cursor: joinCode ? "pointer" : "default",
+            opacity: joinCode ? 1 : 0.5,
+          }}>Join</button>
+        </div>
       </div>
     </div>
   );
