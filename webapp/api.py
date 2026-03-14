@@ -1030,7 +1030,12 @@ async def _hydrate_state_covers(user_id: int, state: PlayerState) -> PlayerState
 async def get_player_state(user_id: int, user: dict = Depends(get_current_user)):
     if user.get("id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    return await _load_state(user_id)
+    state = await _load_state(user_id)
+    # Always return paused — user must press play after app load.
+    # Audio can't autoplay without user gesture (browser policy), so
+    # persisted is_playing=True from a previous session is stale.
+    state.is_playing = False
+    return state
 
 
 @app.post("/api/player/action", response_model=PlayerState)
