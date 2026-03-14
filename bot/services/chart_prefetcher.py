@@ -27,8 +27,15 @@ _PREFETCH_INTERVAL = 3600
 # Minimum file size to consider track already cached (10KB)
 _MIN_CACHED_SIZE = 10 * 1024
 
-# YouTube video ID pattern
+# YouTube video ID pattern (exclude ym_ Yandex prefix)
 _YT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+def _is_youtube_id(video_id: str) -> bool:
+    """Check if ID is a valid YouTube video ID (not Yandex)."""
+    return bool(
+        _YT_ID_PATTERN.match(video_id)
+        and not video_id.startswith("ym_")
+    )
 
 
 async def prefetch_chart_tracks(
@@ -74,7 +81,7 @@ async def prefetch_chart_tracks(
             for track in tracks[:max_per_chart]:
                 video_id = track.get("video_id", "").strip()
                 # Only YouTube IDs (skip Yandex which needs special handling)
-                if video_id and _YT_ID_PATTERN.match(video_id):
+                if video_id and _is_youtube_id(video_id):
                     all_video_ids.add(video_id)
                     
         except Exception as e:
