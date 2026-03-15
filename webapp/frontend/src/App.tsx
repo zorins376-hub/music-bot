@@ -2006,6 +2006,8 @@ export function App() {
           state={state}
           accentColor={accentColor}
           themeId={theme.id}
+          elapsed={elapsed}
+          audioDuration={audioDuration}
           onAction={(act) => action(act)}
           onExpand={() => setView("player")}
         />

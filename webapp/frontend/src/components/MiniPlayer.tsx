@@ -1,11 +1,14 @@
-import { useRef } from "preact/hooks";
+import { useRef, useState, useEffect } from "preact/hooks";
 import type { PlayerState } from "../api";
+import { toggleFavorite, checkFavorite } from "../api";
 import { IconMusic } from "./Icons";
 
 interface Props {
   state: PlayerState;
   accentColor: string;
   themeId?: string;
+  elapsed?: number;
+  audioDuration?: number;
   onAction: (action: string) => void;
   onExpand: () => void;
 }
@@ -14,10 +17,30 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(type); } catch {}
 };
 
-export function MiniPlayer({ state, accentColor, themeId = "blackroom", onAction, onExpand }: Props) {
+export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed = 0, audioDuration = 0, onAction, onExpand }: Props) {
   const track = state.current_track;
   if (!track) return null;
   const isTequila = themeId === "tequila";
+  const duration = audioDuration || track.duration || 0;
+  const progress = duration > 0 ? Math.min(1, elapsed / duration) : 0;
+
+  // Like state
+  const [isLiked, setIsLiked] = useState(false);
+  useEffect(() => {
+    if (track?.video_id) {
+      checkFavorite(track.video_id).then(setIsLiked).catch(() => setIsLiked(false));
+    }
+  }, [track?.video_id]);
+
+  const handleLike = async (e: Event) => {
+    e.stopPropagation();
+    if (!track) return;
+    haptic("medium");
+    try {
+      const newState = await toggleFavorite(track.video_id);
+      setIsLiked(newState);
+    } catch {}
+  };
 
   // Swipe tracking
   const touchStartX = useRef(0);
@@ -56,6 +79,24 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", onAction
         userSelect: "none",
       }}
     >
+      {/* Progress bar at top */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 2,
+        background: "rgba(255,255,255,0.08)",
+      }}>
+        <div style={{
+          height: "100%",
+          width: `${progress * 100}%`,
+          background: isTequila ? "linear-gradient(90deg, #ff6d00, #ffd54f)" : accentColor,
+          transition: "width 0.5s linear",
+          borderRadius: 1,
+        }} />
+      </div>
+
       {/* Mini cover */}
       <div style={{
         width: 44,
@@ -97,6 +138,27 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", onAction
           {track.artist}
         </div>
       </div>
+
+      {/* Like button */}
+      <button
+        onClick={handleLike}
+        style={{
+          background: "none",
+          border: "none",
+          color: isLiked ? "#ff4081" : (isTequila ? "#c8a882" : "var(--tg-theme-hint-color, #888)"),
+          cursor: "pointer",
+          padding: 4,
+          display: "flex",
+          alignItems: "center",
+          flexShrink: 0,
+          transition: "color 0.2s, transform 0.2s",
+          transform: isLiked ? "scale(1.1)" : "scale(1)",
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#ff4081" : "none"} stroke={isLiked ? "#ff4081" : "currentColor"} strokeWidth="2">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+      </button>
 
       {/* Play/Pause button */}
       <button
