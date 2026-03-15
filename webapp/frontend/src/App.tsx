@@ -171,6 +171,14 @@ export function App() {
   const [partyMode, setPartyMode] = useState(false);
   const [moodFilter, setMoodFilter] = useState<string | null>(null);
   const [bypassProcessing, setBypassProcessing] = useState(false);
+  const [crossfadeDuration, setCrossfadeDuration] = useState(() => {
+    try { const v = localStorage.getItem("tma:crossfade"); return v ? parseInt(v, 10) : 0; } catch { return 0; }
+  });
+  const crossfadeDurationRef = useRef(crossfadeDuration);
+  crossfadeDurationRef.current = crossfadeDuration;
+  const [vinylSpin, setVinylSpin] = useState(() => {
+    try { return localStorage.getItem("tma:vinyl-spin") !== "false"; } catch { return true; }
+  });
   const [tapeWarmth, setTapeWarmth] = useState(false);
   const [airBand, setAirBand] = useState(false);
   const [stereoWiden, setStereoWiden] = useState(false);
@@ -334,10 +342,12 @@ export function App() {
         if (nextIds.length) prefetchTracks(nextIds);
       }
 
-      // ── DJ Crossfade: party mode auto-mix with 5s true dual-deck overlap ──
+      // ── Crossfade: smooth transition between tracks ──
+      // Works in party mode (always 5s) OR regular mode (user-configurable duration)
       const remaining = audio.duration ? audio.duration - audio.currentTime : Infinity;
-      const isPartyActive = stateRef.current.queue.length > 1 && viewRef.current === "party";
-      if (isPartyActive && remaining <= 5 && remaining > 0.5 && audio.duration > 15 && !djCrossfadeActiveRef.current) {
+      const cfDur = viewRef.current === "party" ? 5 : crossfadeDurationRef.current;
+      const shouldCrossfade = stateRef.current.queue.length > 1 && cfDur > 0;
+      if (shouldCrossfade && remaining <= cfDur && remaining > 0.5 && audio.duration > cfDur * 2 && !djCrossfadeActiveRef.current) {
         const s = stateRef.current;
         const nextIdx = (s.position + 1) % s.queue.length;
         const nextTrack = s.queue[nextIdx];
@@ -357,12 +367,13 @@ export function App() {
               if (cached !== apiUrl) mix.src = cached;
             });
             mix.play().catch(() => {});
-            // Crossfade: main deck down, mix deck up over 4.5 seconds
+            // Crossfade: main deck down, mix deck up over cfDur-0.5 seconds
+            const fadeDur = Math.max(1, cfDur - 0.5);
             const now = ctx.currentTime;
             cfGain.gain.setValueAtTime(cfGain.gain.value, now);
-            cfGain.gain.exponentialRampToValueAtTime(0.001, now + 4.5);
+            cfGain.gain.exponentialRampToValueAtTime(0.001, now + fadeDur);
             mixGain.gain.setValueAtTime(0.001, now);
-            mixGain.gain.exponentialRampToValueAtTime(1, now + 4.5);
+            mixGain.gain.exponentialRampToValueAtTime(1, now + fadeDur);
             // After crossfade completes: advance to next track on main deck
             djCrossfadeTimerRef.current = window.setTimeout(() => {
               // Stop mix deck
@@ -374,7 +385,7 @@ export function App() {
               djCrossfadeActiveRef.current = false;
               // Advance queue — this loads next track into main deck
               sendAction("next").then(setState).catch(() => {});
-            }, 4600);
+            }, (fadeDur + 0.1) * 1000);
           }
         }
       }
@@ -1231,6 +1242,18 @@ export function App() {
     } catch {}
   }, [handleTapeWarmth, handleAirBand, handleStereoWiden, handleSoftClip]);
 
+  // ── Crossfade duration persistence ──
+  const handleCrossfadeDuration = useCallback((sec: number) => {
+    setCrossfadeDuration(sec);
+    try { localStorage.setItem("tma:crossfade", String(sec)); } catch {}
+  }, []);
+
+  // ── Vinyl spin toggle persistence ──
+  const handleVinylSpin = useCallback((on: boolean) => {
+    setVinylSpin(on);
+    try { localStorage.setItem("tma:vinyl-spin", String(on)); } catch {}
+  }, []);
+
   // Party Mode — bass boost + club EQ + slight speed up + luxury warmth & air
   const handlePartyMode = useCallback((on: boolean) => {
     setPartyMode(on);
@@ -1597,7 +1620,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} vinylSpin={vinylSpin} onVinylSpin={handleVinylSpin} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (

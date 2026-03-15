@@ -49,6 +49,10 @@ interface Props {
   onStereoWiden?: (on: boolean) => void;
   softClip?: boolean;
   onSoftClip?: (on: boolean) => void;
+  crossfadeDuration?: number;
+  onCrossfadeDuration?: (sec: number) => void;
+  vinylSpin?: boolean;
+  onVinylSpin?: (on: boolean) => void;
   onAddToPlaylist?: () => void;
   onPlayTrack?: (track: Track) => void;
   onPlayAll?: (tracks: Track[]) => void;
@@ -246,7 +250,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, crossfadeDuration = 0, onCrossfadeDuration, vinylSpin = true, onVinylSpin, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
   const isTequila = themeId === "tequila";
   const track = state.current_track;
   const duration = audioDuration || track?.duration || 0;
@@ -677,6 +681,42 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           </button>
         </div>
 
+        {/* Crossfade Duration */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
+              <IconWave size={14} color={labelColor} /> Crossfade
+            </div>
+            <span style={{ fontSize: 10, color: labelColor, fontVariantNumeric: "tabular-nums" }}>
+              {crossfadeDuration === 0 ? "OFF" : `${crossfadeDuration}s`}
+            </span>
+          </div>
+          <input
+            type="range" min={0} max={12} step={1}
+            value={crossfadeDuration}
+            onInput={(e) => { haptic("light"); onCrossfadeDuration?.(Number((e.target as HTMLInputElement).value)); }}
+            style={{ width: "100%", height: 4, accentColor: hlColor, cursor: "pointer" }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: labelColor, opacity: 0.7 }}>
+            <span>OFF</span><span>12 сек</span>
+          </div>
+        </div>
+
+        {/* Vinyl Spin Toggle */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
+            💿 Vinyl Spin
+          </div>
+          <button onClick={() => { haptic("light"); onVinylSpin?.(!vinylSpin); }} style={{
+            padding: "5px 14px", borderRadius: 999, fontSize: 11, fontWeight: 600, cursor: "pointer",
+            border: vinylSpin ? `1px solid ${hlColor}` : panelBorder,
+            background: vinylSpin ? activeGrad : inactiveBg,
+            color: vinylSpin ? "#fff" : textColor,
+          }}>
+            {vinylSpin ? "ON" : "OFF"}
+          </button>
+        </div>
+
         {/* 3D Spatial Panner */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -801,6 +841,10 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
     return (
       <div style={{ textAlign: "center", padding: "8px 0" }}>
         <style>{`
+          @keyframes vinylSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
           @keyframes tequilaGlow {
             0% { box-shadow: 0 12px 40px rgba(255, 109, 0, 0.22), 0 0 0 1px rgba(255, 213, 79, 0.22), inset 0 0 0 1px rgba(255,213,79,0.1); }
             50% { box-shadow: 0 16px 54px rgba(255, 109, 0, 0.34), 0 0 0 1px rgba(255, 213, 79, 0.30), inset 0 0 0 1px rgba(255,213,79,0.16); }
@@ -827,7 +871,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             width: 260,
             height: 260,
             margin: "0 auto 20px",
-            borderRadius: 24,
+            borderRadius: vinylSpin ? "50%" : 24,
             background: track
               ? `linear-gradient(135deg, rgba(255,167,38,0.15), rgba(255,213,79,0.08))`
               : "linear-gradient(135deg, #ff6d00 0%, #ffd54f 100%)",
@@ -837,10 +881,10 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             boxShadow: track
               ? `0 12px 40px rgba(255, 109, 0, 0.25), 0 0 0 1px ${borderGold}, inset 0 0 0 1px rgba(255,213,79,0.1)`
               : "0 8px 24px rgba(255,109,0,0.3)",
-            animation: state.is_playing ? "tequilaGlow 3.6s ease-in-out infinite" : "none",
+            animation: vinylSpin && state.is_playing && track ? "vinylSpin 4s linear infinite" : (state.is_playing ? "tequilaGlow 3.6s ease-in-out infinite" : "none"),
             overflow: "hidden",
             transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing ? 1.03 : 1})`,
+            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !vinylSpin ? 1.03 : 1})`,
             willChange: "transform",
             touchAction: "pan-y",
             userSelect: "none",
@@ -850,12 +894,25 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             <img
               src={track.cover_url}
               alt="Cover"
-              style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }}
+              style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", borderRadius: vinylSpin ? "50%" : 0 }}
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
             />
           ) : (
             track ? <IconMusic size={64} color="rgba(255,245,220,0.8)" /> : <IconMusicNote size={48} color="rgba(255,245,220,0.5)" />
+          )}
+          {/* Vinyl center hole */}
+          {vinylSpin && track && (
+            <div style={{
+              position: "absolute",
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              background: "radial-gradient(circle, #1a120b 40%, rgba(26,18,11,0.9) 60%, transparent 100%)",
+              border: `2px solid ${borderGold}`,
+              boxShadow: "0 0 12px rgba(0,0,0,0.6)",
+              zIndex: 2,
+            }} />
           )}
           {/* Warm visualizer */}
           {track && <AudioVisualizer isPlaying={state.is_playing} accentColor="#ff6d00" />}
@@ -1533,6 +1590,12 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   // ─── DEFAULT BLACK ROOM THEME ──────────────────────────
   return (
     <div style={{ textAlign: "center", padding: "16px 0" }}>
+      <style>{`
+        @keyframes vinylSpin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
       {/* Cover container with swipe */}
       <div
         onTouchStart={handleTouchStart}
@@ -1543,31 +1606,45 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           width: 240,
           height: 240,
           margin: "0 auto 24px",
-          borderRadius: 20,
+          borderRadius: vinylSpin ? "50%" : 20,
           background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : "linear-gradient(135deg, #7c4dff 0%, #e040fb 100%)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontSize: 64,
-          boxShadow: track ? "0 8px 24px rgba(0,0,0,0.3)" : "none",
+          boxShadow: track ? (vinylSpin ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 3px rgba(60,60,80,0.5)` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
           overflow: "hidden",
           transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-          transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing ? 1.02 : 1})`,
+          transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !vinylSpin ? 1.02 : 1})`,
+          animation: vinylSpin && state.is_playing && track ? "vinylSpin 4s linear infinite" : "none",
           willChange: "transform",
           touchAction: "pan-y",
           userSelect: "none",
         }}
       >
         {track?.cover_url ? (
-          <img 
-            src={track.cover_url} 
-            alt="Cover" 
-            style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} 
+          <img
+            src={track.cover_url}
+            alt="Cover"
+            style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", borderRadius: vinylSpin ? "50%" : 0 }}
             draggable={false}
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         ) : (
           track ? <IconMusic size={64} color="rgba(255,255,255,0.8)" /> : <IconMusicNote size={48} color="rgba(255,255,255,0.5)" />
+        )}
+        {/* Vinyl center hole */}
+        {vinylSpin && track && (
+          <div style={{
+            position: "absolute",
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "radial-gradient(circle, #1a1a2e 40%, rgba(26,26,46,0.9) 60%, transparent 100%)",
+            border: `2px solid ${accentColor}`,
+            boxShadow: "0 0 12px rgba(0,0,0,0.6)",
+            zIndex: 2,
+          }} />
         )}
         {/* Audio Visualizer overlay */}
         {track && <AudioVisualizer isPlaying={state.is_playing} accentColor={accentColor} />}
