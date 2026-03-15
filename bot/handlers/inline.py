@@ -101,17 +101,22 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
             dl_query = f"{track['uploader']} {track['title']}"
             b64 = base64.urlsafe_b64encode(dl_query.encode()).decode().rstrip("=")
             deep_link = f"https://t.me/{bot_username}?start=s_{b64}"
+            # D-03: WebApp link → opens mini app with track pre-loaded
+            webapp_link = f"https://t.me/{bot_username}/app?startapp=play_{video_id}"
             results.append(
                 InlineQueryResultArticle(
                     id=video_id[:64],
                     title=f"{icon} {track['uploader']} — {track['title']}",
                     description=f"◷ {track.get('duration_fmt', '?:??')} · {source}",
                     input_message_content=InputTextMessageContent(
-                        message_text=f"{icon} {track['uploader']} — {track['title']} ({track.get('duration_fmt', '?:??')})",
+                        message_text=f"{icon} <b>{track['uploader']}</b> — {track['title']} ({track.get('duration_fmt', '?:??')})",
                         parse_mode="HTML",
                     ),
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🎵 Скачать в боте", url=deep_link)]
+                        [
+                            InlineKeyboardButton(text="▶ Слушать", url=webapp_link),
+                            InlineKeyboardButton(text="Скачать", url=deep_link),
+                        ]
                     ]),
                 )
             )
