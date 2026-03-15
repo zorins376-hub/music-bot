@@ -45,6 +45,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const [joinCode, setJoinCode] = useState("");
   const [showConfirmClose, setShowConfirmClose] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [moreMenuPos, setMoreMenuPos] = useState<{ top: number; right: number } | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -649,6 +651,31 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       <div style={{ background: shellBg, borderRadius: 26, padding: 2 }}>
         {Toast}
 
+        {/* More menu — rendered as fixed overlay to escape overflow:hidden parents */}
+        {showMoreMenu && moreMenuPos && (
+          <>
+            <div onClick={() => setShowMoreMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
+            <div style={{
+              position: "fixed", top: moreMenuPos.top, right: moreMenuPos.right, zIndex: 9999,
+              background: warm ? "rgba(40, 24, 14, 0.96)" : "rgba(20, 18, 35, 0.96)",
+              border: cardBorder, borderRadius: 16, padding: 6, minWidth: 170,
+              boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
+              backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+            }}>
+              <button onClick={() => { handleShareTv(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> Share TV</button>
+              {currentTrack && <button onClick={() => { setShowStageMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSparkles size={14} /> Stage mode</button>}
+              {currentTrack && <button onClick={() => { setShowTvMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> TV mode</button>}
+              {!readOnlyMode && <button onClick={() => { handleSavePlaylist(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSave size={14} /> Сохранить плейлист</button>}
+              {isDJ && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
+              {isDJ && (
+                showConfirmClose
+                  ? <button onClick={() => { handleClose(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "rgba(229,57,53,0.3)", color: "#ff5252", fontSize: 12, fontWeight: 800, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconFlag size={14} /> Точно закрыть?</button>
+                  : <button onClick={handleClose} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#ff5252", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconFlag size={14} /> Закрыть пати</button>
+              )}
+            </div>
+          </>
+        )}
+
         <div style={{
           padding: "18px 16px 16px", borderRadius: 22, marginBottom: 12,
           background: partyGradient, position: "relative", overflow: "hidden",
@@ -689,32 +716,16 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                   background: "rgba(0,0,0,0.18)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5
                 }}><IconRobot size={14} /> Auto-DJ</button>
               )}
-              <div style={{ position: "relative" }}>
-                <button onClick={() => setShowMoreMenu(!showMoreMenu)} style={{
-                  padding: "10px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
-                  background: showMoreMenu ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
-                }}>⋯</button>
-                {showMoreMenu && (
-                  <div style={{
-                    position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20,
-                    background: warm ? "rgba(40, 24, 14, 0.96)" : "rgba(20, 18, 35, 0.96)",
-                    border: cardBorder, borderRadius: 16, padding: 6, minWidth: 170,
-                    boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
-                    backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-                  }}>
-                    <button onClick={() => { handleShareTv(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> Share TV</button>
-                    {currentTrack && <button onClick={() => { setShowStageMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSparkles size={14} /> Stage mode</button>}
-                    {currentTrack && <button onClick={() => { setShowTvMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> TV mode</button>}
-                    {!readOnlyMode && <button onClick={() => { handleSavePlaylist(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSave size={14} /> Сохранить плейлист</button>}
-                    {isDJ && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
-                    {isDJ && (
-                      showConfirmClose
-                        ? <button onClick={() => { handleClose(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "rgba(229,57,53,0.3)", color: "#ff5252", fontSize: 12, fontWeight: 800, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconFlag size={14} /> Точно закрыть?</button>
-                        : <button onClick={handleClose} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#ff5252", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconFlag size={14} /> Закрыть пати</button>
-                    )}
-                  </div>
-                )}
-              </div>
+              <button ref={moreButtonRef} onClick={() => {
+                if (!showMoreMenu && moreButtonRef.current) {
+                  const rect = moreButtonRef.current.getBoundingClientRect();
+                  setMoreMenuPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+                }
+                setShowMoreMenu(!showMoreMenu);
+              }} style={{
+                padding: "10px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.14)",
+                background: showMoreMenu ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
+              }}>⋯</button>
             </div>
           </div>
         </div>
