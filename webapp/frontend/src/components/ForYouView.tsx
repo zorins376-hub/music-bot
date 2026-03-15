@@ -209,6 +209,43 @@ export function ForYouView({
         </div>
       </div>
 
+      {/* ===== Quick Mood Buttons ===== */}
+      <div style={{
+        display: "flex", gap: 8, marginBottom: 20, overflowX: "auto",
+        scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+        padding: "2px 0",
+      }}>
+        {[
+          { mood: "chill", label: "Chill", gradient: "linear-gradient(135deg, #00bcd4, #26c6da)" },
+          { mood: "energy", label: "Энергия", gradient: "linear-gradient(135deg, #ff5722, #ff9800)" },
+          { mood: "focus", label: "Фокус", gradient: "linear-gradient(135deg, #7c4dff, #b388ff)" },
+          { mood: "romance", label: "Романтика", gradient: "linear-gradient(135deg, #e91e63, #f48fb1)" },
+          { mood: "party", label: "Party", gradient: "linear-gradient(135deg, #ffc107, #ff6d00)" },
+          { mood: "melancholy", label: "Грусть", gradient: "linear-gradient(135deg, #546e7a, #90a4ae)" },
+        ].map(({ mood, label, gradient }) => (
+          <button
+            key={mood}
+            onClick={() => {
+              haptic("medium");
+              fetchWave(userId, 10, mood).then((tracks) => {
+                if (tracks.length > 0 && onPlayAll) onPlayAll(tracks);
+                else if (tracks.length > 0) onPlayTrack(tracks[0]);
+              }).catch(() => {});
+            }}
+            style={{
+              padding: "10px 18px", borderRadius: 16, border: "none",
+              background: gradient, color: "#fff",
+              fontSize: 12, fontWeight: 700, cursor: "pointer",
+              whiteSpace: "nowrap", flexShrink: 0,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+              transition: "transform 0.15s ease",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* ===== Wave Section ===== */}
       <div style={{
         marginBottom: 28, padding: 16, borderRadius: 22,

@@ -126,7 +126,7 @@ export function App() {
   const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = user?.id ?? 0;
 
-  const [view, setView] = useState<View>("player");
+  const [view, setView] = useState<View>("foryou");
   const [partyCode, setPartyCode] = useState<string | null>(null);
   const [partyReadonly, setPartyReadonly] = useState(false);
   const [state, setState] = useState<PlayerState>({
@@ -970,6 +970,8 @@ export function App() {
       fetchPlayerState(userId).then((s) => {
         // On initial load, force paused state — user must press play
         setState({ ...s, is_playing: false });
+        // If user has a track loaded, switch to player view
+        if (s.current_track) setView("player");
       }).catch(() => {});
     }
     // Handle deep link from share: startapp=play_VIDEOID
@@ -977,6 +979,7 @@ export function App() {
     if (startParam && startParam.startsWith("play_")) {
       const videoId = startParam.slice(5);
       if (videoId) {
+        setView("player");
         sendAction("play", videoId).then(setState).catch(() => {});
       }
     }

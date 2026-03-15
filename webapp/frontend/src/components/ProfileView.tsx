@@ -1,8 +1,9 @@
 import { useState, useEffect } from "preact/hooks";
 import type { Track } from "../api";
+import { fetchFavoritesList } from "../api";
 import {
   IconCrown, IconFire, IconMusicNote, IconChart, IconPlaySmall,
-  IconDiamond, IconSpinner, IconHeadphones, IconMusic,
+  IconDiamond, IconSpinner, IconHeadphones, IconMusic, IconHeart,
 } from "./Icons";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -109,6 +110,8 @@ export function ProfileView({
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [favorites, setFavorites] = useState<Track[]>([]);
+  const [showAllFavs, setShowAllFavs] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -126,6 +129,8 @@ export function ProfileView({
       .then((data: UserStats) => setStats(data))
       .catch(() => setError(true))
       .finally(() => setLoading(false));
+    // Load favorites
+    fetchFavoritesList().then(setFavorites).catch(() => {});
   }, [userId]);
 
   // ── Loading / error states ──────────────────────────────────────────
@@ -419,6 +424,72 @@ export function ProfileView({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Favorites ────────────────────────────────────────────── */}
+      {favorites.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            marginBottom: 10,
+          }}>
+            <div style={{
+              fontSize: 15, fontWeight: 600, color: textColor,
+              letterSpacing: 0.4, display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <IconHeart size={16} color={highlight} filled /> Избранное
+            </div>
+            {favorites.length > 5 && (
+              <button onClick={() => setShowAllFavs(!showAllFavs)} style={{
+                background: "none", border: "none", color: highlight,
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>
+                {showAllFavs ? "Свернуть" : `Все (${favorites.length})`}
+              </button>
+            )}
+          </div>
+          <div style={{
+            display: "flex", gap: 10, overflowX: showAllFavs ? undefined : "auto",
+            flexWrap: showAllFavs ? "wrap" : undefined,
+            scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+            padding: "2px 0",
+          }}>
+            {(showAllFavs ? favorites : favorites.slice(0, 10)).map((t, idx) => (
+              <div
+                key={`fav-${t.video_id}-${idx}`}
+                onClick={() => { haptic("light"); onPlayTrack(t); }}
+                style={{
+                  minWidth: showAllFavs ? "calc(50% - 5px)" : 110,
+                  maxWidth: showAllFavs ? "calc(50% - 5px)" : 110,
+                  cursor: "pointer", borderRadius: 14, overflow: "hidden",
+                  background: cardBg, border: cardBorder,
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{
+                  width: "100%", aspectRatio: "1", overflow: "hidden",
+                  background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  {t.cover_url
+                    ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <IconMusic size={28} color={hintColor} />
+                  }
+                </div>
+                <div style={{ padding: "6px 8px" }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 600, color: textColor,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}>{t.title}</div>
+                  <div style={{
+                    fontSize: 10, color: hintColor,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}>{t.artist}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
