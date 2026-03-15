@@ -861,82 +861,165 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             100% { opacity: 0; transform: translateX(160%) rotate(18deg); }
           }
         `}</style>
-        {/* Cover — luxury framed */}
-        <div
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          style={{
-            position: "relative",
-            width: 260,
-            height: 260,
-            margin: "0 auto 20px",
-            borderRadius: vinylSpin ? "50%" : 24,
-            background: track
-              ? `linear-gradient(135deg, rgba(255,167,38,0.15), rgba(255,213,79,0.08))`
-              : "linear-gradient(135deg, #ff6d00 0%, #ffd54f 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: track
-              ? `0 12px 40px rgba(255, 109, 0, 0.25), 0 0 0 1px ${borderGold}, inset 0 0 0 1px rgba(255,213,79,0.1)`
-              : "0 8px 24px rgba(255,109,0,0.3)",
-            animation: vinylSpin && state.is_playing && track ? "vinylSpin 4s linear infinite" : (state.is_playing ? "tequilaGlow 3.6s ease-in-out infinite" : "none"),
-            overflow: "hidden",
-            transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !vinylSpin ? 1.03 : 1})`,
-            willChange: "transform",
-            touchAction: "pan-y",
-            userSelect: "none",
-          }}
-        >
-          {track?.cover_url ? (
-            <img
-              src={track.cover_url}
-              alt="Cover"
-              style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", borderRadius: vinylSpin ? "50%" : 0 }}
-              draggable={false}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-            />
-          ) : (
-            track ? <IconMusic size={64} color="rgba(255,245,220,0.8)" /> : <IconMusicNote size={48} color="rgba(255,245,220,0.5)" />
+        {/* ── Turntable ── */}
+        <div style={{ position: "relative", width: 280, margin: "0 auto 20px" }}>
+          {/* Tonearm */}
+          {vinylSpin && (
+            <svg
+              viewBox="0 0 60 130"
+              style={{
+                position: "absolute",
+                top: -16,
+                right: 2,
+                width: 52,
+                height: 112,
+                zIndex: 12,
+                pointerEvents: "none",
+                transformOrigin: "48px 10px",
+                transform: state.is_playing && track ? "rotate(24deg)" : "rotate(0deg)",
+                transition: "transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.5))",
+              }}
+            >
+              <circle cx="54" cy="3" r="5" fill="#555" stroke="#777" strokeWidth="0.5" />
+              <circle cx="48" cy="10" r="6.5" fill="#4a3a2a" stroke={borderGold} strokeWidth="0.8" />
+              <circle cx="48" cy="10" r="2.5" fill="#2a1a0a" />
+              <line x1="48" y1="16" x2="12" y2="108" stroke="url(#tq-arm-grad)" strokeWidth="2.8" strokeLinecap="round" />
+              <line x1="12" y1="108" x2="6" y2="122" stroke="#bba070" strokeWidth="3.5" strokeLinecap="round" />
+              <rect x="1" y="120" width="12" height="5" rx="1.5" fill="#998060" stroke={borderGold} strokeWidth="0.5" />
+              <line x1="7" y1="125" x2="7" y2="129" stroke="#d4b878" strokeWidth="1.2" />
+              <defs>
+                <linearGradient id="tq-arm-grad" x1="48" y1="16" x2="12" y2="108" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#aa9070" />
+                  <stop offset="100%" stopColor="#887050" />
+                </linearGradient>
+              </defs>
+            </svg>
           )}
-          {/* Vinyl center hole */}
-          {vinylSpin && track && (
+
+          {/* Disc */}
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            style={{
+              position: "relative",
+              width: 260,
+              height: 260,
+              margin: "0 auto",
+              borderRadius: vinylSpin ? "50%" : 24,
+              background: track
+                ? `linear-gradient(135deg, rgba(255,167,38,0.15), rgba(255,213,79,0.08))`
+                : "linear-gradient(135deg, #ff6d00 0%, #ffd54f 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: track
+                ? (vinylSpin
+                  ? `0 12px 40px rgba(255, 109, 0, 0.25), 0 0 0 2px ${borderGold}, 0 0 0 4px rgba(26,18,11,0.8), 0 0 0 5px ${borderGold}`
+                  : `0 12px 40px rgba(255, 109, 0, 0.25), 0 0 0 1px ${borderGold}, inset 0 0 0 1px rgba(255,213,79,0.1)`)
+                : "0 8px 24px rgba(255,109,0,0.3)",
+              animation: vinylSpin && state.is_playing && track ? "vinylSpin 4s linear infinite" : (state.is_playing ? "tequilaGlow 3.6s ease-in-out infinite" : "none"),
+              overflow: "hidden",
+              transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
+              transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !vinylSpin ? 1.03 : 1})`,
+              willChange: "transform",
+              touchAction: "pan-y",
+              userSelect: "none",
+            }}
+          >
+            {track?.cover_url ? (
+              <img
+                src={track.cover_url}
+                alt="Cover"
+                style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", borderRadius: vinylSpin ? "50%" : 0 }}
+                draggable={false}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+            ) : (
+              track ? <IconMusic size={64} color="rgba(255,245,220,0.8)" /> : <IconMusicNote size={48} color="rgba(255,245,220,0.5)" />
+            )}
+            {/* Vinyl grooves */}
+            {vinylSpin && track && (
+              <div style={{
+                position: "absolute",
+                inset: 0,
+                borderRadius: "50%",
+                background: "repeating-radial-gradient(circle, transparent 0px, transparent 3px, rgba(0,0,0,0.06) 3.5px, transparent 4px)",
+                pointerEvents: "none",
+                zIndex: 1,
+              }} />
+            )}
+            {/* Center label */}
+            {vinylSpin && track && (
+              <div style={{
+                position: "absolute",
+                width: 86,
+                height: 86,
+                borderRadius: "50%",
+                background: "radial-gradient(circle at 35% 35%, #2a1f10, #1a120b 70%)",
+                border: `1.5px solid ${borderGold}`,
+                boxShadow: "0 0 16px rgba(0,0,0,0.7), inset 0 1px 3px rgba(255,213,79,0.15)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 3,
+                padding: "6px 8px",
+                overflow: "hidden",
+              }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#0a0806", border: `1px solid ${borderGold}`, marginBottom: 3, flexShrink: 0 }} />
+                <div style={{
+                  fontSize: 7,
+                  color: "#c8a882",
+                  textAlign: "center",
+                  width: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.2,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                }}>{track.artist}</div>
+                <div style={{
+                  fontSize: "clamp(6.5px, 2vw, 8.5px)",
+                  color: "#fef0e0",
+                  fontWeight: 700,
+                  textAlign: "center",
+                  width: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.2,
+                  marginTop: 1,
+                }}>{track.title}</div>
+                <div style={{ fontSize: 6, color: "rgba(200,168,130,0.5)", marginTop: 2, letterSpacing: "0.08em" }}>{track.duration_fmt}</div>
+              </div>
+            )}
+            {/* Warm visualizer */}
+            {track && <AudioVisualizer isPlaying={state.is_playing} accentColor="#ff6d00" />}
+            {/* Golden shimmer border overlay */}
             <div style={{
               position: "absolute",
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: "radial-gradient(circle, #1a120b 40%, rgba(26,18,11,0.9) 60%, transparent 100%)",
-              border: `2px solid ${borderGold}`,
-              boxShadow: "0 0 12px rgba(0,0,0,0.6)",
-              zIndex: 2,
-            }} />
-          )}
-          {/* Warm visualizer */}
-          {track && <AudioVisualizer isPlaying={state.is_playing} accentColor="#ff6d00" />}
-          {/* Golden shimmer border overlay */}
-          <div style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: 24,
-            border: `1.5px solid ${borderGold}`,
-            pointerEvents: "none",
-          }} />
-          {state.is_playing && (
-            <div style={{
-              position: "absolute",
-              top: -20,
-              left: -60,
-              width: 120,
-              height: 320,
-              background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,244,200,0.26), rgba(255,255,255,0))",
-              transform: "rotate(18deg)",
-              animation: "tequilaShimmer 2.8s ease-in-out infinite",
+              inset: 0,
+              borderRadius: vinylSpin ? "50%" : 24,
+              border: `1.5px solid ${borderGold}`,
               pointerEvents: "none",
             }} />
-          )}
+            {state.is_playing && !vinylSpin && (
+              <div style={{
+                position: "absolute",
+                top: -20,
+                left: -60,
+                width: 120,
+                height: 320,
+                background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,244,200,0.26), rgba(255,255,255,0))",
+                transform: "rotate(18deg)",
+                animation: "tequilaShimmer 2.8s ease-in-out infinite",
+                pointerEvents: "none",
+              }} />
+            )}
+          </div>
         </div>
 
         {/* Glass info card */}
@@ -1596,58 +1679,139 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           to { transform: rotate(360deg); }
         }
       `}</style>
-      {/* Cover container with swipe */}
-      <div
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        style={{
-          position: "relative",
-          width: 240,
-          height: 240,
-          margin: "0 auto 24px",
-          borderRadius: vinylSpin ? "50%" : 20,
-          background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : "linear-gradient(135deg, #7c4dff 0%, #e040fb 100%)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 64,
-          boxShadow: track ? (vinylSpin ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 3px rgba(60,60,80,0.5)` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
-          overflow: "hidden",
-          transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-          transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !vinylSpin ? 1.02 : 1})`,
-          animation: vinylSpin && state.is_playing && track ? "vinylSpin 4s linear infinite" : "none",
-          willChange: "transform",
-          touchAction: "pan-y",
-          userSelect: "none",
-        }}
-      >
-        {track?.cover_url ? (
-          <img
-            src={track.cover_url}
-            alt="Cover"
-            style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", borderRadius: vinylSpin ? "50%" : 0 }}
-            draggable={false}
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          />
-        ) : (
-          track ? <IconMusic size={64} color="rgba(255,255,255,0.8)" /> : <IconMusicNote size={48} color="rgba(255,255,255,0.5)" />
+      {/* ── Turntable ── */}
+      <div style={{ position: "relative", width: 268, margin: "0 auto 24px" }}>
+        {/* Tonearm */}
+        {vinylSpin && (
+          <svg
+            viewBox="0 0 60 130"
+            style={{
+              position: "absolute",
+              top: -14,
+              right: 4,
+              width: 48,
+              height: 106,
+              zIndex: 12,
+              pointerEvents: "none",
+              transformOrigin: "48px 10px",
+              transform: state.is_playing && track ? "rotate(24deg)" : "rotate(0deg)",
+              transition: "transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+              filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.6))",
+            }}
+          >
+            <circle cx="54" cy="3" r="5" fill="#444" stroke="#666" strokeWidth="0.5" />
+            <circle cx="48" cy="10" r="6.5" fill="#2a2a3e" stroke={accentColor} strokeWidth="0.8" />
+            <circle cx="48" cy="10" r="2.5" fill="#1a1a2e" />
+            <line x1="48" y1="16" x2="12" y2="108" stroke="url(#df-arm-grad)" strokeWidth="2.8" strokeLinecap="round" />
+            <line x1="12" y1="108" x2="6" y2="122" stroke="#aaa" strokeWidth="3.5" strokeLinecap="round" />
+            <rect x="1" y="120" width="12" height="5" rx="1.5" fill="#888" stroke={accentColor} strokeWidth="0.5" />
+            <line x1="7" y1="125" x2="7" y2="129" stroke="#ccc" strokeWidth="1.2" />
+            <defs>
+              <linearGradient id="df-arm-grad" x1="48" y1="16" x2="12" y2="108" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#999" />
+                <stop offset="100%" stopColor="#666" />
+              </linearGradient>
+            </defs>
+          </svg>
         )}
-        {/* Vinyl center hole */}
-        {vinylSpin && track && (
-          <div style={{
-            position: "absolute",
-            width: 32,
-            height: 32,
-            borderRadius: "50%",
-            background: "radial-gradient(circle, #1a1a2e 40%, rgba(26,26,46,0.9) 60%, transparent 100%)",
-            border: `2px solid ${accentColor}`,
-            boxShadow: "0 0 12px rgba(0,0,0,0.6)",
-            zIndex: 2,
-          }} />
-        )}
-        {/* Audio Visualizer overlay */}
-        {track && <AudioVisualizer isPlaying={state.is_playing} accentColor={accentColor} />}
+
+        {/* Disc */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          style={{
+            position: "relative",
+            width: 240,
+            height: 240,
+            margin: "0 auto",
+            borderRadius: vinylSpin ? "50%" : 20,
+            background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : "linear-gradient(135deg, #7c4dff 0%, #e040fb 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 64,
+            boxShadow: track ? (vinylSpin ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 2px ${accentColor}, 0 0 0 4px rgba(26,26,46,0.8), 0 0 0 5px rgba(124,77,255,0.3)` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
+            overflow: "hidden",
+            transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
+            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !vinylSpin ? 1.02 : 1})`,
+            animation: vinylSpin && state.is_playing && track ? "vinylSpin 4s linear infinite" : "none",
+            willChange: "transform",
+            touchAction: "pan-y",
+            userSelect: "none",
+          }}
+        >
+          {track?.cover_url ? (
+            <img
+              src={track.cover_url}
+              alt="Cover"
+              style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", borderRadius: vinylSpin ? "50%" : 0 }}
+              draggable={false}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          ) : (
+            track ? <IconMusic size={64} color="rgba(255,255,255,0.8)" /> : <IconMusicNote size={48} color="rgba(255,255,255,0.5)" />
+          )}
+          {/* Vinyl grooves */}
+          {vinylSpin && track && (
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: "50%",
+              background: "repeating-radial-gradient(circle, transparent 0px, transparent 3px, rgba(0,0,0,0.07) 3.5px, transparent 4px)",
+              pointerEvents: "none",
+              zIndex: 1,
+            }} />
+          )}
+          {/* Center label */}
+          {vinylSpin && track && (
+            <div style={{
+              position: "absolute",
+              width: 80,
+              height: 80,
+              borderRadius: "50%",
+              background: "radial-gradient(circle at 35% 35%, #2a2a3e, #1a1a2e 70%)",
+              border: `1.5px solid ${accentColor}`,
+              boxShadow: `0 0 16px rgba(0,0,0,0.7), inset 0 1px 3px ${accentColorAlpha}`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 3,
+              padding: "6px 8px",
+              overflow: "hidden",
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#0a0a1e", border: `1px solid ${accentColor}`, marginBottom: 3, flexShrink: 0 }} />
+              <div style={{
+                fontSize: 7,
+                color: "var(--tg-theme-hint-color, #aaa)",
+                textAlign: "center",
+                width: "100%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                lineHeight: 1.2,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}>{track.artist}</div>
+              <div style={{
+                fontSize: "clamp(6.5px, 2vw, 8.5px)",
+                color: "#fff",
+                fontWeight: 700,
+                textAlign: "center",
+                width: "100%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                lineHeight: 1.2,
+                marginTop: 1,
+              }}>{track.title}</div>
+              <div style={{ fontSize: 6, color: "var(--tg-theme-hint-color, rgba(170,170,170,0.5))", marginTop: 2, letterSpacing: "0.08em" }}>{track.duration_fmt}</div>
+            </div>
+          )}
+          {/* Audio Visualizer overlay */}
+          {track && <AudioVisualizer isPlaying={state.is_playing} accentColor={accentColor} />}
+        </div>
       </div>
 
       {/* Track info with Marquee */}
