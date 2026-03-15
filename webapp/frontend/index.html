@@ -42,6 +42,11 @@
       50% { opacity: 0.32; }
       100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
     }
+    @keyframes tequilaPlaceholderShimmer {
+      0% { filter: blur(28px) saturate(1.2) brightness(0.85); }
+      50% { filter: blur(24px) saturate(1.4) brightness(1.05); }
+      100% { filter: blur(28px) saturate(1.2) brightness(0.85); }
+    }
     @keyframes tequilaLoaderFloat {
       0%, 100% { transform: translateY(0px) scale(1); }
       50% { transform: translateY(-8px) scale(1.012); }
@@ -250,6 +255,7 @@
         linear-gradient(180deg, rgba(8,6,6,0.12) 0%, rgba(8,6,6,0.28) 50%, rgba(8,6,6,0.92) 84%, rgba(4,4,5,0.98) 100%),
         linear-gradient(135deg, rgba(255,255,255,0.06), transparent 38%, rgba(255,193,7,0.06));
       pointer-events: none;
+      z-index: 2;
     }
     .boot-loader-image-wrap::before {
       content: "";
@@ -258,10 +264,26 @@
       width: 26%;
       background: linear-gradient(90deg, transparent, rgba(255, 239, 184, 0.22), rgba(255, 193, 7, 0.12), transparent);
       pointer-events: none;
-      z-index: 1;
+      z-index: 3;
       animation: tequilaImageSweep 4.8s ease-in-out infinite;
     }
+    /* Blur placeholder — inline base64, visible instantly */
+    .boot-loader-placeholder {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      filter: blur(28px) saturate(1.2) contrast(1.05);
+      transform: scale(1.15); /* hide blur edges */
+      animation: tequilaPlaceholderShimmer 3s ease-in-out infinite;
+      z-index: 0;
+    }
+    /* Full image — hidden until loaded, then fades in over placeholder */
     .boot-loader-image {
+      position: absolute;
+      inset: 0;
       display: block;
       width: 100%;
       height: 100%;
@@ -269,6 +291,12 @@
       object-position: center;
       animation: tequilaLoaderZoom 4.8s ease-out forwards;
       filter: saturate(1.03) contrast(1.03);
+      opacity: 0;
+      transition: opacity 800ms cubic-bezier(.22,.8,.24,1);
+      z-index: 1;
+    }
+    .boot-loader-image.is-loaded {
+      opacity: 1;
     }
     .boot-loader-caption {
       position: absolute;
@@ -378,7 +406,8 @@
         <span class="boot-loader-sparkle s6">✦</span>
       </div>
       <div class="boot-loader-image-wrap">
-        <img class="boot-loader-image" src="/tequila-loader.webp" alt="Luxury loader" />
+        <img class="boot-loader-placeholder" src="data:image/webp;base64,UklGRqYAAABXRUJQVlA4IJoAAAAQBQCdASoSACAAPzmIuVOvKSWisAgB4CcJZwDMWCHfaEAY2ggMCP/lfonz9ZbHBENKAP7r6UjHjRJM9a+Yy4noDsQ1c8T+MsA5VcLHCTZh7MHQ/WW/t4eVcmCFES/PDvlVFoDb0LRBRW7zybvJBUwbkU5g3FxOmUtuZnJ6plER57rufnqGB/v69A8XoGCCI3kEvPLT0Yb2q4AA" alt="" aria-hidden="true" />
+        <img class="boot-loader-image" src="/tequila-loader.webp" alt="Luxury loader" onload="this.classList.add('is-loaded')" />
       </div>
       <div class="boot-loader-caption"><span class="spark">✦</span> Inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘 <span class="spark">✦</span></div>
       <div class="boot-loader-subline">Luxury sound entrance</div>
