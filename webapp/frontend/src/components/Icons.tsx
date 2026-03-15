@@ -85,17 +85,17 @@ export const IconInfo = ({ size = 16, color = "currentColor", strokeWidth = 2 }:
   </svg>
 );
 
-// Equalizer bars (animated)
+// Equalizer bars (animated) — bars grow upward from bottom
 export const IconEqualizer = ({ size = 20, color = "currentColor", animated = true }: IconProps & { animated?: boolean }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-    <rect x="4" y="10" width="4" height="10" rx="1" style={animated ? { animation: "eq1 0.4s ease infinite alternate" } : {}}>
-      {animated && <animate attributeName="height" values="10;16;10" dur="0.4s" repeatCount="indefinite"/>}
+    <rect x="4" y="10" width="4" height="10" rx="1">
+      {animated && <><animate attributeName="y" values="10;4;10" dur="0.4s" repeatCount="indefinite"/><animate attributeName="height" values="10;16;10" dur="0.4s" repeatCount="indefinite"/></>}
     </rect>
     <rect x="10" y="6" width="4" height="14" rx="1">
-      {animated && <animate attributeName="height" values="14;8;14" dur="0.5s" repeatCount="indefinite"/>}
+      {animated && <><animate attributeName="y" values="6;12;6" dur="0.5s" repeatCount="indefinite"/><animate attributeName="height" values="14;8;14" dur="0.5s" repeatCount="indefinite"/></>}
     </rect>
     <rect x="16" y="8" width="4" height="12" rx="1">
-      {animated && <animate attributeName="height" values="12;18;12" dur="0.35s" repeatCount="indefinite"/>}
+      {animated && <><animate attributeName="y" values="8;2;8" dur="0.35s" repeatCount="indefinite"/><animate attributeName="height" values="12;18;12" dur="0.35s" repeatCount="indefinite"/></>}
     </rect>
   </svg>
 );
@@ -280,10 +280,11 @@ export const IconPlaySmall = ({ size = 12, color = "currentColor" }: IconProps) 
   </svg>
 );
 
-// Diamond icon
+// Diamond icon — with facet detail
 export const IconDiamond = ({ size = 12, color = "currentColor" }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
-    <polygon points="12,2 22,12 12,22 2,12"/>
+    <polygon points="12,2 22,12 12,22 2,12" opacity="0.9"/>
+    <path d="M12 2L8 12 12 22M12 2L16 12 12 22M2 12h20" stroke={color} strokeWidth="0.5" fill="none" opacity="0.3"/>
   </svg>
 );
 
@@ -309,11 +310,16 @@ export const IconSpatial = ({ size = 18, color = "currentColor", strokeWidth = 2
   </svg>
 );
 
-// Speed/Playback rate icon
+// Speed/Playback rate icon — gauge/speedometer
 export const IconSpeed = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10"/>
-    <polyline points="12 6 12 12 16 14"/>
+    <path d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/>
+    <path d="M12 6v2"/>
+    <path d="M6 12h2"/>
+    <path d="M18 12h-2"/>
+    <path d="M7.76 7.76l1.42 1.42"/>
+    <path d="M14.83 9.17l2.83-2.83"/>
+    <circle cx="12" cy="12" r="2"/>
   </svg>
 );
 
@@ -337,10 +343,17 @@ export const IconMood = ({ size = 18, color = "currentColor", strokeWidth = 2 }:
   </svg>
 );
 
-// Party/Celebration icon
+// Party/Celebration icon — party hat with confetti
 export const IconParty = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+    <path d="M5.8 21.2 12 3l6.2 18.2"/>
+    <path d="M6.5 18h11"/>
+    <path d="M8 14h8"/>
+    <circle cx="18" cy="5" r="1" fill={color} stroke="none"/>
+    <circle cx="20" cy="9" r="0.8" fill={color} stroke="none"/>
+    <path d="M16 2l1 2"/>
+    <path d="M20 3l-1 1.5"/>
+    <circle cx="4" cy="8" r="0.8" fill={color} stroke="none"/>
   </svg>
 );
 
@@ -373,10 +386,12 @@ export const IconMoodChill = ({ size = 18, color = "currentColor" }: IconProps) 
   </svg>
 );
 
-/** ⚡ Energy — lightning bolt */
+/** ⚡ Energy — lightning bolt with energy aura */
 export const IconMoodEnergy = ({ size = 18, color = "currentColor" }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    <path d="M7 3l-2 3" strokeWidth="1.5" opacity="0.4"/>
+    <path d="M17 19l2 3" strokeWidth="1.5" opacity="0.4"/>
   </svg>
 );
 
@@ -448,12 +463,14 @@ export const IconTrending = ({ size = 18, color = "currentColor", strokeWidth = 
   </svg>
 );
 
-/** 🔍 Similar/Discover icon */
+/** 🔍 Similar/Related — branching nodes */
 export const IconSimilar = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10"/>
-    <path d="M8 12h8"/>
-    <path d="M12 8v8"/>
+    <circle cx="5" cy="12" r="3"/>
+    <circle cx="19" cy="6" r="3"/>
+    <circle cx="19" cy="18" r="3"/>
+    <path d="M8 10.5l8-3.5"/>
+    <path d="M8 13.5l8 3.5"/>
   </svg>
 );
 
@@ -498,8 +515,9 @@ export const IconRobot = ({ size = 18, color = "currentColor", strokeWidth = 2 }
     <rect x="3" y="11" width="18" height="10" rx="2"/>
     <circle cx="12" cy="5" r="2"/>
     <path d="M12 7v4"/>
-    <line x1="8" y1="16" x2="8" y2="16"/>
-    <line x1="16" y1="16" x2="16" y2="16"/>
+    <circle cx="8" cy="16" r="1" fill={color} stroke="none"/>
+    <circle cx="16" cy="16" r="1" fill={color} stroke="none"/>
+    <path d="M10 19h4" strokeWidth="1.5"/>
   </svg>
 );
 
@@ -518,13 +536,14 @@ export const IconTV = ({ size = 18, color = "currentColor", strokeWidth = 2 }: I
   </svg>
 );
 
-/** 🎭 Stage/Theater icon */
+/** 🎭 Stage/Theater icon — theater masks */
 export const IconStage = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="9" cy="9" r="5"/>
-    <path d="M14 9a5 5 0 0 1 5 5"/>
-    <circle cx="17" cy="17" r="3"/>
-    <path d="M6 14a5 5 0 0 0-3 5"/>
+    <path d="M4 4h10a2 2 0 0 1 2 2v6a6 6 0 0 1-12 0V6a2 2 0 0 1 2-2z"/>
+    <circle cx="7" cy="9" r="1" fill={color} stroke="none"/>
+    <circle cx="12" cy="9" r="1" fill={color} stroke="none"/>
+    <path d="M7 13c1 1 3.5 1 5 0"/>
+    <path d="M16 8h2a2 2 0 0 1 2 2v4a6 6 0 0 1-4 5.6" opacity="0.5"/>
   </svg>
 );
 
