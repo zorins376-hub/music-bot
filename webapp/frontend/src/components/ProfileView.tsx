@@ -149,10 +149,24 @@ export function ProfileView({
   }, [isPremium]);
 
   useEffect(() => {
+    // Skip fetch entirely for invalid userId — show error immediately
+    if (!userId || userId <= 0) {
+      setLoading(false);
+      setError(true);
+      return;
+    }
+
     setLoading(true);
     setError(false);
+    let settled = false;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 10000); // 10s timeout
+
+    // Defensive fallback: force loading=false after 12s no matter what
+    const fallback = setTimeout(() => {
+      if (!settled) { settled = true; setLoading(false); setError(true); }
+    }, 12000);
+
     fetch(`/api/stats/${userId}`, {
       headers: {
         "Content-Type": "application/json",
@@ -164,11 +178,11 @@ export function ProfileView({
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: UserStats) => setStats(data))
-      .catch(() => setError(true))
-      .finally(() => { clearTimeout(timer); setLoading(false); });
+      .then((data: UserStats) => { if (!settled) setStats(data); })
+      .catch(() => { if (!settled) setError(true); })
+      .finally(() => { settled = true; clearTimeout(timer); clearTimeout(fallback); setLoading(false); });
     fetchFavoritesList().then(setFavorites).catch(() => {});
-    return () => { ctrl.abort(); clearTimeout(timer); };
+    return () => { ctrl.abort(); clearTimeout(timer); clearTimeout(fallback); };
   }, [userId]);
 
   // ── Avatar upload handler ────────────────────────────────────────────

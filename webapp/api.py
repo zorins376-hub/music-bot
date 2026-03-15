@@ -3559,4 +3559,7 @@ if _FRONTEND_DIST.is_dir():
         file_path = _FRONTEND_DIST / full_path
         if full_path and file_path.is_file() and _FRONTEND_DIST in file_path.resolve().parents:
             return FileResponse(file_path)
-        return FileResponse(_FRONTEND_DIST / "index.html")
+        return FileResponse(
+            _FRONTEND_DIST / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
