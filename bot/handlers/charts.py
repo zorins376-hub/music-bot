@@ -686,11 +686,11 @@ _CHART_FETCHERS = {
 }
 
 _CHART_LABELS = {
-    "shazam": "🎵 Apple Music Global Top",
-    "youtube": "▶ YouTube Music Top",
-    "vk": "🇷🇺 Яндекс Топ Россия",
-    "rusradio": "📻 Русское Радио — Золотой Граммофон",
-    "europa": "🎶 Европа Плюс TOP40",
+    "shazam": "Apple Music Global",
+    "youtube": "YouTube Music Top",
+    "vk": "Яндекс Топ Россия",
+    "rusradio": "Русское Радио",
+    "europa": "Европа Плюс TOP40",
 }
 
 

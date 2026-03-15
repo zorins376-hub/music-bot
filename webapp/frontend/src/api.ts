@@ -449,7 +449,7 @@ export interface Party {
   current_reactions: Record<string, number>;
 }
 
-export async function createParty(name = "Party 🎉"): Promise<Party> {
+export async function createParty(name = "Party"): Promise<Party> {
   const r = await fetch(`${API_BASE}/party`, {
     method: "POST",
     headers: getHeaders(),

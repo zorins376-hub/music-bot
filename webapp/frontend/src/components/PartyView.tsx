@@ -123,16 +123,16 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       try {
         const msg = JSON.parse(ev.data);
         if (msg.event === "closed") {
-          showToast("🏁 Пати завершена!");
+          showToast("Пати завершена!");
           setParty(null);
           return;
         }
 
         if (msg.event === "member_joined" && msg.data.name) {
-          showToast(`👋 ${msg.data.name} присоединился`);
+          showToast(`${msg.data.name} присоединился`);
         }
         if (msg.event === "track_added") {
-          showToast(`🎵 ${msg.data.added_by_name} добавил: ${msg.data.title}`);
+          showToast(`${msg.data.added_by_name} добавил: ${msg.data.title}`);
         }
         if (msg.event === "reaction" && msg.data?.emoji) {
           const burstId = reactionBurstIdRef.current + 1;
@@ -185,7 +185,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
         await onPlaybackAction?.("seek", undefined, seekPosition);
       }
     } catch {
-      showToast("❌ Не удалось синхронизировать playback");
+      showToast("Не удалось синхронизировать playback");
     }
   };
 
@@ -195,7 +195,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       const updated = await updatePartyMemberRole(party.invite_code, memberUserId, currentRole === "cohost" ? "listener" : "cohost");
       setParty(updated);
     } catch {
-      showToast("❌ Не удалось обновить роль");
+      showToast("Не удалось обновить роль");
     }
   };
 
@@ -205,7 +205,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       const updated = await reorderPartyTrack(party.invite_code, fromPosition, toPosition);
       setParty(updated);
     } catch {
-      showToast("❌ Не удалось изменить порядок");
+      showToast("Не удалось изменить порядок");
     }
   };
 
@@ -215,7 +215,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       const updated = await playNextPartyTrack(party.invite_code, videoId);
       setParty(updated);
     } catch {
-      showToast("❌ Не удалось перенести трек наверх");
+      showToast("Не удалось перенести трек наверх");
     }
   };
 
@@ -223,9 +223,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     if (!party) return;
     try {
       const playlist = await savePartyAsPlaylist(party.invite_code);
-      showToast(`💾 Сохранено в плейлист: ${playlist.name}`);
+      showToast(`Сохранено в плейлист: ${playlist.name}`);
     } catch {
-      showToast("❌ Не удалось сохранить пати");
+      showToast("Не удалось сохранить пати");
     }
   };
 
@@ -241,7 +241,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       const updated = await reactToPartyTrack(party.invite_code, emoji);
       setParty(updated);
     } catch {
-      showToast("❌ Не удалось отправить реакцию");
+      showToast("Не удалось отправить реакцию");
     }
   };
 
@@ -250,9 +250,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     try {
       const updated = await runPartyAutoDj(party.invite_code, 5);
       setParty(updated);
-      showToast("🤖 AI Auto-DJ добавил новые треки");
+      showToast("Auto-DJ добавил новые треки");
     } catch {
-      showToast("❌ Auto-DJ не смог подобрать треки");
+      showToast("Auto-DJ не смог подобрать треки");
     }
   };
 
@@ -263,7 +263,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       setParty(updated);
       setChatMessage("");
     } catch {
-      showToast("❌ Не удалось отправить сообщение");
+      showToast("Не удалось отправить сообщение");
     }
   };
 
@@ -272,9 +272,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     try {
       const updated = await deletePartyChatMessage(party.invite_code, messageId);
       setParty(updated);
-      showToast("🧹 Сообщение удалено");
+      showToast("Сообщение удалено");
     } catch {
-      showToast("❌ Не удалось удалить сообщение");
+      showToast("Не удалось удалить сообщение");
     }
   };
 
@@ -283,9 +283,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     try {
       const updated = await clearPartyChat(party.invite_code);
       setParty(updated);
-      showToast("🫧 Чат очищен");
+      showToast("Чат очищен");
     } catch {
-      showToast("❌ Не удалось очистить чат");
+      showToast("Не удалось очистить чат");
     }
   };
 
@@ -376,7 +376,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
           setParty(p);
           connectSSE(initialCode);
         })
-        .catch(() => showToast("❌ Пати не найдена"))
+        .catch(() => showToast("Пати не найдена"))
         .finally(() => setLoading(false));
     } else {
       setLoading(true);
@@ -441,7 +441,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   }, [searchQuery]);
 
   const handleCreate = async () => {
-    const name = newName.trim() || "Party 🎉";
+    const name = newName.trim() || "Party";
     haptic("medium");
     try {
       const p = await createParty(name);
@@ -450,7 +450,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       setShowCreate(false);
       setNewName("");
     } catch {
-      showToast("❌ Не удалось создать пати");
+      showToast("Не удалось создать пати");
     }
   };
 
@@ -462,7 +462,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       setParty(p);
       connectSSE(code);
     } catch {
-      showToast("❌ Пати не найдена");
+      showToast("Пати не найдена");
     }
     setLoading(false);
   };
@@ -479,9 +479,9 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     } catch (err: any) {
       const detail = err?.message || "";
       if (detail.includes("409") || detail.includes("already")) {
-        showToast("⚠️ Этот трек уже в очереди");
+        showToast("Этот трек уже в очереди");
       } else {
-        showToast("❌ Ошибка при добавлении");
+        showToast("Ошибка при добавлении");
       }
     }
   };
@@ -502,7 +502,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       const updated = await skipPartyTrack(party.invite_code);
       setParty(updated);
     } catch {
-      showToast("❌ Ошибка");
+      showToast("Ошибка");
     }
   };
 
@@ -519,7 +519,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       setParty(null);
       eventSourceRef.current?.close();
     } catch {
-      showToast("❌ Только DJ может закрыть пати");
+      showToast("Только DJ может закрыть пати");
     }
   };
 
@@ -543,12 +543,12 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     if (!party || !recap) return;
     haptic("light");
     const summary = [
-      `🎉 Recap пати «${party.name}»`,
-      `🎶 Треков: ${recap.total_tracks}`,
-      `👥 Участников: ${recap.total_members}`,
-      `⏱️ Длительность: ${formatDuration(recap.total_duration)}`,
-      `⏭️ Skip votes: ${recap.total_skip_votes}`,
-      recap.top_artists[0] ? `🏆 Топ артист: ${recap.top_artists[0].label}` : null,
+      `Recap пати «${party.name}»`,
+      `Треков: ${recap.total_tracks}`,
+      `Участников: ${recap.total_members}`,
+      `Длительность: ${formatDuration(recap.total_duration)}`,
+      `Skip votes: ${recap.total_skip_votes}`,
+      recap.top_artists[0] ? `Топ артист: ${recap.top_artists[0].label}` : null,
       `#${party.invite_code}`,
     ].filter(Boolean).join("\n");
     const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
@@ -556,7 +556,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(summary);
-        showToast("📋 Recap скопирован");
+        showToast("Recap скопирован");
       }
     } catch {}
     window.open(shareUrl, "_blank");
@@ -615,7 +615,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showToast("🖼 Poster downloaded");
+    showToast("Poster downloaded");
   };
 
   const Toast = toast ? (

@@ -180,7 +180,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
           await navigator.share({
             files: [file],
             title: `${track.artist} — ${track.title}`,
-            text: isTequila ? "Listen on 𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀 𝐌 𝐔 𝐒 𝐈 𝐂 ✨" : "Listen on BLACK ROOM 🎵",
+            text: isTequila ? "Listen on 𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀 𝐌 𝐔 𝐒 𝐈 𝐂" : "Listen on BLACK ROOM",
           });
           return;
         }

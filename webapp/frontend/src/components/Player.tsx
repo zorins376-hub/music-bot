@@ -184,15 +184,22 @@ function AudioVisualizer({ isPlaying, accentColor = "#7c4dff" }: { isPlaying: bo
   );
 }
 
-// --- Marquee Component for long text ---
+// --- Marquee Component for long text (GPU-accelerated, buttery smooth) ---
 function Marquee({ text, style }: { text: string; style?: Record<string, string | number> }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const [needsScroll, setNeedsScroll] = useState(false);
+  const [animDuration, setAnimDuration] = useState(10);
 
   useEffect(() => {
     if (containerRef.current && textRef.current) {
-      setNeedsScroll(textRef.current.scrollWidth > containerRef.current.clientWidth);
+      const overflow = textRef.current.scrollWidth > containerRef.current.clientWidth;
+      setNeedsScroll(overflow);
+      if (overflow) {
+        // Speed: ~45px/s — consistent regardless of text length
+        const dur = Math.max(6, textRef.current.scrollWidth / 45);
+        setAnimDuration(dur);
+      }
     }
   }, [text]);
 
@@ -203,6 +210,8 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
         overflow: "hidden",
         whiteSpace: "nowrap",
         position: "relative",
+        maskImage: needsScroll ? "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)" : undefined,
+        WebkitMaskImage: needsScroll ? "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)" : undefined,
         ...style,
       }}
     >
@@ -210,21 +219,27 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
         ref={textRef}
         style={{
           display: "inline-block",
-          paddingRight: needsScroll ? 50 : 0,
-          animation: needsScroll ? "marquee 8s linear infinite" : "none",
+          paddingRight: needsScroll ? 60 : 0,
+          animation: needsScroll ? `marqueeSmooth ${animDuration}s linear infinite` : "none",
+          willChange: needsScroll ? "transform" : undefined,
         }}
       >
         {text}
       </span>
       {needsScroll && (
-        <span style={{ display: "inline-block", paddingRight: 50, animation: "marquee 8s linear infinite" }}>
+        <span style={{
+          display: "inline-block",
+          paddingRight: 60,
+          animation: `marqueeSmooth ${animDuration}s linear infinite`,
+          willChange: "transform",
+        }}>
           {text}
         </span>
       )}
       <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
+        @keyframes marqueeSmooth {
+          0% { transform: translate3d(0, 0, 0); }
+          100% { transform: translate3d(-50%, 0, 0); }
         }
       `}</style>
     </div>
@@ -332,7 +347,7 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   const handleShare = () => {
     if (!track) return;
     haptic("medium");
-    const text = `🎵 ${track.title} — ${track.artist}`;
+    const text = `${track.title} — ${track.artist}`;
     const url = `https://t.me/TSmymusicbot_bot/app?startapp=play_${track.video_id}`;
     try {
       window.Telegram?.WebApp?.openTelegramLink?.(
@@ -351,8 +366,10 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
 
   const handleTouchMove = (e: TouchEvent) => {
     touchEndX.current = e.touches[0].clientX;
-    const diff = touchEndX.current - touchStartX.current;
-    setSwipeOffset(Math.max(-80, Math.min(80, diff)));
+    const raw = touchEndX.current - touchStartX.current;
+    // Rubber-band damping: resistance increases as you drag further
+    const damped = Math.sign(raw) * Math.pow(Math.abs(raw), 0.75);
+    setSwipeOffset(Math.max(-100, Math.min(100, damped)));
   };
 
   const handleTouchEnd = () => {
@@ -809,8 +826,9 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
               : "0 8px 24px rgba(255,109,0,0.3)",
             animation: state.is_playing ? "tequilaGlow 3.6s ease-in-out infinite" : "none",
             overflow: "hidden",
-            transition: swipeOffset === 0 ? "transform 0.3s ease-out" : "none",
-            transform: `translateX(${swipeOffset}px) scale(${state.is_playing ? 1.03 : 1})`,
+            transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
+            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing ? 1.03 : 1})`,
+            willChange: "transform",
             touchAction: "pan-y",
             userSelect: "none",
           }}
@@ -1471,8 +1489,9 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           fontSize: 64,
           boxShadow: track ? "0 8px 24px rgba(0,0,0,0.3)" : "none",
           overflow: "hidden",
-          transition: swipeOffset === 0 ? "transform 0.3s ease-out" : "none",
-          transform: `translateX(${swipeOffset}px) scale(${state.is_playing ? 1.02 : 1})`,
+          transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
+          transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing ? 1.02 : 1})`,
+          willChange: "transform",
           touchAction: "pan-y",
           userSelect: "none",
         }}
