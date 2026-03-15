@@ -36,8 +36,8 @@ declare global {
 window.Telegram?.WebApp?.ready();
 window.Telegram?.WebApp?.expand();
 
-render(<App />, document.getElementById("app")!);
-
+// Boot-loader exit MUST run BEFORE render() —
+// if App crashes during first render, the preloader still dismisses.
 const bootLoader = document.getElementById("boot-loader");
 
 function playStartupWhoosh() {
@@ -117,4 +117,11 @@ if (bootLoader) {
       window.setTimeout(() => bootLoader.remove(), 100);
     }, 920);
   }, 4000);
+}
+
+// Render app AFTER boot-loader exit is scheduled
+try {
+  render(<App />, document.getElementById("app")!);
+} catch (e) {
+  console.error("App render failed:", e);
 }

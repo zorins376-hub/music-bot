@@ -393,11 +393,12 @@ async def _get_or_create_webapp_user(tg_user: dict):
             if attempt < 2:
                 continue
             raise
-        except Exception:
+        except Exception as exc:
             if attempt < 2:
                 import asyncio as _aio
-                await _aio.sleep(0.1 * (attempt + 1))
+                await _aio.sleep(0.2 * (attempt + 1))
                 continue
+            logger.error("_get_or_create_webapp_user failed after 3 attempts: %s", exc)
             raise
 
 

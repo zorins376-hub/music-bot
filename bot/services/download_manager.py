@@ -82,9 +82,11 @@ class DownloadManager:
         except Exception as exc:
             if not future.done():
                 future.set_exception(exc)
-                # Suppress "Future exception was never retrieved" if no one is waiting
-                if not future._callbacks:  # type: ignore[attr-defined]
-                    future.exception()  # mark as retrieved
+            # Always mark exception as retrieved to suppress asyncio warning
+            try:
+                future.exception()
+            except Exception:
+                pass
             raise
         finally:
             async with self._lock:
