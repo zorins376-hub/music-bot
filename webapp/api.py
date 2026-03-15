@@ -1410,6 +1410,48 @@ class AiPlaylistRequest(BaseModel):
 @app.post("/api/ingest")
 async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_current_user)):
     """Send a play/skip/like event to Supabase AI for learning user taste."""
+    # --- Gamification: award XP for actions ---
+    try:
+        from bot.models.base import async_session
+        from bot.models.user import User
+        from sqlalchemy import select, update
+        from datetime import date as dt_date
+        xp_map = {"play": 2, "like": 5, "dislike": 1, "skip": 0}
+        xp_gain = xp_map.get(body.event, 0)
+        if xp_gain > 0:
+            async with async_session() as session:
+                q = await session.execute(select(User).where(User.id == user["id"]))
+                u = q.scalar()
+                if u:
+                    u.xp = (u.xp or 0) + xp_gain
+                    # Level up every 100 XP
+                    u.level = max(1, ((u.xp or 0) // 100) + 1)
+                    # Streak tracking
+                    today = dt_date.today()
+                    if u.last_play_date and u.last_play_date == today:
+                        pass  # same day
+                    elif u.last_play_date and (today - u.last_play_date).days == 1:
+                        u.streak_days = (u.streak_days or 0) + 1
+                    elif u.last_play_date and (today - u.last_play_date).days > 1:
+                        u.streak_days = 1
+                    else:
+                        u.streak_days = 1
+                    u.last_play_date = today
+                    # Auto-badges
+                    badges = list(u.badges or [])
+                    if "first_listen" not in badges and body.event == "play":
+                        badges.append("first_listen")
+                    if "meloman" not in badges and (u.xp or 0) >= 200:
+                        badges.append("meloman")
+                    if "streak_7" not in badges and (u.streak_days or 0) >= 7:
+                        badges.append("streak_7")
+                    if "streak_30" not in badges and (u.streak_days or 0) >= 30:
+                        badges.append("streak_30")
+                    u.badges = badges
+                    await session.commit()
+    except Exception:
+        pass  # gamification errors should never block ingestion
+
     if not settings.SUPABASE_AI_ENABLED:
         return {"ok": False, "reason": "AI not enabled"}
     from bot.services.supabase_ai import supabase_ai
