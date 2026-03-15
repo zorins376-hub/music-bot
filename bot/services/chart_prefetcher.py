@@ -12,6 +12,7 @@ Estimated size: ~300 tracks × 5MB = ~1.5GB
 import asyncio
 import logging
 import re
+import time
 from pathlib import Path
 
 from bot.config import settings
@@ -29,6 +30,25 @@ _MIN_CACHED_SIZE = 10 * 1024
 
 # YouTube video ID pattern (exclude ym_ Yandex prefix)
 _YT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+# Permanently failed video IDs (age-restricted, geo-blocked, etc.)
+# Maps video_id -> timestamp when it was blacklisted
+# Entries expire after 24 hours in case the issue is resolved
+_PERMANENT_FAILURES: dict[str, float] = {}
+_FAILURE_TTL = 86400  # 24 hours
+
+# Error messages that indicate permanent failures (no point retrying)
+_PERMANENT_ERROR_PATTERNS = [
+    "Sign in to confirm your age",
+    "age-restricted",
+    "This video is not available",
+    "Video unavailable",
+    "Private video",
+    "been removed",
+    "copyright",
+    "blocked",
+    "geo restriction",
+]
 
 def _is_youtube_id(video_id: str) -> bool:
     """Check if ID is a valid YouTube video ID (not Yandex)."""
@@ -54,18 +74,31 @@ async def prefetch_chart_tracks(
     
     async def download_one(video_id: str) -> bool:
         """Download single track. Returns True if downloaded, False if skipped/failed."""
+        # Skip permanently failed videos (age-restricted, geo-blocked, etc.)
+        if video_id in _PERMANENT_FAILURES:
+            if time.time() - _PERMANENT_FAILURES[video_id] < _FAILURE_TTL:
+                return False  # still blacklisted
+            else:
+                del _PERMANENT_FAILURES[video_id]  # expired, retry
+
         mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-        
+
         # Skip if already cached
         if mp3_path.exists() and mp3_path.stat().st_size > _MIN_CACHED_SIZE:
             return False
-        
+
         async with semaphore:
             try:
                 await download_manager.download(video_id, bitrate=bitrate)
                 return True
             except Exception as e:
-                logger.debug("Prefetch failed for %s: %s", video_id, e)
+                err_msg = str(e)
+                # Check if this is a permanent failure
+                if any(pattern.lower() in err_msg.lower() for pattern in _PERMANENT_ERROR_PATTERNS):
+                    _PERMANENT_FAILURES[video_id] = time.time()
+                    logger.info("Prefetch: permanently skipping %s (reason: %s)", video_id, err_msg[:100])
+                else:
+                    logger.debug("Prefetch failed for %s: %s", video_id, e)
                 stats["failed"] += 1
                 return False
 

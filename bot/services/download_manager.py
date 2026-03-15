@@ -76,10 +76,15 @@ class DownloadManager:
 
         try:
             result = await self._do_download(video_id, bitrate, progress_cb, dl_id)
-            future.set_result(result)
+            if not future.done():
+                future.set_result(result)
             return result
         except Exception as exc:
-            future.set_exception(exc)
+            if not future.done():
+                future.set_exception(exc)
+                # Suppress "Future exception was never retrieved" if no one is waiting
+                if not future._callbacks:  # type: ignore[attr-defined]
+                    future.exception()  # mark as retrieved
             raise
         finally:
             async with self._lock:

@@ -320,6 +320,7 @@ async def health():
 async def _get_or_create_webapp_user(tg_user: dict):
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
 
     from bot.db import is_admin
     from bot.models.base import async_session
@@ -332,52 +333,72 @@ async def _get_or_create_webapp_user(tg_user: dict):
     now = datetime.now(timezone.utc)
     touch_interval = timedelta(seconds=60)
 
-    async with async_session() as session:
-        db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-        if db_user is None:
-            db_user = User(
-                id=user_id,
-                username=username,
-                first_name=first_name,
-                is_admin=admin,
-                is_premium=admin,
-            )
-            session.add(db_user)
-            await session.commit()
-            await session.refresh(db_user)
-            return db_user
+    for attempt in range(3):
+        try:
+            async with async_session() as session:
+                db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+                if db_user is None:
+                    db_user = User(
+                        id=user_id,
+                        username=username,
+                        first_name=first_name,
+                        is_admin=admin,
+                        is_premium=admin,
+                    )
+                    session.add(db_user)
+                    try:
+                        await session.commit()
+                    except IntegrityError:
+                        await session.rollback()
+                        # Race condition: another request already created the user
+                        db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+                        if db_user is None:
+                            raise
+                        return db_user
+                    await session.refresh(db_user)
+                    return db_user
 
-        changed = False
-        if db_user.username != username:
-            db_user.username = username
-            changed = True
-        if db_user.first_name != first_name:
-            db_user.first_name = first_name
-            changed = True
-        if db_user.is_admin != admin:
-            db_user.is_admin = admin
-            changed = True
+                changed = False
+                if db_user.username != username:
+                    db_user.username = username
+                    changed = True
+                if db_user.first_name != first_name:
+                    db_user.first_name = first_name
+                    changed = True
+                if db_user.is_admin != admin:
+                    db_user.is_admin = admin
+                    changed = True
 
-        if db_user.last_active is None or (now - db_user.last_active) >= touch_interval:
-            db_user.last_active = now
-            changed = True
+                if db_user.last_active is None or (now - db_user.last_active) >= touch_interval:
+                    db_user.last_active = now
+                    changed = True
 
-        expired_premium = (
-            not admin
-            and db_user.is_premium
-            and db_user.premium_until is not None
-            and db_user.premium_until < now
-        )
-        if admin and not db_user.is_premium:
-            db_user.is_premium = True
-            changed = True
-        if expired_premium:
-            db_user.is_premium = False
-            changed = True
+                expired_premium = (
+                    not admin
+                    and db_user.is_premium
+                    and db_user.premium_until is not None
+                    and db_user.premium_until < now
+                )
+                if admin and not db_user.is_premium:
+                    db_user.is_premium = True
+                    changed = True
+                if expired_premium:
+                    db_user.is_premium = False
+                    changed = True
 
-        if changed:
-            await session.commit()
-        return db_user
+                if changed:
+                    await session.commit()
+                return db_user
+        except IntegrityError:
+            if attempt < 2:
+                continue
+            raise
+        except Exception:
+            if attempt < 2:
+                import asyncio as _aio
+                await _aio.sleep(0.1 * (attempt + 1))
+                continue
+            raise
 
 
 @app.get("/api/user/me", response_model=UserProfileSchema)
