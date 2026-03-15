@@ -1940,6 +1940,133 @@ async def toggle_favorite(video_id: str, user: dict = Depends(get_current_user))
         return {"liked": True}
 
 
+@app.get("/api/favorites/list")
+async def list_favorites(user: dict = Depends(get_current_user)):
+    """List all favorite tracks for current user."""
+    user_id = user["id"]
+    from bot.models.base import async_session
+    async with async_session() as session:
+        from sqlalchemy import select
+        from bot.models.track import Track
+        from bot.models.favorite import FavoriteTrack
+
+        q = await session.execute(
+            select(Track)
+            .join(FavoriteTrack, FavoriteTrack.track_id == Track.id)
+            .where(FavoriteTrack.user_id == user_id)
+            .order_by(FavoriteTrack.created_at.desc())
+            .limit(100)
+        )
+        tracks = q.scalars().all()
+        return {
+            "tracks": [
+                {
+                    "video_id": t.source_id,
+                    "title": t.title or "Unknown",
+                    "artist": t.artist or "Unknown",
+                    "duration": t.duration or 0,
+                    "duration_fmt": f"{(t.duration or 0) // 60}:{(t.duration or 0) % 60:02d}",
+                    "source": t.source or "youtube",
+                    "cover_url": t.cover_url,
+                }
+                for t in tracks
+            ]
+        }
+
+
+@app.get("/api/stats/{user_id}")
+async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
+    """Listening statistics for profile page."""
+    from bot.models.base import async_session
+    async with async_session() as session:
+        from sqlalchemy import select, func
+        from sqlalchemy import distinct
+        from bot.models.track import ListeningHistory, Track
+        from bot.models.user import User
+        from bot.models.favorite import FavoriteTrack
+
+        # Total plays
+        total_plays_q = await session.execute(
+            select(func.count()).where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+        )
+        total_plays = total_plays_q.scalar() or 0
+
+        # Total listening time (seconds)
+        total_time_q = await session.execute(
+            select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
+            .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+        )
+        total_time = total_time_q.scalar() or 0
+
+        # Total favorites
+        total_favs_q = await session.execute(
+            select(func.count()).where(FavoriteTrack.user_id == user_id)
+        )
+        total_favs = total_favs_q.scalar() or 0
+
+        # Top artists (by play count)
+        top_artists_q = await session.execute(
+            select(Track.artist, func.count().label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.artist.isnot(None))
+            .group_by(Track.artist)
+            .order_by(func.count().desc())
+            .limit(10)
+        )
+        top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+
+        # Top genres
+        top_genres_q = await session.execute(
+            select(Track.genre, func.count().label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.genre.isnot(None))
+            .group_by(Track.genre)
+            .order_by(func.count().desc())
+            .limit(5)
+        )
+        top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+
+        # Recent tracks (last 20)
+        recent_q = await session.execute(
+            select(Track.source_id, Track.title, Track.artist, Track.duration, Track.cover_url, ListeningHistory.created_at)
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            .order_by(ListeningHistory.created_at.desc())
+            .limit(20)
+        )
+        recent = []
+        for r in recent_q.all():
+            recent.append({
+                "video_id": r[0],
+                "title": r[1],
+                "artist": r[2],
+                "duration": r[3] or 0,
+                "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
+                "cover_url": r[4],
+                "source": "db",
+            })
+
+        # User info (xp, level, streak, badges)
+        user_q = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        u = user_q.scalar()
+
+        return {
+            "total_plays": total_plays,
+            "total_time": total_time,
+            "total_favorites": total_favs,
+            "top_artists": top_artists,
+            "top_genres": top_genres,
+            "recent_tracks": recent,
+            "xp": u.xp if u else 0,
+            "level": u.level if u else 1,
+            "streak_days": u.streak_days if u else 0,
+            "badges": u.badges or [] if u else [],
+            "member_since": u.created_at.isoformat() if u else None,
+        }
+
+
 # ── Queue Reorder ────────────────────────────────────────────────────────
 
 class ReorderRequest(BaseModel):

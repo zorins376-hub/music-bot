@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchPlaylists, fetchPlaylistTracks, createPlaylist, deletePlaylist,
-  renamePlaylist, removeTrackFromPlaylist,
+  renamePlaylist, removeTrackFromPlaylist, getStreamUrl,
   type Playlist, type Track,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck } from "./Icons";
 import { showToast } from "./Toast";
+import { downloadPlaylistOffline, countCachedTracks, isPlaylistDownloading, cancelPlaylistDownload } from "../offlineCache";
 
 interface Props {
   userId: number;
@@ -35,6 +36,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [swipedTrackId, setSwipedTrackId] = useState<string | null>(null);
   const touchStartX = useRef(0);
+  const [dlProgress, setDlProgress] = useState<{ total: number; completed: number; current: string | null } | null>(null);
+  const [cachedCount, setCachedCount] = useState(0);
 
   const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
   const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
@@ -112,6 +115,40 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
       reload();
     } catch {}
     setSwipedTrackId(null);
+  };
+
+  // Count cached tracks when tracks change
+  useEffect(() => {
+    if (tracks.length > 0) {
+      countCachedTracks(tracks.map(t => t.video_id)).then(setCachedCount).catch(() => {});
+    } else {
+      setCachedCount(0);
+    }
+  }, [tracks]);
+
+  const handleDownloadOffline = async () => {
+    if (isPlaylistDownloading(`pl-${selectedId}`)) {
+      cancelPlaylistDownload(`pl-${selectedId}`);
+      setDlProgress(null);
+      showToast("Скачивание отменено", "info", 2000);
+      return;
+    }
+    haptic("medium");
+    const result = await downloadPlaylistOffline(
+      tracks.map(t => ({
+        video_id: t.video_id,
+        title: t.title,
+        artist: t.artist,
+        duration: t.duration,
+        cover_url: t.cover_url,
+      })),
+      (videoId) => getStreamUrl(videoId),
+      (progress) => setDlProgress(progress),
+      `pl-${selectedId}`,
+    );
+    setDlProgress(null);
+    setCachedCount(result.success);
+    showToast(`Скачано ${result.success} из ${tracks.length} треков`, result.failed > 0 ? "info" : "success", 3000);
   };
 
   const onTouchStart = (e: TouchEvent) => {
@@ -194,6 +231,27 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
               style={{ flex: 1, padding: "10px 0", borderRadius: 14, border: "none", background: activeBg, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               ▶ Воспроизвести всё
             </button>
+            <button onClick={handleDownloadOffline}
+              style={{
+                padding: "10px 14px", borderRadius: 14, border: cardBorder,
+                background: dlProgress ? "rgba(255,152,0,0.2)" : (cachedCount >= tracks.length && tracks.length > 0 ? "rgba(76,175,80,0.2)" : cardBg),
+                color: cachedCount >= tracks.length && tracks.length > 0 ? "#81c784" : textColor,
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+              {dlProgress ? (
+                <><IconSpinner size={14} color={warm ? "#ffd54f" : accentColor} /> {dlProgress.completed}/{dlProgress.total}</>
+              ) : cachedCount >= tracks.length && tracks.length > 0 ? (
+                <><IconCheck size={14} color="#81c784" /> Офлайн</>
+              ) : (
+                <><IconDownload size={14} color={warm ? "#ffd54f" : accentColor} /> Скачать</>
+              )}
+            </button>
+          </div>
+        )}
+        {dlProgress?.current && (
+          <div style={{ fontSize: 11, color: hintColor, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Скачивание: {dlProgress.current}...
           </div>
         )}
 

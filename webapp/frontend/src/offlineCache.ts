@@ -227,5 +227,123 @@ export async function clearCache(): Promise<void> {
   });
 }
 
+// ── Offline Playlist Downloads ──────────────────────────────────────────
+
+export interface OfflineTrackMeta {
+  video_id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  cover_url?: string;
+}
+
+interface DownloadProgress {
+  total: number;
+  completed: number;
+  failed: number;
+  current: string | null;
+}
+
+type ProgressCallback = (progress: DownloadProgress) => void;
+
+const _playlistDownloads = new Map<string, AbortController>();
+
+export function isPlaylistDownloading(key: string): boolean {
+  return _playlistDownloads.has(key);
+}
+
+export function cancelPlaylistDownload(key: string): void {
+  const ctrl = _playlistDownloads.get(key);
+  if (ctrl) {
+    ctrl.abort();
+    _playlistDownloads.delete(key);
+  }
+}
+
+/**
+ * Download multiple tracks to IndexedDB for offline playback.
+ * Skips tracks already cached. Reports progress via callback.
+ */
+export async function downloadPlaylistOffline(
+  tracks: OfflineTrackMeta[],
+  getApiUrl: (videoId: string) => string,
+  onProgress?: ProgressCallback,
+  key = "playlist",
+): Promise<{ success: number; failed: number }> {
+  const ctrl = new AbortController();
+  _playlistDownloads.set(key, ctrl);
+
+  const progress: DownloadProgress = {
+    total: tracks.length,
+    completed: 0,
+    failed: 0,
+    current: null,
+  };
+
+  let success = 0;
+  let failed = 0;
+
+  for (const track of tracks) {
+    if (ctrl.signal.aborted) break;
+
+    // Skip if already cached
+    try {
+      const cached = await getCachedTrack(track.video_id);
+      if (cached) {
+        success++;
+        progress.completed++;
+        onProgress?.(progress);
+        continue;
+      }
+    } catch {}
+
+    progress.current = track.title;
+    onProgress?.(progress);
+
+    try {
+      const url = getApiUrl(track.video_id);
+      const resp = await fetch(url, { signal: ctrl.signal });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        if (blob.size > 10240) {
+          await cacheTrack(track.video_id, blob);
+          success++;
+        } else {
+          failed++;
+        }
+      } else {
+        failed++;
+      }
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === "AbortError") break;
+      failed++;
+    }
+
+    progress.completed++;
+    progress.failed = failed;
+    onProgress?.(progress);
+  }
+
+  _playlistDownloads.delete(key);
+  progress.current = null;
+  progress.completed = progress.total;
+  progress.failed = failed;
+  onProgress?.(progress);
+
+  return { success, failed };
+}
+
+/** Check how many tracks from a list are already cached */
+export async function countCachedTracks(videoIds: string[]): Promise<number> {
+  let count = 0;
+  for (const id of videoIds) {
+    try {
+      const cached = await getCachedTrack(id);
+      if (cached) count++;
+    } catch {}
+  }
+  return count;
+}
+
 // Initialize on module load
 initCache().catch(() => {});

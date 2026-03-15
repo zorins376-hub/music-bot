@@ -372,6 +372,35 @@ export async function fetchTrending(hours = 24, limit = 20): Promise<Track[]> {
   return data.tracks;
 }
 
+// ── User Stats & Profile ─────────────────────────────────────────────────
+
+export interface UserStats {
+  total_plays: number;
+  total_time: number;
+  total_favorites: number;
+  top_artists: Array<{ name: string; count: number }>;
+  top_genres: Array<{ name: string; count: number }>;
+  recent_tracks: Track[];
+  xp: number;
+  level: number;
+  streak_days: number;
+  badges: string[];
+  member_since: string | null;
+}
+
+export async function fetchUserStats(userId: number): Promise<UserStats> {
+  const r = await fetchWithRetry(`${API_BASE}/stats/${userId}`, { headers: getHeaders(), retries: 1 });
+  if (!r.ok) throw new Error("Failed to fetch stats");
+  return r.json();
+}
+
+export async function fetchFavoritesList(): Promise<Track[]> {
+  const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}
+
 // ── Party Playlists ─────────────────────────────────────────────────────
 
 export interface PartyTrack extends Track {
