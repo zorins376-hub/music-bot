@@ -1,9 +1,11 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import type { Track } from "../api";
 import { fetchFavoritesList } from "../api";
+import { getThemeById, themeColors } from "../themes";
 import {
   IconCrown, IconFire, IconMusicNote, IconChart, IconPlaySmall,
   IconDiamond, IconSpinner, IconHeadphones, IconMusic, IconHeart,
+  IconMoon, IconParty, IconRocket, IconDiscover, IconEdit,
 } from "./Icons";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -45,6 +47,17 @@ const BADGE_DEFS: Record<string, { label: string; desc: string }> = {
   first_listen: { label: "Первый трек", desc: "Начало пути" },
 };
 
+const BADGE_ICONS: Record<string, (props: { size: number; color: string }) => any> = {
+  first_listen: IconMusicNote,
+  meloman: IconHeadphones,
+  streak_7: IconFire,
+  streak_30: IconFire,
+  explorer: IconDiscover,
+  dj: IconMusic,
+  night_owl: IconMoon,
+  party_starter: IconParty,
+};
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function formatTime(seconds: number): string {
@@ -82,6 +95,23 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
+// ── Premium border keyframes (injected once) ────────────────────────────
+
+let premiumStyleInjected = false;
+function ensurePremiumStyle() {
+  if (premiumStyleInjected) return;
+  premiumStyleInjected = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes profile-premium-border {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 // ── Component ───────────────────────────────────────────────────────────
 
 export function ProfileView({
@@ -93,25 +123,30 @@ export function ProfileView({
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
 }: Props) {
-  const warm = themeId === "tequila";
-
-  const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
-  const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
-  const cardBg = warm ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)";
-  const cardBorder = warm ? "1px solid rgba(255, 213, 79, 0.1)" : "1px solid rgba(255,255,255,0.06)";
-  const activeBg = warm
-    ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))"
-    : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.3))`;
-  const accentGradient = warm
-    ? "linear-gradient(135deg, #ff8f00, #ffd54f)"
-    : `linear-gradient(135deg, ${accentColor}, #b388ff)`;
-  const highlight = warm ? "#ffd54f" : accentColor;
+  const theme = getThemeById(themeId);
+  const tc = themeColors(theme, accentColor);
 
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [showAllFavs, setShowAllFavs] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load avatar from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`avatar_${userId}`);
+      if (saved) setAvatarUrl(saved);
+    } catch {}
+  }, [userId]);
+
+  // Inject premium animation style
+  useEffect(() => {
+    if (isPremium) ensurePremiumStyle();
+  }, [isPremium]);
 
   useEffect(() => {
     setLoading(true);
@@ -136,19 +171,50 @@ export function ProfileView({
     return () => { ctrl.abort(); clearTimeout(timer); };
   }, [userId]);
 
+  // ── Avatar upload handler ────────────────────────────────────────────
+
+  const handleAvatarFile = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        // Center-crop and resize
+        const srcSize = Math.min(img.width, img.height);
+        const sx = (img.width - srcSize) / 2;
+        const sy = (img.height - srcSize) / 2;
+        ctx.drawImage(img, sx, sy, srcSize, srcSize, 0, 0, 256, 256);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        try { localStorage.setItem(`avatar_${userId}`, dataUrl); } catch {}
+        setAvatarUrl(dataUrl);
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be re-selected
+    input.value = "";
+  };
+
   // ── Loading / error states ──────────────────────────────────────────
 
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: 64 }}>
-        <IconSpinner size={28} color={hintColor} />
+        <IconSpinner size={28} color={tc.hintColor} />
       </div>
     );
   }
 
   if (error || !stats) {
     return (
-      <div style={{ textAlign: "center", padding: 64, color: hintColor, fontSize: 14 }}>
+      <div style={{ textAlign: "center", padding: 64, color: tc.hintColor, fontSize: 14 }}>
         Не удалось загрузить профиль
       </div>
     );
@@ -164,144 +230,212 @@ export function ProfileView({
   const displayName = firstName || username || "User";
   const avatarLetter = displayName.charAt(0).toUpperCase();
 
+  const avatarGlow = tc.isTequila
+    ? "0 0 30px rgba(255,167,38,0.4), 0 0 60px rgba(255,109,0,0.2)"
+    : tc.glowShadow;
+
+  // Premium animated gradient border wrapper style
+  const premiumBorderStyle: Record<string, any> | undefined = isPremium
+    ? {
+        background: tc.isTequila
+          ? "linear-gradient(135deg, #ff8f00, #ffd54f, #ff6d00, #ffab40)"
+          : `linear-gradient(135deg, ${accentColor}, #b388ff, #e040fb, ${accentColor})`,
+        backgroundSize: "300% 300%",
+        animation: "profile-premium-border 4s ease infinite",
+        borderRadius: 19,
+        padding: 1.5,
+      }
+    : undefined;
+
   // ── Render ──────────────────────────────────────────────────────────
+
+  const headerCard = (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      padding: "24px 16px 20px", marginBottom: isPremium ? 0 : 16,
+      borderRadius: 18, background: tc.cardBg, border: isPremium ? "none" : tc.cardBorder,
+      backdropFilter: "blur(16px)",
+    }}>
+      {/* Hidden file input for avatar upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleAvatarFile}
+      />
+
+      {/* Avatar with edit overlay */}
+      <div
+        onClick={() => { haptic("light"); fileInputRef.current?.click(); }}
+        style={{
+          width: 72, height: 72, borderRadius: "50%",
+          position: "relative", cursor: "pointer",
+          marginBottom: 12, flexShrink: 0,
+        }}
+      >
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt=""
+            style={{
+              width: 72, height: 72, borderRadius: "50%",
+              objectFit: "cover",
+              boxShadow: avatarGlow,
+            }}
+          />
+        ) : (
+          <div style={{
+            width: 72, height: 72, borderRadius: "50%",
+            background: tc.accentGradient,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 28, fontWeight: 700, color: "#fff",
+            boxShadow: avatarGlow,
+          }}>
+            {avatarLetter}
+          </div>
+        )}
+        {/* Edit overlay */}
+        <div style={{
+          position: "absolute", bottom: 0, right: 0,
+          width: 22, height: 22, borderRadius: "50%",
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          border: "1.5px solid rgba(255,255,255,0.2)",
+        }}>
+          <IconEdit size={11} color="#fff" />
+        </div>
+      </div>
+
+      {/* Name + username */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6, marginBottom: 2,
+      }}>
+        <span style={{ fontSize: 18, fontWeight: 700, color: tc.textColor }}>
+          {displayName}
+        </span>
+        {isPremium && (
+          <IconCrown size={16} color={tc.isTequila ? "#ffd54f" : "#ffc107"} />
+        )}
+      </div>
+      {username && (
+        <div style={{ fontSize: 13, color: tc.hintColor, marginBottom: 8 }}>
+          @{username}
+        </div>
+      )}
+
+      {/* Member since */}
+      {stats.member_since && (
+        <div style={{ fontSize: 12, color: tc.hintColor, marginBottom: 12 }}>
+          {formatMemberSince(stats.member_since)}
+        </div>
+      )}
+
+      {/* Level + XP bar */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8,
+        width: "100%", maxWidth: 260, marginBottom: 8,
+      }}>
+        <div style={{
+          padding: "3px 10px", borderRadius: 10,
+          background: tc.activeBg, border: tc.cardBorder,
+          fontSize: 11, fontWeight: 600, color: tc.highlight,
+          whiteSpace: "nowrap", flexShrink: 0,
+        }}>
+          <IconChart size={10} color={tc.highlight} />{" "}
+          Уровень {stats.level}
+        </div>
+        <div style={{ flex: 1, position: "relative" }}>
+          <div style={{
+            width: "100%", height: 6, borderRadius: 3,
+            background: "rgba(255,255,255,0.08)",
+          }}>
+            <div style={{
+              width: `${xpProgress * 100}%`, height: "100%", borderRadius: 3,
+              background: tc.accentGradient,
+              transition: "width 0.4s ease",
+            }} />
+          </div>
+          <div style={{
+            position: "absolute", right: 0, top: 10,
+            fontSize: 10, color: tc.hintColor,
+          }}>
+            {stats.xp}/{xpForNext} XP
+          </div>
+        </div>
+      </div>
+
+      {/* Streak */}
+      {stats.streak_days > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 4,
+          marginTop: 12, fontSize: 13, fontWeight: 600,
+          color: tc.isTequila ? "#ffab40" : "#ff7043",
+        }}>
+          <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} />
+          {stats.streak_days} дней подряд
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ paddingBottom: 24 }}>
       {/* ── Profile header ─────────────────────────────────────────── */}
-      <div style={{
-        display: "flex", flexDirection: "column", alignItems: "center",
-        padding: "24px 16px 20px", marginBottom: 16,
-        borderRadius: 18, background: cardBg, border: cardBorder,
-        backdropFilter: warm ? "blur(12px)" : undefined,
-      }}>
-        {/* Avatar */}
-        <div style={{
-          width: 72, height: 72, borderRadius: "50%",
-          background: accentGradient,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 28, fontWeight: 700, color: "#fff",
-          marginBottom: 12, flexShrink: 0,
-          boxShadow: warm
-            ? "0 4px 20px rgba(255, 143, 0, 0.3)"
-            : "0 4px 20px rgba(124, 77, 255, 0.3)",
-        }}>
-          {avatarLetter}
+      {isPremium ? (
+        <div style={{ ...premiumBorderStyle, marginBottom: 16 }}>
+          {headerCard}
         </div>
-
-        {/* Name + username */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, marginBottom: 2,
-        }}>
-          <span style={{ fontSize: 18, fontWeight: 700, color: textColor }}>
-            {displayName}
-          </span>
-          {isPremium && (
-            <IconCrown size={16} color={warm ? "#ffd54f" : "#ffc107"} />
-          )}
-        </div>
-        {username && (
-          <div style={{ fontSize: 13, color: hintColor, marginBottom: 8 }}>
-            @{username}
-          </div>
-        )}
-
-        {/* Member since */}
-        {stats.member_since && (
-          <div style={{ fontSize: 12, color: hintColor, marginBottom: 12 }}>
-            {formatMemberSince(stats.member_since)}
-          </div>
-        )}
-
-        {/* Level + XP bar */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          width: "100%", maxWidth: 260, marginBottom: 8,
-        }}>
-          <div style={{
-            padding: "3px 10px", borderRadius: 10,
-            background: activeBg, border: cardBorder,
-            fontSize: 11, fontWeight: 600, color: highlight,
-            whiteSpace: "nowrap", flexShrink: 0,
-          }}>
-            <IconChart size={10} color={highlight} />{" "}
-            Уровень {stats.level}
-          </div>
-          <div style={{ flex: 1, position: "relative" }}>
-            <div style={{
-              width: "100%", height: 6, borderRadius: 3,
-              background: "rgba(255,255,255,0.08)",
-            }}>
-              <div style={{
-                width: `${xpProgress * 100}%`, height: "100%", borderRadius: 3,
-                background: accentGradient,
-                transition: "width 0.4s ease",
-              }} />
-            </div>
-            <div style={{
-              position: "absolute", right: 0, top: 10,
-              fontSize: 10, color: hintColor,
-            }}>
-              {stats.xp}/{xpForNext} XP
-            </div>
-          </div>
-        </div>
-
-        {/* Streak */}
-        {stats.streak_days > 0 && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 4,
-            marginTop: 12, fontSize: 13, fontWeight: 600,
-            color: warm ? "#ffab40" : "#ff7043",
-          }}>
-            <IconFire size={16} color={warm ? "#ffab40" : "#ff7043"} />
-            {stats.streak_days} дней подряд
-          </div>
-        )}
-      </div>
+      ) : (
+        <div style={{ marginBottom: 16 }}>{headerCard}</div>
+      )}
 
       {/* ── Stats cards ────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {/* Total plays */}
         <div style={{
           flex: 1, padding: "14px 10px", borderRadius: 14,
-          background: cardBg, border: cardBorder,
-          backdropFilter: warm ? "blur(12px)" : undefined,
+          background: tc.cardBg, border: tc.cardBorder,
+          backdropFilter: "blur(16px)",
           textAlign: "center",
+          boxShadow: tc.glowShadow.replace(/0\.\d+\)/, (m) => `${parseFloat(m) * 0.3})`),
         }}>
-          <IconMusicNote size={18} color={highlight} />
-          <div style={{ fontSize: 20, fontWeight: 700, color: textColor, marginTop: 4 }}>
+          <IconMusicNote size={18} color={tc.highlight} />
+          <div style={{ fontSize: 20, fontWeight: 700, color: tc.textColor, marginTop: 4 }}>
             {stats.total_plays.toLocaleString()}
           </div>
-          <div style={{ fontSize: 11, color: hintColor }}>треков</div>
+          <div style={{ fontSize: 11, color: tc.hintColor }}>треков</div>
         </div>
 
         {/* Listening time */}
         <div style={{
           flex: 1, padding: "14px 10px", borderRadius: 14,
-          background: cardBg, border: cardBorder,
-          backdropFilter: warm ? "blur(12px)" : undefined,
+          background: tc.cardBg, border: tc.cardBorder,
+          backdropFilter: "blur(16px)",
           textAlign: "center",
+          boxShadow: tc.glowShadow.replace(/0\.\d+\)/, (m) => `${parseFloat(m) * 0.3})`),
         }}>
-          <IconHeadphones size={18} color={highlight} />
-          <div style={{ fontSize: 20, fontWeight: 700, color: textColor, marginTop: 4 }}>
+          <IconHeadphones size={18} color={tc.highlight} />
+          <div style={{ fontSize: 20, fontWeight: 700, color: tc.textColor, marginTop: 4 }}>
             {formatTime(stats.total_time)}
           </div>
-          <div style={{ fontSize: 11, color: hintColor }}>прослушано</div>
+          <div style={{ fontSize: 11, color: tc.hintColor }}>прослушано</div>
         </div>
 
         {/* Favorites */}
         <div style={{
           flex: 1, padding: "14px 10px", borderRadius: 14,
-          background: cardBg, border: cardBorder,
-          backdropFilter: warm ? "blur(12px)" : undefined,
+          background: tc.cardBg, border: tc.cardBorder,
+          backdropFilter: "blur(16px)",
           textAlign: "center",
+          boxShadow: tc.glowShadow.replace(/0\.\d+\)/, (m) => `${parseFloat(m) * 0.3})`),
         }}>
-          <IconDiamond size={18} color={highlight} />
-          <div style={{ fontSize: 20, fontWeight: 700, color: textColor, marginTop: 4 }}>
+          <IconDiamond size={18} color={tc.highlight} />
+          <div style={{ fontSize: 20, fontWeight: 700, color: tc.textColor, marginTop: 4 }}>
             {stats.total_favorites.toLocaleString()}
           </div>
-          <div style={{ fontSize: 11, color: hintColor }}>избранных</div>
+          <div style={{ fontSize: 11, color: tc.hintColor }}>избранных</div>
         </div>
       </div>
 
@@ -309,7 +443,7 @@ export function ProfileView({
       {stats.top_artists.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
-            fontSize: 15, fontWeight: 600, color: textColor,
+            fontSize: 15, fontWeight: 600, color: tc.textColor,
             letterSpacing: 0.4, marginBottom: 10,
           }}>
             Топ исполнители
@@ -318,18 +452,18 @@ export function ProfileView({
             <div key={artist.name} style={{
               display: "flex", alignItems: "center", gap: 10,
               padding: "8px 12px", borderRadius: 12, marginBottom: 6,
-              background: cardBg, border: cardBorder,
-              backdropFilter: warm ? "blur(12px)" : undefined,
+              background: tc.cardBg, border: tc.cardBorder,
+              backdropFilter: "blur(16px)",
             }}>
               <div style={{
                 width: 22, fontSize: 12, fontWeight: 700, textAlign: "center",
-                color: idx < 3 ? highlight : hintColor, flexShrink: 0,
+                color: idx < 3 ? tc.highlight : tc.hintColor, flexShrink: 0,
               }}>
                 {idx + 1}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontSize: 13, fontWeight: 500, color: textColor,
+                  fontSize: 13, fontWeight: 500, color: tc.textColor,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   marginBottom: 4,
                 }}>
@@ -342,12 +476,12 @@ export function ProfileView({
                   <div style={{
                     width: `${(artist.count / maxArtistCount) * 100}%`,
                     height: "100%", borderRadius: 2,
-                    background: accentGradient,
+                    background: tc.accentGradient,
                     transition: "width 0.3s ease",
                   }} />
                 </div>
               </div>
-              <div style={{ fontSize: 11, color: hintColor, flexShrink: 0 }}>
+              <div style={{ fontSize: 11, color: tc.hintColor, flexShrink: 0 }}>
                 {artist.count}
               </div>
             </div>
@@ -359,7 +493,7 @@ export function ProfileView({
       {stats.top_genres.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
-            fontSize: 15, fontWeight: 600, color: textColor,
+            fontSize: 15, fontWeight: 600, color: tc.textColor,
             letterSpacing: 0.4, marginBottom: 10,
           }}>
             Жанры
@@ -368,14 +502,14 @@ export function ProfileView({
             {stats.top_genres.map((genre) => (
               <div key={genre.name} style={{
                 padding: "5px 12px", borderRadius: 12,
-                background: cardBg, border: cardBorder,
-                backdropFilter: warm ? "blur(12px)" : undefined,
-                fontSize: 12, color: textColor, fontWeight: 500,
+                background: tc.cardBg, border: tc.cardBorder,
+                backdropFilter: "blur(16px)",
+                fontSize: 12, color: tc.textColor, fontWeight: 500,
                 display: "flex", alignItems: "center", gap: 5,
               }}>
                 {genre.name}
                 <span style={{
-                  fontSize: 10, color: hintColor,
+                  fontSize: 10, color: tc.hintColor,
                   padding: "1px 5px", borderRadius: 6,
                   background: "rgba(255,255,255,0.06)",
                 }}>
@@ -391,7 +525,7 @@ export function ProfileView({
       {stats.badges.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
-            fontSize: 15, fontWeight: 600, color: textColor,
+            fontSize: 15, fontWeight: 600, color: tc.textColor,
             letterSpacing: 0.4, marginBottom: 10,
           }}>
             Достижения
@@ -402,26 +536,27 @@ export function ProfileView({
             {stats.badges.map((badgeId) => {
               const def = BADGE_DEFS[badgeId];
               if (!def) return null;
+              const BadgeIcon = BADGE_ICONS[badgeId] || IconCrown;
               return (
                 <div key={badgeId} style={{
                   padding: "12px 14px", borderRadius: 14,
-                  background: cardBg, border: cardBorder,
-                  backdropFilter: warm ? "blur(12px)" : undefined,
+                  background: tc.cardBg, border: tc.cardBorder,
+                  backdropFilter: "blur(16px)",
                 }}>
                   <div style={{
                     width: 32, height: 32, borderRadius: 10,
-                    background: activeBg,
+                    background: tc.activeBg,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     marginBottom: 8,
                   }}>
-                    <IconCrown size={16} color={highlight} />
+                    <BadgeIcon size={16} color={tc.highlight} />
                   </div>
                   <div style={{
-                    fontSize: 13, fontWeight: 600, color: textColor, marginBottom: 2,
+                    fontSize: 13, fontWeight: 600, color: tc.textColor, marginBottom: 2,
                   }}>
                     {def.label}
                   </div>
-                  <div style={{ fontSize: 11, color: hintColor }}>
+                  <div style={{ fontSize: 11, color: tc.hintColor }}>
                     {def.desc}
                   </div>
                 </div>
@@ -439,14 +574,14 @@ export function ProfileView({
             marginBottom: 10,
           }}>
             <div style={{
-              fontSize: 15, fontWeight: 600, color: textColor,
+              fontSize: 15, fontWeight: 600, color: tc.textColor,
               letterSpacing: 0.4, display: "flex", alignItems: "center", gap: 6,
             }}>
-              <IconHeart size={16} color={highlight} filled /> Избранное
+              <IconHeart size={16} color={tc.highlight} filled /> Избранное
             </div>
             {favorites.length > 5 && (
               <button onClick={() => setShowAllFavs(!showAllFavs)} style={{
-                background: "none", border: "none", color: highlight,
+                background: "none", border: "none", color: tc.highlight,
                 fontSize: 12, fontWeight: 600, cursor: "pointer",
               }}>
                 {showAllFavs ? "Свернуть" : `Все (${favorites.length})`}
@@ -467,27 +602,27 @@ export function ProfileView({
                   minWidth: showAllFavs ? "calc(50% - 5px)" : 110,
                   maxWidth: showAllFavs ? "calc(50% - 5px)" : 110,
                   cursor: "pointer", borderRadius: 14, overflow: "hidden",
-                  background: cardBg, border: cardBorder,
+                  background: tc.cardBg, border: tc.cardBorder,
                   flexShrink: 0,
                 }}
               >
                 <div style={{
                   width: "100%", aspectRatio: "1", overflow: "hidden",
-                  background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)",
+                  background: tc.coverPlaceholderBg,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {t.cover_url
                     ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : <IconMusic size={28} color={hintColor} />
+                    : <IconMusic size={28} color={tc.hintColor} />
                   }
                 </div>
                 <div style={{ padding: "6px 8px" }}>
                   <div style={{
-                    fontSize: 11, fontWeight: 600, color: textColor,
+                    fontSize: 11, fontWeight: 600, color: tc.textColor,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>{t.title}</div>
                   <div style={{
-                    fontSize: 10, color: hintColor,
+                    fontSize: 10, color: tc.hintColor,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>{t.artist}</div>
                 </div>
@@ -501,7 +636,7 @@ export function ProfileView({
       {stats.recent_tracks.length > 0 && (
         <div>
           <div style={{
-            fontSize: 15, fontWeight: 600, color: textColor,
+            fontSize: 15, fontWeight: 600, color: tc.textColor,
             letterSpacing: 0.4, marginBottom: 10,
           }}>
             История
@@ -513,8 +648,8 @@ export function ProfileView({
               style={{
                 display: "flex", alignItems: "center",
                 padding: "8px 12px", borderRadius: 14, marginBottom: 6,
-                background: cardBg, border: cardBorder,
-                backdropFilter: warm ? "blur(12px)" : undefined,
+                background: tc.cardBg, border: tc.cardBorder,
+                backdropFilter: "blur(16px)",
                 cursor: "pointer",
               }}
             >
@@ -522,27 +657,25 @@ export function ProfileView({
               <div style={{
                 width: 44, height: 44, borderRadius: 10, overflow: "hidden",
                 flexShrink: 0, marginRight: 12,
-                background: warm ? "rgba(255, 213, 79, 0.08)" : "rgba(124,77,255,0.08)",
-                border: warm
-                  ? "1px solid rgba(255, 213, 79, 0.14)"
-                  : "1px solid rgba(255,255,255,0.06)",
+                background: tc.coverPlaceholderBg,
+                border: `1px solid ${tc.accentBorderAlpha}`,
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
                 {t.cover_url
                   ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  : <IconMusic size={20} color={hintColor} />
+                  : <IconMusic size={20} color={tc.hintColor} />
                 }
               </div>
 
               {/* Title + artist */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontSize: 14, color: textColor,
+                  fontSize: 14, color: tc.textColor,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
                   {t.title}
                 </div>
-                <div style={{ fontSize: 12, color: hintColor }}>
+                <div style={{ fontSize: 12, color: tc.hintColor }}>
                   {t.artist}
                 </div>
               </div>
@@ -550,7 +683,7 @@ export function ProfileView({
               {/* Time ago */}
               {(t as any).played_at && (
                 <div style={{
-                  fontSize: 11, color: hintColor, flexShrink: 0, marginLeft: 8,
+                  fontSize: 11, color: tc.hintColor, flexShrink: 0, marginLeft: 8,
                 }}>
                   {timeAgo((t as any).played_at)}
                 </div>
@@ -562,7 +695,7 @@ export function ProfileView({
                 display: "flex", alignItems: "center", justifyContent: "center",
                 flexShrink: 0, marginLeft: 4,
               }}>
-                <IconPlaySmall size={14} color={highlight} />
+                <IconPlaySmall size={14} color={tc.highlight} />
               </div>
             </div>
           ))}

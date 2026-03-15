@@ -118,3 +118,79 @@ export function saveThemeId(id: string) {
 export function getThemeById(id: string): Theme {
   return themes.find((t) => t.id === id) || themes[0];
 }
+
+/** Derived color helpers — replaces binary `warm = themeId === "tequila"` in components */
+export interface ThemeColors {
+  textColor: string;
+  hintColor: string;
+  cardBg: string;
+  cardBorder: string;
+  activeBg: string;
+  accentGradient: string;
+  highlight: string;
+  glowShadow: string;
+  accentBorderAlpha: string;
+  coverPlaceholderBg: string;
+  isTequila: boolean;
+}
+
+export function themeColors(theme: Theme, accentColor?: string): ThemeColors {
+  const accent = accentColor || theme.accent;
+  const isTequila = theme.id === "tequila";
+
+  // Per-theme card border colors
+  const borderMap: Record<string, string> = {
+    blackroom: "rgba(124, 77, 255, 0.1)",
+    tequila:   "rgba(255, 213, 79, 0.12)",
+    neon:      "rgba(0, 230, 255, 0.12)",
+    midnight:  "rgba(168, 85, 247, 0.1)",
+    emerald:   "rgba(52, 211, 153, 0.1)",
+  };
+
+  const glowMap: Record<string, string> = {
+    blackroom: "0 4px 20px rgba(124, 77, 255, 0.2)",
+    tequila:   "0 4px 24px rgba(255, 143, 0, 0.3)",
+    neon:      "0 4px 24px rgba(0, 230, 255, 0.25), 0 0 40px rgba(255, 0, 255, 0.1)",
+    midnight:  "0 4px 20px rgba(168, 85, 247, 0.25)",
+    emerald:   "0 4px 20px rgba(52, 211, 153, 0.2)",
+  };
+
+  const gradientMap: Record<string, string> = {
+    blackroom: `linear-gradient(135deg, ${accent}, #b388ff)`,
+    tequila:   "linear-gradient(135deg, #ff8f00, #ffd54f)",
+    neon:      "linear-gradient(135deg, #00e6ff, #ff00ff)",
+    midnight:  "linear-gradient(135deg, #a855f7, #ec4899)",
+    emerald:   "linear-gradient(135deg, #34d399, #06b6d4)",
+  };
+
+  const activeBgMap: Record<string, string> = {
+    blackroom: `linear-gradient(135deg, ${accent}, rgba(124, 77, 255, 0.3))`,
+    tequila:   "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))",
+    neon:      "linear-gradient(135deg, rgba(0,230,255,0.25), rgba(255,0,255,0.15))",
+    midnight:  "linear-gradient(135deg, rgba(168,85,247,0.3), rgba(236,72,153,0.15))",
+    emerald:   "linear-gradient(135deg, rgba(52,211,153,0.25), rgba(6,182,212,0.15))",
+  };
+
+  const placeholderMap: Record<string, string> = {
+    blackroom: "rgba(124, 77, 255, 0.06)",
+    tequila:   "rgba(255, 213, 79, 0.06)",
+    neon:      "rgba(0, 230, 255, 0.06)",
+    midnight:  "rgba(168, 85, 247, 0.06)",
+    emerald:   "rgba(52, 211, 153, 0.06)",
+  };
+
+  const id = theme.id;
+  return {
+    textColor: theme.textColor,
+    hintColor: theme.hintColor,
+    cardBg: theme.secondaryBg,
+    cardBorder: `1px solid ${borderMap[id] || borderMap.blackroom}`,
+    activeBg: activeBgMap[id] || activeBgMap.blackroom,
+    accentGradient: gradientMap[id] || gradientMap.blackroom,
+    highlight: isTequila ? "#ffd54f" : accent,
+    glowShadow: glowMap[id] || glowMap.blackroom,
+    accentBorderAlpha: borderMap[id] || borderMap.blackroom,
+    coverPlaceholderBg: placeholderMap[id] || placeholderMap.blackroom,
+    isTequila,
+  };
+}

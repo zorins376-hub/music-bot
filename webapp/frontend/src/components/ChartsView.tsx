@@ -4,6 +4,7 @@ import {
   createPlaylist, searchTracks,
   type ChartSource, type Track, type Playlist,
 } from "../api";
+import { getThemeById, themeColors } from "../themes";
 import { IconMusic, IconSpinner, IconPlus, IconSave } from "./Icons";
 import { showToast } from "./Toast";
 
@@ -19,7 +20,9 @@ const haptic = (s: "light" | "medium" | "heavy") => {
 };
 
 export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
-  const warm = themeId === "tequila";
+  const theme = getThemeById(themeId);
+  const tc = themeColors(theme, accentColor);
+
   const [sources, setSources] = useState<ChartSource[]>([]);
   const [activeSource, setActiveSource] = useState<string | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -32,14 +35,6 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
   const [savingChart, setSavingChart] = useState(false);
   const [saveProgress, setSaveProgress] = useState<{ done: number; total: number } | null>(null);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
-
-  const hintColor = warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)";
-  const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
-  const cardBg = warm ? "rgba(40, 25, 15, 0.55)" : "var(--tg-theme-secondary-bg-color, #2a2a3e)";
-  const cardBorder = warm ? "1px solid rgba(255, 213, 79, 0.1)" : "1px solid rgba(255,255,255,0.06)";
-  const activeBg = warm
-    ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,167,38,0.2))"
-    : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.3))`;
 
   useEffect(() => {
     fetchChartSources()
@@ -166,7 +161,7 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
 
   return (
     <div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: textColor, letterSpacing: 0.4, marginBottom: 10 }}>Чарты</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: tc.textColor, letterSpacing: 0.4, marginBottom: 10 }}>Чарты</div>
 
       {/* Source tabs */}
       <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 14, paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
@@ -174,13 +169,13 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
           <button key={s.id} onClick={() => { haptic("light"); setActiveSource(s.id); }}
             style={{
               padding: "6px 14px", borderRadius: 14, border: activeSource === s.id
-                ? (warm ? "1px solid rgba(255,213,79,0.3)" : "none")
-                : cardBorder,
-              background: activeSource === s.id ? activeBg : cardBg,
-              color: activeSource === s.id ? (warm ? "#ffd54f" : "#fff") : hintColor,
+                ? (tc.isTequila ? `1px solid ${tc.accentBorderAlpha}` : "none")
+                : tc.cardBorder,
+              background: activeSource === s.id ? tc.activeBg : tc.cardBg,
+              color: activeSource === s.id ? tc.highlight : tc.hintColor,
               fontSize: 12, fontWeight: activeSource === s.id ? 600 : 400,
               cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-              backdropFilter: warm ? "blur(12px)" : undefined,
+              backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
             }}>
             {s.label}
           </button>
@@ -196,54 +191,54 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             setSaveChartName(label);
             setShowSaveChart(true);
           }} style={{
-            flex: 1, padding: "8px 14px", borderRadius: 12, border: cardBorder,
-            background: cardBg, backdropFilter: warm ? "blur(12px)" : undefined,
-            color: warm ? "#ffd54f" : accentColor, fontSize: 12, fontWeight: 600,
+            flex: 1, padding: "8px 14px", borderRadius: 12, border: tc.cardBorder,
+            background: tc.cardBg, backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+            color: tc.highlight, fontSize: 12, fontWeight: 600,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}>
-            <IconSave size={14} color={warm ? "#ffd54f" : accentColor} /> Новый плейлист из чарта
+            <IconSave size={14} color={tc.highlight} /> Новый плейлист из чарта
           </button>
           <button onClick={() => {
             haptic("light");
             setShowSaveMenu(true);
             fetchPlaylists(userId).then(setPlaylists).catch(() => setPlaylists([]));
           }} style={{
-            padding: "8px 14px", borderRadius: 12, border: cardBorder,
-            background: cardBg, backdropFilter: warm ? "blur(12px)" : undefined,
-            color: warm ? "#ffd54f" : accentColor, fontSize: 12, fontWeight: 600,
+            padding: "8px 14px", borderRadius: 12, border: tc.cardBorder,
+            background: tc.cardBg, backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+            color: tc.highlight, fontSize: 12, fontWeight: 600,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}>
-            <IconPlus size={14} color={warm ? "#ffd54f" : accentColor} /> В существующий
+            <IconPlus size={14} color={tc.highlight} /> В существующий
           </button>
         </div>
       )}
 
       {/* Track list */}
       {loading ? (
-        <div style={{ textAlign: "center", padding: 32 }}><IconSpinner size={24} color={hintColor} /></div>
+        <div style={{ textAlign: "center", padding: 32 }}><IconSpinner size={24} color={tc.hintColor} /></div>
       ) : tracks.length === 0 ? (
-        <div style={{ textAlign: "center", color: hintColor, padding: 32 }}>Нет данных</div>
+        <div style={{ textAlign: "center", color: tc.hintColor, padding: 32 }}>Нет данных</div>
       ) : (
         tracks.map((t, idx) => (
           <div key={`${t.video_id}-${idx}`}
-            style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 6, background: cardBg, border: cardBorder, backdropFilter: warm ? "blur(12px)" : undefined }}>
-            <div style={{ width: 20, fontSize: 12, color: idx < 3 ? (warm ? "#ffd54f" : accentColor) : hintColor, fontWeight: 700, marginRight: 8, textAlign: "center", flexShrink: 0 }}>
+            style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderRadius: 14, marginBottom: 6, background: tc.cardBg, border: tc.cardBorder, backdropFilter: tc.isTequila ? "blur(12px)" : undefined }}>
+            <div style={{ width: 20, fontSize: 12, color: idx < 3 ? tc.highlight : tc.hintColor, fontWeight: 700, marginRight: 8, textAlign: "center", flexShrink: 0 }}>
               {idx + 1}
             </div>
             <div onClick={() => handlePlayTrack(t)}
               style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 12, cursor: "pointer",
-                background: warm ? "rgba(255, 213, 79, 0.08)" : "rgba(124,77,255,0.08)",
-                border: warm ? "1px solid rgba(255, 213, 79, 0.14)" : "1px solid rgba(255,255,255,0.06)",
+                background: tc.coverPlaceholderBg,
+                border: `1px solid ${tc.accentBorderAlpha}`,
                 display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={hintColor} />}
+              {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={tc.hintColor} />}
             </div>
             <div onClick={() => handlePlayTrack(t)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-              <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: textColor }}>{t.title}</div>
-              <div style={{ fontSize: 12, color: hintColor }}>{t.artist}</div>
+              <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: tc.textColor }}>{t.title}</div>
+              <div style={{ fontSize: 12, color: tc.hintColor }}>{t.artist}</div>
             </div>
             <button onClick={() => openAddMenu(t)}
               style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <IconPlus size={16} color={hintColor} />
+              <IconPlus size={16} color={tc.hintColor} />
             </button>
           </div>
         ))
@@ -257,34 +252,34 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             style={{
               width: "100%", maxWidth: 420, maxHeight: "60vh", overflowY: "auto", padding: "16px 16px 24px",
               borderRadius: "20px 20px 0 0",
-              background: warm ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
-              border: warm ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(255,255,255,0.08)",
+              background: tc.isTequila ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
+              border: `1px solid ${tc.accentBorderAlpha}`,
               backdropFilter: "blur(20px)",
             }}>
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
-            <div style={{ fontSize: 13, color: hintColor, marginBottom: 4 }}>Добавить в плейлист</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: textColor, marginBottom: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: tc.hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 13, color: tc.hintColor, marginBottom: 4 }}>Добавить в плейлист</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: tc.textColor, marginBottom: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {addMenuTrack.artist} — {addMenuTrack.title}
             </div>
             {playlists.length === 0 ? (
-              <div style={{ textAlign: "center", color: hintColor, padding: 20 }}>Нет плейлистов</div>
+              <div style={{ textAlign: "center", color: tc.hintColor, padding: 20 }}>Нет плейлистов</div>
             ) : (
               playlists.map((p) => (
                 <button key={p.id} onClick={() => handleAdd(p.id)} disabled={addingTo === p.id}
                   style={{
                     display: "flex", alignItems: "center", width: "100%", padding: "10px 14px",
-                    borderRadius: 12, border: cardBorder, background: cardBg,
+                    borderRadius: 12, border: tc.cardBorder, background: tc.cardBg,
                     marginBottom: 6, cursor: "pointer", textAlign: "left",
                     opacity: addingTo === p.id ? 0.5 : 1,
                   }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: activeBg, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, flexShrink: 0 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: tc.activeBg, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, flexShrink: 0 }}>
                     <IconMusic size={16} color="#fff" />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, color: textColor }}>{p.name}</div>
-                    <div style={{ fontSize: 11, color: hintColor }}>{p.track_count} треков</div>
+                    <div style={{ fontSize: 14, color: tc.textColor }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: tc.hintColor }}>{p.track_count} треков</div>
                   </div>
-                  {addingTo === p.id ? <IconSpinner size={16} color={hintColor} /> : <IconPlus size={16} color={warm ? "#ffd54f" : accentColor} />}
+                  {addingTo === p.id ? <IconSpinner size={16} color={tc.hintColor} /> : <IconPlus size={16} color={tc.highlight} />}
                 </button>
               ))
             )}
@@ -300,33 +295,33 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             style={{
               width: "100%", maxWidth: 420, padding: "16px 16px 24px",
               borderRadius: "20px 20px 0 0",
-              background: warm ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
-              border: warm ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(255,255,255,0.08)",
+              background: tc.isTequila ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
+              border: `1px solid ${tc.accentBorderAlpha}`,
               backdropFilter: "blur(20px)",
             }}>
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
-            <div style={{ fontSize: 14, fontWeight: 600, color: textColor, marginBottom: 4 }}>Сохранить чарт как плейлист</div>
-            <div style={{ fontSize: 12, color: hintColor, marginBottom: 14 }}>{tracks.length} треков</div>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: tc.hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: tc.textColor, marginBottom: 4 }}>Сохранить чарт как плейлист</div>
+            <div style={{ fontSize: 12, color: tc.hintColor, marginBottom: 14 }}>{tracks.length} треков</div>
             <input
               type="text" value={saveChartName} disabled={savingChart}
               onInput={(e) => setSaveChartName((e.target as HTMLInputElement).value)}
               placeholder="Название плейлиста"
               style={{
                 width: "100%", padding: "10px 14px", borderRadius: 12, fontSize: 14,
-                border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(255,255,255,0.1)",
-                background: warm ? "rgba(30, 18, 10, 0.6)" : "rgba(255,255,255,0.05)",
-                color: textColor, outline: "none", marginBottom: 12, boxSizing: "border-box",
+                border: `1px solid ${tc.accentBorderAlpha}`,
+                background: tc.isTequila ? "rgba(30, 18, 10, 0.6)" : "rgba(255,255,255,0.05)",
+                color: tc.textColor, outline: "none", marginBottom: 12, boxSizing: "border-box",
               }}
             />
             {saveProgress && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: hintColor, marginBottom: 4 }}>
+                <div style={{ fontSize: 12, color: tc.hintColor, marginBottom: 4 }}>
                   {saveProgress.done}/{saveProgress.total}
                 </div>
                 <div style={{ width: "100%", height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
                   <div style={{
                     width: `${(saveProgress.done / saveProgress.total) * 100}%`, height: "100%", borderRadius: 2,
-                    background: warm ? "linear-gradient(90deg, #ff8f00, #ffd54f)" : accentColor,
+                    background: tc.accentGradient,
                     transition: "width 0.2s ease",
                   }} />
                 </div>
@@ -335,7 +330,7 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             <button onClick={handleSaveChartAsNew} disabled={savingChart || !saveChartName.trim()}
               style={{
                 width: "100%", padding: "12px", borderRadius: 12, border: "none",
-                background: warm ? "linear-gradient(135deg, #ff8f00, #ffb300)" : accentColor,
+                background: tc.accentGradient,
                 color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer",
                 opacity: savingChart || !saveChartName.trim() ? 0.5 : 1,
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -354,46 +349,46 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
             style={{
               width: "100%", maxWidth: 420, maxHeight: "60vh", overflowY: "auto", padding: "16px 16px 24px",
               borderRadius: "20px 20px 0 0",
-              background: warm ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
-              border: warm ? "1px solid rgba(255,213,79,0.15)" : "1px solid rgba(255,255,255,0.08)",
+              background: tc.isTequila ? "rgba(40, 25, 15, 0.95)" : "var(--tg-theme-bg-color, #1a1a2e)",
+              border: `1px solid ${tc.accentBorderAlpha}`,
               backdropFilter: "blur(20px)",
             }}>
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
-            <div style={{ fontSize: 14, fontWeight: 600, color: textColor, marginBottom: 4 }}>Добавить чарт в плейлист</div>
-            <div style={{ fontSize: 12, color: hintColor, marginBottom: 14 }}>{tracks.length} треков</div>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: tc.hintColor, opacity: 0.3, margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: tc.textColor, marginBottom: 4 }}>Добавить чарт в плейлист</div>
+            <div style={{ fontSize: 12, color: tc.hintColor, marginBottom: 14 }}>{tracks.length} треков</div>
             {saveProgress && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: hintColor, marginBottom: 4 }}>
+                <div style={{ fontSize: 12, color: tc.hintColor, marginBottom: 4 }}>
                   {saveProgress.done}/{saveProgress.total}
                 </div>
                 <div style={{ width: "100%", height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
                   <div style={{
                     width: `${(saveProgress.done / saveProgress.total) * 100}%`, height: "100%", borderRadius: 2,
-                    background: warm ? "linear-gradient(90deg, #ff8f00, #ffd54f)" : accentColor,
+                    background: tc.accentGradient,
                     transition: "width 0.2s ease",
                   }} />
                 </div>
               </div>
             )}
             {playlists.length === 0 ? (
-              <div style={{ textAlign: "center", color: hintColor, padding: 20 }}>Нет плейлистов</div>
+              <div style={{ textAlign: "center", color: tc.hintColor, padding: 20 }}>Нет плейлистов</div>
             ) : (
               playlists.map((p) => (
                 <button key={p.id} onClick={() => handleSaveChartToExisting(p.id)} disabled={addingTo !== null}
                   style={{
                     display: "flex", alignItems: "center", width: "100%", padding: "10px 14px",
-                    borderRadius: 12, border: cardBorder, background: cardBg,
+                    borderRadius: 12, border: tc.cardBorder, background: tc.cardBg,
                     marginBottom: 6, cursor: "pointer", textAlign: "left",
                     opacity: addingTo === p.id ? 0.5 : 1,
                   }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: activeBg, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, flexShrink: 0 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: tc.activeBg, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, flexShrink: 0 }}>
                     <IconMusic size={16} color="#fff" />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, color: textColor }}>{p.name}</div>
-                    <div style={{ fontSize: 11, color: hintColor }}>{p.track_count} треков</div>
+                    <div style={{ fontSize: 14, color: tc.textColor }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: tc.hintColor }}>{p.track_count} треков</div>
                   </div>
-                  {addingTo === p.id ? <IconSpinner size={16} color={hintColor} /> : <IconPlus size={16} color={warm ? "#ffd54f" : accentColor} />}
+                  {addingTo === p.id ? <IconSpinner size={16} color={tc.hintColor} /> : <IconPlus size={16} color={tc.highlight} />}
                 </button>
               ))
             )}

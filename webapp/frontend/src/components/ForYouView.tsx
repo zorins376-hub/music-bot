@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, type Track } from "../api";
+import { getThemeById, themeColors } from "../themes";
 import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar } from "./Icons";
 
 interface Props {
@@ -23,15 +24,8 @@ export function ForYouView({
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
 }: Props) {
-  const isTequila = themeId === "tequila";
-
-  // --- Theme tokens ---
-  const textColor = isTequila ? "#fef0e0" : "#eee";
-  const hintColor = isTequila ? "#c8a882" : "rgba(255,255,255,0.5)";
-  const accent = isTequila ? "#ffd54f" : accentColor;
-  const cardBg = isTequila ? "rgba(40, 25, 15, 0.55)" : "rgba(20, 20, 30, 0.6)";
-  const cardBorder = isTequila ? "1px solid rgba(255, 213, 79, 0.15)" : "1px solid rgba(124, 77, 255, 0.15)";
-  const sectionBg = isTequila ? "rgba(40, 25, 15, 0.6)" : "rgba(30, 25, 50, 0.5)";
+  const theme = getThemeById(themeId);
+  const tc = themeColors(theme, accentColor);
 
   // --- Wave state ---
   const [waveTracks, setWaveTracks] = useState<Track[]>([]);
@@ -183,7 +177,7 @@ export function ForYouView({
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
       {icon}
       <span style={{
-        fontSize: 11, fontWeight: 700, color: hintColor,
+        fontSize: 11, fontWeight: 700, color: tc.hintColor,
         textTransform: "uppercase", letterSpacing: 2,
       }}>{title}</span>
     </div>
@@ -194,20 +188,20 @@ export function ForYouView({
     if (loading) {
       return (
         <div style={{ textAlign: "center", padding: 24 }}>
-          <IconSpinner size={22} color={hintColor} />
+          <IconSpinner size={22} color={tc.hintColor} />
         </div>
       );
     }
     if (error) {
       return (
-        <div style={{ textAlign: "center", color: hintColor, padding: 20, fontSize: 12 }}>
+        <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
           Не удалось загрузить
         </div>
       );
     }
     if (tracks.length === 0) {
       return (
-        <div style={{ textAlign: "center", color: hintColor, padding: 20, fontSize: 12 }}>
+        <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
           Нет данных
         </div>
       );
@@ -222,27 +216,27 @@ export function ForYouView({
           <div key={t.video_id} onClick={() => handlePlayTrack(t)} style={{
             minWidth: 130, maxWidth: 130, cursor: "pointer",
             borderRadius: 16, overflow: "hidden",
-            background: sectionBg,
-            border: cardBorder,
+            background: tc.cardBg,
+            border: tc.cardBorder,
             transition: "transform 0.15s ease",
           }}>
             <div style={{
               width: 130, height: 130, overflow: "hidden",
-              background: isTequila ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)",
+              background: tc.coverPlaceholderBg,
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
               {t.cover_url
                 ? <img src={t.cover_url} alt="" style={{ width: 130, height: 130, objectFit: "cover", display: "block" }} />
-                : <IconMusicNote size={32} color={hintColor} />
+                : <IconMusicNote size={32} color={tc.hintColor} />
               }
             </div>
             <div style={{ padding: "8px 10px" }}>
               <div style={{
-                fontSize: 12, fontWeight: 600, color: textColor,
+                fontSize: 12, fontWeight: 600, color: tc.textColor,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{t.title}</div>
               <div style={{
-                fontSize: 10, color: hintColor,
+                fontSize: 10, color: tc.hintColor,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{t.artist}</div>
             </div>
@@ -276,7 +270,7 @@ export function ForYouView({
             transform: `rotate(${refreshing ? 0 : pullDistance * 4}deg)`,
             animation: refreshing ? "spinRefresh 0.8s linear infinite" : "none",
           }}>
-            <IconSpinner size={20} color={accent} />
+            <IconSpinner size={20} color={tc.highlight} />
           </div>
           <style>{`@keyframes spinRefresh { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
         </div>
@@ -289,12 +283,12 @@ export function ForYouView({
         }}>
           <div>
             <div style={{
-              fontSize: 22, fontWeight: 700, color: textColor,
+              fontSize: 22, fontWeight: 700, color: tc.textColor,
               letterSpacing: 0.3, marginBottom: 4,
             }}>
               Для тебя
             </div>
-            <div style={{ fontSize: 13, color: hintColor }}>
+            <div style={{ fontSize: 13, color: tc.hintColor }}>
               Персональные рекомендации
             </div>
           </div>
@@ -306,7 +300,7 @@ export function ForYouView({
               cursor: "pointer",
               opacity: refreshing ? 0.5 : 0.7,
               padding: 8,
-              color: hintColor,
+              color: tc.hintColor,
               fontSize: 18,
               animation: refreshing ? "spinRefresh 0.8s linear infinite" : "none",
             }}
@@ -323,58 +317,48 @@ export function ForYouView({
           onClick={() => handlePlayTrack(todTrack)}
           style={{
             marginBottom: 20, padding: 16, borderRadius: 22,
-            background: isTequila
-              ? "linear-gradient(135deg, rgba(255,109,0,0.22), rgba(255,213,79,0.10))"
-              : `linear-gradient(135deg, ${accentColor}33, rgba(124,77,255,0.08))`,
-            border: isTequila
-              ? "1px solid rgba(255,213,79,0.25)"
-              : `1px solid ${accentColor}44`,
+            background: tc.activeBg,
+            border: `1px solid ${tc.accentBorderAlpha}`,
             backdropFilter: "blur(16px)",
             cursor: "pointer",
             display: "flex", alignItems: "center", gap: 14,
-            boxShadow: isTequila
-              ? "0 8px 28px rgba(255,109,0,0.15)"
-              : `0 8px 28px ${accentColor}22`,
+            boxShadow: tc.glowShadow,
           }}
         >
           <div style={{
             width: 72, height: 72, borderRadius: 16, overflow: "hidden", flexShrink: 0,
-            background: isTequila ? "rgba(255,213,79,0.1)" : "rgba(124,77,255,0.1)",
-            border: isTequila ? "1px solid rgba(255,213,79,0.2)" : `1px solid ${accentColor}33`,
+            background: tc.coverPlaceholderBg,
+            border: `1px solid ${tc.accentBorderAlpha}`,
           }}>
             {todTrack.cover_url
               ? <img src={todTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusicNote size={28} color={accent} /></div>
+              : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusicNote size={28} color={tc.highlight} /></div>
             }
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
               display: "flex", alignItems: "center", gap: 5, marginBottom: 4,
             }}>
-              <IconStar size={14} color={accent} filled />
-              <span style={{ fontSize: 10, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 1.5 }}>
+              <IconStar size={14} color={tc.highlight} filled />
+              <span style={{ fontSize: 10, fontWeight: 700, color: tc.highlight, textTransform: "uppercase", letterSpacing: 1.5 }}>
                 Трек дня
               </span>
             </div>
             <div style={{
-              fontSize: 15, fontWeight: 600, color: textColor,
+              fontSize: 15, fontWeight: 600, color: tc.textColor,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>{todTrack.title}</div>
             <div style={{
-              fontSize: 12, color: hintColor,
+              fontSize: 12, color: tc.hintColor,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>{todTrack.artist}</div>
           </div>
           <div style={{
             width: 40, height: 40, borderRadius: 12,
-            background: isTequila
-              ? "linear-gradient(135deg, #ff8f00, #ffb300)"
-              : `linear-gradient(135deg, ${accentColor}, rgba(124,77,255,0.8))`,
+            background: tc.accentGradient,
             display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0,
-            boxShadow: isTequila
-              ? "0 4px 16px rgba(255,143,0,0.35)"
-              : `0 4px 16px ${accentColor}55`,
+            boxShadow: tc.glowShadow,
           }}>
             <IconPlaySmall size={20} color="#fff" />
           </div>
@@ -421,17 +405,15 @@ export function ForYouView({
       {/* ===== Wave Section ===== */}
       <div style={{
         marginBottom: 28, padding: 16, borderRadius: 22,
-        background: cardBg, border: cardBorder,
+        background: tc.cardBg, border: tc.cardBorder,
         backdropFilter: "blur(16px)",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-          <SectionHeading icon={<IconWave size={16} color={accent} />} title="Волна" />
+          <SectionHeading icon={<IconWave size={16} color={tc.highlight} />} title="Волна" />
           {waveTracks.length > 0 && (
             <button onClick={() => handlePlayAll(waveTracks)} style={{
               padding: "5px 12px", borderRadius: 12, border: "none",
-              background: isTequila
-                ? "linear-gradient(135deg, #ff8f00, #ffb300)"
-                : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.6))`,
+              background: tc.accentGradient,
               color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
               display: "flex", alignItems: "center", gap: 4,
             }}>
@@ -446,21 +428,21 @@ export function ForYouView({
       {/* ===== Trending Section ===== */}
       <div style={{
         marginBottom: 28, padding: 16, borderRadius: 22,
-        background: cardBg, border: cardBorder,
+        background: tc.cardBg, border: tc.cardBorder,
         backdropFilter: "blur(16px)",
       }}>
-        <SectionHeading icon={<IconTrending size={16} color={accent} />} title="В тренде" />
+        <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="В тренде" />
 
         {trendingLoading ? (
           <div style={{ textAlign: "center", padding: 24 }}>
-            <IconSpinner size={22} color={hintColor} />
+            <IconSpinner size={22} color={tc.hintColor} />
           </div>
         ) : trendingError ? (
-          <div style={{ textAlign: "center", color: hintColor, padding: 20, fontSize: 12 }}>
+          <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
             Не удалось загрузить
           </div>
         ) : trendingTracks.length === 0 ? (
-          <div style={{ textAlign: "center", color: hintColor, padding: 20, fontSize: 12 }}>
+          <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
             Нет данных
           </div>
         ) : (
@@ -473,30 +455,30 @@ export function ForYouView({
             }}>
               <div style={{
                 width: 24, fontSize: 13, fontWeight: 700, marginRight: 10, textAlign: "center", flexShrink: 0,
-                color: idx < 3 ? accent : hintColor,
+                color: idx < 3 ? tc.highlight : tc.hintColor,
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 2,
               }}>
-                {idx < 3 && <IconFire size={12} color={accent} />}
+                {idx < 3 && <IconFire size={12} color={tc.highlight} />}
                 {idx + 1}
               </div>
               <div style={{
                 width: 48, height: 48, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 12,
-                background: isTequila ? "rgba(255,213,79,0.08)" : "rgba(124,77,255,0.08)",
-                border: isTequila ? "1px solid rgba(255,213,79,0.14)" : "1px solid rgba(255,255,255,0.06)",
+                background: tc.coverPlaceholderBg,
+                border: `1px solid ${tc.accentBorderAlpha}`,
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
                 {t.cover_url
                   ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  : <IconMusicNote size={20} color={hintColor} />
+                  : <IconMusicNote size={20} color={tc.hintColor} />
                 }
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontSize: 14, fontWeight: 500, color: textColor,
+                  fontSize: 14, fontWeight: 500, color: tc.textColor,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>{t.title}</div>
                 <div style={{
-                  fontSize: 12, color: hintColor,
+                  fontSize: 12, color: tc.hintColor,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>{t.artist}</div>
               </div>
@@ -504,7 +486,7 @@ export function ForYouView({
                 width: 32, height: 32, borderRadius: 8, flexShrink: 0,
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <IconPlaySmall size={16} color={hintColor} />
+                <IconPlaySmall size={16} color={tc.hintColor} />
               </div>
             </div>
           ))
@@ -515,15 +497,15 @@ export function ForYouView({
       {currentTrack && (
         <div style={{
           marginBottom: 28, padding: 16, borderRadius: 22,
-          background: cardBg, border: cardBorder,
+          background: tc.cardBg, border: tc.cardBorder,
           backdropFilter: "blur(16px)",
         }}>
-          <SectionHeading icon={<IconSimilar size={16} color={accent} />} title="Похожее" />
+          <SectionHeading icon={<IconSimilar size={16} color={tc.highlight} />} title="Похожее" />
           <div style={{
-            fontSize: 13, color: textColor, marginBottom: 10, marginTop: -4,
+            fontSize: 13, color: tc.textColor, marginBottom: 10, marginTop: -4,
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>
-            Похожее на <span style={{ fontWeight: 600, color: accent }}>{currentTrack.title}</span>
+            Похожее на <span style={{ fontWeight: 600, color: tc.highlight }}>{currentTrack.title}</span>
           </div>
           <HorizontalCards tracks={similarTracks} loading={similarLoading} error={similarError} />
         </div>
@@ -532,10 +514,10 @@ export function ForYouView({
       {/* ===== AI Playlist Generator ===== */}
       <div style={{
         padding: 16, borderRadius: 22,
-        background: cardBg, border: cardBorder,
+        background: tc.cardBg, border: tc.cardBorder,
         backdropFilter: "blur(16px)",
       }}>
-        <SectionHeading icon={<IconRocket size={16} color={accent} />} title="AI Плейлист" />
+        <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="AI Плейлист" />
 
         <div style={{ display: "flex", gap: 8, marginBottom: aiTracks.length > 0 || aiError ? 14 : 0 }}>
           <input
@@ -547,9 +529,9 @@ export function ForYouView({
             disabled={aiLoading}
             style={{
               flex: 1, padding: "10px 14px", borderRadius: 14, fontSize: 13,
-              border: isTequila ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)",
-              background: isTequila ? "rgba(30, 18, 10, 0.6)" : "rgba(255,255,255,0.05)",
-              color: textColor, outline: "none", boxSizing: "border-box",
+              border: `1px solid ${tc.accentBorderAlpha}`,
+              background: tc.isTequila ? "rgba(30, 18, 10, 0.6)" : "rgba(255,255,255,0.05)",
+              color: tc.textColor, outline: "none", boxSizing: "border-box",
               opacity: aiLoading ? 0.5 : 1,
             }}
           />
@@ -558,9 +540,7 @@ export function ForYouView({
             disabled={aiLoading || !aiPrompt.trim()}
             style={{
               padding: "10px 16px", borderRadius: 14, border: "none",
-              background: isTequila
-                ? "linear-gradient(135deg, #ff8f00, #ffb300)"
-                : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.6))`,
+              background: tc.accentGradient,
               color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer",
               opacity: aiLoading || !aiPrompt.trim() ? 0.5 : 1,
               whiteSpace: "nowrap",
@@ -584,9 +564,7 @@ export function ForYouView({
             {onPlayAll && (
               <button onClick={() => handlePlayAll(aiTracks)} style={{
                 padding: "6px 14px", borderRadius: 12, border: "none",
-                background: isTequila
-                  ? "linear-gradient(135deg, #ff8f00, #ffb300)"
-                  : `linear-gradient(135deg, ${accentColor}, rgba(124, 77, 255, 0.6))`,
+                background: tc.accentGradient,
                 color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
                 display: "flex", alignItems: "center", gap: 4, marginBottom: 10,
               }}>
@@ -601,22 +579,22 @@ export function ForYouView({
               }}>
                 <div style={{
                   width: 44, height: 44, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 12,
-                  background: isTequila ? "rgba(255,213,79,0.08)" : "rgba(124,77,255,0.08)",
-                  border: isTequila ? "1px solid rgba(255,213,79,0.14)" : "1px solid rgba(255,255,255,0.06)",
+                  background: tc.coverPlaceholderBg,
+                  border: `1px solid ${tc.accentBorderAlpha}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {t.cover_url
                     ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : <IconMusicNote size={20} color={hintColor} />
+                    : <IconMusicNote size={20} color={tc.hintColor} />
                   }
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
-                    fontSize: 14, fontWeight: 500, color: textColor,
+                    fontSize: 14, fontWeight: 500, color: tc.textColor,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>{t.title}</div>
                   <div style={{
-                    fontSize: 12, color: hintColor,
+                    fontSize: 12, color: tc.hintColor,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>{t.artist}</div>
                 </div>
@@ -624,7 +602,7 @@ export function ForYouView({
                   width: 32, height: 32, borderRadius: 8, flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <IconPlaySmall size={16} color={hintColor} />
+                  <IconPlaySmall size={16} color={tc.hintColor} />
                 </div>
               </div>
             ))}
