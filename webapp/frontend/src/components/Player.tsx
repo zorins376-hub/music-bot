@@ -316,6 +316,19 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
   // Reset similar/ai-playlist on track change
   useEffect(() => { setShowSimilar(false); setSimilarTracks([]); }, [track?.video_id]);
 
+  // Quick suggestions when queue is empty
+  const [quickSuggestions, setQuickSuggestions] = useState<Track[]>([]);
+
+  useEffect(() => {
+    if (state.current_track && state.queue.length <= 1) {
+      fetchSimilar(state.current_track.video_id, 4)
+        .then(setQuickSuggestions)
+        .catch(() => setQuickSuggestions([]));
+    } else {
+      setQuickSuggestions([]);
+    }
+  }, [state.current_track?.video_id, state.queue.length]);
+
   // Swipe tracking
   const touchStartX = useRef<number>(0);
   const touchEndX = useRef<number>(0);
@@ -1000,6 +1013,55 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           </button>
         </div>
 
+        {/* Smart Suggestions — when queue is empty */}
+        {quickSuggestions.length > 0 && (
+          <div style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            borderRadius: 16,
+            background: glassCard,
+            backdropFilter: "blur(12px)",
+            border: `1px solid ${borderGold}`,
+          }}>
+            <div style={{ fontSize: 11, color: "#c8a882", marginBottom: 8, fontWeight: 600 }}>Далее:</div>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+              {quickSuggestions.map((t) => (
+                <div
+                  key={t.video_id}
+                  onClick={() => { haptic("medium"); onPlayTrack?.(t); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "5px 10px 5px 5px",
+                    borderRadius: 20,
+                    background: "rgba(255, 213, 79, 0.08)",
+                    border: `1px solid ${borderGold}`,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    maxWidth: 180,
+                    transition: "background 0.2s ease",
+                  }}
+                >
+                  <img
+                    src={t.thumbnail}
+                    alt=""
+                    style={{ width: 28, height: 28, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+                  />
+                  <span style={{
+                    fontSize: 12,
+                    color: "#fef0e0",
+                    fontWeight: 500,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}>{t.title}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Action Buttons Carousel — warm tones */}
         {track && (
           <div style={{
@@ -1594,6 +1656,55 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
           <IconRepeat mode={state.repeat_mode} activeColor={accentColor} />
         </button>
       </div>
+
+      {/* Smart Suggestions — when queue is empty */}
+      {quickSuggestions.length > 0 && (
+        <div style={{
+          marginTop: 14,
+          padding: "10px 14px",
+          borderRadius: 16,
+          background: "rgba(255,255,255,0.06)",
+          backdropFilter: "blur(12px)",
+          border: "1px solid rgba(179, 136, 255, 0.16)",
+        }}>
+          <div style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", marginBottom: 8, fontWeight: 600 }}>Далее:</div>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+            {quickSuggestions.map((t) => (
+              <div
+                key={t.video_id}
+                onClick={() => { haptic("medium"); onPlayTrack?.(t); }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "5px 10px 5px 5px",
+                  borderRadius: 20,
+                  background: "rgba(124, 77, 255, 0.08)",
+                  border: "1px solid rgba(179, 136, 255, 0.16)",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  maxWidth: 180,
+                  transition: "background 0.2s ease",
+                }}
+              >
+                <img
+                  src={t.thumbnail}
+                  alt=""
+                  style={{ width: 28, height: 28, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+                />
+                <span style={{
+                  fontSize: 12,
+                  color: "var(--tg-theme-text-color, #eee)",
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}>{t.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Action Buttons Carousel */}
       {track && (

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
-import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, type Track } from "../api";
-import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus } from "./Icons";
+import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, type Track } from "../api";
+import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar } from "./Icons";
 
 interface Props {
   userId: number;
@@ -48,11 +48,19 @@ export function ForYouView({
   const [similarLoading, setSimilarLoading] = useState(false);
   const [similarError, setSimilarError] = useState(false);
 
+  // --- Track of the Day ---
+  const [todTrack, setTodTrack] = useState<Track | null>(null);
+
   // --- AI Playlist state ---
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiTracks, setAiTracks] = useState<Track[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(false);
+
+  // --- Fetch Track of Day ---
+  useEffect(() => {
+    fetchTrackOfDay().then(setTodTrack).catch(() => {});
+  }, []);
 
   // --- Fetch wave ---
   useEffect(() => {
@@ -208,6 +216,70 @@ export function ForYouView({
           Персональные рекомендации
         </div>
       </div>
+
+      {/* ===== Track of the Day ===== */}
+      {todTrack && (
+        <div
+          onClick={() => handlePlayTrack(todTrack)}
+          style={{
+            marginBottom: 20, padding: 16, borderRadius: 22,
+            background: isTequila
+              ? "linear-gradient(135deg, rgba(255,109,0,0.22), rgba(255,213,79,0.10))"
+              : `linear-gradient(135deg, ${accentColor}33, rgba(124,77,255,0.08))`,
+            border: isTequila
+              ? "1px solid rgba(255,213,79,0.25)"
+              : `1px solid ${accentColor}44`,
+            backdropFilter: "blur(16px)",
+            cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 14,
+            boxShadow: isTequila
+              ? "0 8px 28px rgba(255,109,0,0.15)"
+              : `0 8px 28px ${accentColor}22`,
+          }}
+        >
+          <div style={{
+            width: 72, height: 72, borderRadius: 16, overflow: "hidden", flexShrink: 0,
+            background: isTequila ? "rgba(255,213,79,0.1)" : "rgba(124,77,255,0.1)",
+            border: isTequila ? "1px solid rgba(255,213,79,0.2)" : `1px solid ${accentColor}33`,
+          }}>
+            {todTrack.cover_url
+              ? <img src={todTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusicNote size={28} color={accent} /></div>
+            }
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 5, marginBottom: 4,
+            }}>
+              <IconStar size={14} color={accent} filled />
+              <span style={{ fontSize: 10, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 1.5 }}>
+                Трек дня
+              </span>
+            </div>
+            <div style={{
+              fontSize: 15, fontWeight: 600, color: textColor,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>{todTrack.title}</div>
+            <div style={{
+              fontSize: 12, color: hintColor,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>{todTrack.artist}</div>
+          </div>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: isTequila
+              ? "linear-gradient(135deg, #ff8f00, #ffb300)"
+              : `linear-gradient(135deg, ${accentColor}, rgba(124,77,255,0.8))`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+            boxShadow: isTequila
+              ? "0 4px 16px rgba(255,143,0,0.35)"
+              : `0 4px 16px ${accentColor}55`,
+          }}>
+            <IconPlaySmall size={20} color="#fff" />
+          </div>
+        </div>
+      )}
 
       {/* ===== Quick Mood Buttons ===== */}
       <div style={{

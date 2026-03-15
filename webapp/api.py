@@ -1569,6 +1569,74 @@ async def get_trending(
     return SearchResult(tracks=tracks, total=len(tracks))
 
 
+# ── Track of the Day ──────────────────────────────────────────────────────
+
+_track_of_day_cache: dict = {"date": None, "track": None}
+
+
+@app.get("/api/track-of-day")
+async def track_of_day(user: dict = Depends(get_current_user)):
+    """Return a single 'Track of the Day' — cached per calendar day."""
+    from datetime import date as dt_date
+    today = dt_date.today().isoformat()
+
+    if _track_of_day_cache["date"] == today and _track_of_day_cache["track"]:
+        return _track_of_day_cache["track"]
+
+    # Try trending first, then random popular from DB
+    track_data = None
+    try:
+        if settings.SUPABASE_AI_ENABLED:
+            from bot.services.supabase_ai import supabase_ai
+            results = await supabase_ai.get_trending(hours=48, limit=5)
+            if results:
+                import random
+                r = random.choice(results[:5])
+                track_data = {
+                    "video_id": r.get("video_id", r.get("source_id", "")),
+                    "title": r.get("title", "Unknown"),
+                    "artist": r.get("artist", "Unknown"),
+                    "duration": r.get("duration", 0),
+                    "duration_fmt": r.get("duration_fmt", "0:00"),
+                    "source": r.get("source", "youtube"),
+                    "cover_url": r.get("cover_url"),
+                }
+    except Exception:
+        pass
+
+    if not track_data:
+        # Fallback: most downloaded track from DB
+        try:
+            from bot.models.base import async_session
+            from bot.models.track import Track
+            from sqlalchemy import select
+            async with async_session() as session:
+                q = await session.execute(
+                    select(Track).where(Track.downloads > 0).order_by(Track.downloads.desc()).limit(10)
+                )
+                tracks = q.scalars().all()
+                if tracks:
+                    import random
+                    t = random.choice(tracks[:5])
+                    track_data = {
+                        "video_id": t.source_id,
+                        "title": t.title or "Unknown",
+                        "artist": t.artist or "Unknown",
+                        "duration": t.duration or 0,
+                        "duration_fmt": f"{(t.duration or 0) // 60}:{(t.duration or 0) % 60:02d}",
+                        "source": t.source or "youtube",
+                        "cover_url": t.cover_url,
+                    }
+        except Exception:
+            pass
+
+    if track_data:
+        _track_of_day_cache["date"] = today
+        _track_of_day_cache["track"] = track_data
+
+    return track_data or {}
+
+
 # ── Charts API ───────────────────────────────────────────────────────────
 
 @app.post("/api/charts/refresh")

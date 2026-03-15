@@ -372,6 +372,14 @@ export async function fetchTrending(hours = 24, limit = 20): Promise<Track[]> {
   return data.tracks;
 }
 
+export async function fetchTrackOfDay(): Promise<Track | null> {
+  const r = await fetch(`${API_BASE}/track-of-day`, { headers: getHeaders() });
+  if (!r.ok) return null;
+  const data = await r.json();
+  if (!data || !data.video_id) return null;
+  return data as Track;
+}
+
 // ── User Stats & Profile ─────────────────────────────────────────────────
 
 export interface UserStats {
