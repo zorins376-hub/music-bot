@@ -99,7 +99,7 @@ function createTapeCurve(samples = 8192): Float32Array<ArrayBuffer> {
 
 function createSoftClipCurve(samples = 8192): Float32Array<ArrayBuffer> {
   const curve = new Float32Array(samples);
-  const ceil = 0.944; // -0.5 dBFS
+  const ceil = 0.933; // -0.6 dBFS — extra headroom for inter-sample peaks
   for (let i = 0; i < samples; i++) {
     const x = (2 * i) / (samples - 1) - 1;
     if (Math.abs(x) <= ceil) {
@@ -235,8 +235,8 @@ export function App() {
       const t = ctx.currentTime;
       outGain.gain.cancelScheduledValues(t);
       outGain.gain.setValueAtTime(outGain.gain.value, t);
-      outGain.gain.setTargetAtTime(0.0001, t, 0.035); // 35ms τ ≈ 140ms to silence
-      await new Promise(r => setTimeout(r, 160)); // wait ~4.5 time constants
+      outGain.gain.setTargetAtTime(0.0001, t, 0.04); // 40ms τ ≈ 160ms to silence
+      await new Promise(r => setTimeout(r, 180)); // wait ~4.5 time constants
     }
     audio.pause();
   }, []);
@@ -462,12 +462,18 @@ export function App() {
       loudnessGain.gain.value = 1;
       loudnessGainRef.current = loudnessGain;
 
-      // ── Subsonic filter: HPF @ 20Hz removes inaudible rumble ──
+      // ── Subsonic filter: HPF @ 20Hz removes inaudible rumble + DC offset ──
       const subsonicFilter = ctx.createBiquadFilter();
       subsonicFilter.type = "highpass";
       subsonicFilter.frequency.value = 20;
-      subsonicFilter.Q.value = 0.7;
+      subsonicFilter.Q.value = 0.707; // Butterworth Q — maximally flat passband
       subsonicFilterRef.current = subsonicFilter;
+
+      // ── DC blocker: HPF @ 5Hz catches any DC offset from waveshapers ──
+      const dcBlocker = ctx.createBiquadFilter();
+      dcBlocker.type = "highpass";
+      dcBlocker.frequency.value = 5;
+      dcBlocker.Q.value = 0.5;
 
       // ── 10-band parametric EQ with studio Q values ──
       const filters = EQ_BANDS.map((freq, idx) => {
@@ -480,11 +486,11 @@ export function App() {
 
       // ── Transparent peak limiter — brickwall safety net, NOT a compressor ──
       const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -1;   // Only true 0dBFS peaks (after EQ boost headroom)
-      compressor.knee.value = 1;         // Hard knee = true limiter behavior
+      compressor.threshold.value = -2;   // -2dBFS — extra headroom catches inter-sample peaks
+      compressor.knee.value = 0.5;       // Hard knee = true limiter behavior, no pumping
       compressor.ratio.value = 20;       // Brickwall ratio — clamps peaks, doesn't compress
-      compressor.attack.value = 0.001;   // 1ms — instant catch
-      compressor.release.value = 0.1;    // 100ms — fast release, no pumping since it rarely triggers
+      compressor.attack.value = 0.0005;  // 0.5ms — catches transients before they clip
+      compressor.release.value = 0.08;   // 80ms — fast release, no artifacts since rarely triggers
       compressorRef.current = compressor;
 
       // ── Tape Saturation (WaveShaperNode) — warm analog character ──
@@ -531,7 +537,7 @@ export function App() {
       softClipRef.current = clipper;
 
       // ── Signal chain: source → loudness → crossfade → preamp → HPF → EQ
-      //    → compressor → tapeSat → airBand → panner → widener → analyser → clipper → output ──
+      //    → limiter → tapeSat → airBand → panner → widener → analyser → clipper → dcBlock → output ──
       source.connect(loudnessGain);
       loudnessGain.connect(crossfadeGain);
       crossfadeGain.connect(inputGain);
@@ -549,7 +555,8 @@ export function App() {
       panner.connect(splitter);
       merger.connect(analyser);
       analyser.connect(clipper);
-      clipper.connect(outputGain);
+      clipper.connect(dcBlocker);
+      dcBlocker.connect(outputGain);
       outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
@@ -805,8 +812,8 @@ export function App() {
         const t = ctx.currentTime;
         outGain.gain.cancelScheduledValues(t);
         outGain.gain.setValueAtTime(outGain.gain.value, t);
-        outGain.gain.setTargetAtTime(0.0001, t, 0.025); // 25ms τ ≈ 100ms to silence
-        await new Promise(r => setTimeout(r, 120));
+        outGain.gain.setTargetAtTime(0.0001, t, 0.03); // 30ms τ ≈ 120ms to silence
+        await new Promise(r => setTimeout(r, 140));
       }
 
       audio.pause();
@@ -824,7 +831,7 @@ export function App() {
           if (audio.readyState >= 4) { resolve(); } // HAVE_ENOUGH_DATA — fully buffered
           else { audio.addEventListener("canplaythrough", onReady, { once: true }); }
           // Timeout fallback: don't block forever on slow networks
-          setTimeout(resolve, 5000);
+          setTimeout(resolve, 8000);
         });
         await audio.play().catch(() => {});
       }

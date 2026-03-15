@@ -116,21 +116,24 @@ export function ProfileView({
   useEffect(() => {
     setLoading(true);
     setError(false);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000); // 10s timeout
     fetch(`/api/stats/${userId}`, {
       headers: {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
       },
+      signal: ctrl.signal,
     })
       .then((r) => {
-        if (!r.ok) throw new Error("fetch failed");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((data: UserStats) => setStats(data))
       .catch(() => setError(true))
-      .finally(() => setLoading(false));
-    // Load favorites
+      .finally(() => { clearTimeout(timer); setLoading(false); });
     fetchFavoritesList().then(setFavorites).catch(() => {});
+    return () => { ctrl.abort(); clearTimeout(timer); };
   }, [userId]);
 
   // ── Loading / error states ──────────────────────────────────────────
