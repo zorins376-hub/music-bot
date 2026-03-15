@@ -176,8 +176,14 @@ export function App() {
   });
   const crossfadeDurationRef = useRef(crossfadeDuration);
   crossfadeDurationRef.current = crossfadeDuration;
-  const [vinylSpin, setVinylSpin] = useState(() => {
-    try { return localStorage.getItem("tma:vinyl-spin") !== "false"; } catch { return true; }
+  const [coverMode, setCoverMode] = useState<"default" | "vinyl" | "cd" | "case">(() => {
+    try {
+      const v = localStorage.getItem("tma:cover-mode");
+      if (v === "default" || v === "vinyl" || v === "cd" || v === "case") return v;
+      // migrate old boolean
+      const old = localStorage.getItem("tma:vinyl-spin");
+      return old === "false" ? "default" : "vinyl";
+    } catch { return "vinyl"; }
   });
   const [tapeWarmth, setTapeWarmth] = useState(false);
   const [airBand, setAirBand] = useState(false);
@@ -1249,9 +1255,9 @@ export function App() {
   }, []);
 
   // ── Vinyl spin toggle persistence ──
-  const handleVinylSpin = useCallback((on: boolean) => {
-    setVinylSpin(on);
-    try { localStorage.setItem("tma:vinyl-spin", String(on)); } catch {}
+  const handleCoverMode = useCallback((mode: "default" | "vinyl" | "cd" | "case") => {
+    setCoverMode(mode);
+    try { localStorage.setItem("tma:cover-mode", mode); } catch {}
   }, []);
 
   // Party Mode — bass boost + club EQ + slight speed up + luxury warmth & air
@@ -1620,7 +1626,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} vinylSpin={vinylSpin} onVinylSpin={handleVinylSpin} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
