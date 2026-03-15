@@ -3,6 +3,7 @@ import logging
 import re
 import shutil
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import uuid
@@ -13,6 +14,41 @@ from bot.config import settings, _COOKIES_PATH
 from bot.utils import fmt_duration as _utils_fmt_duration
 
 logger = logging.getLogger(__name__)
+
+# ── Permanent failure cache (age-restricted, removed, etc.) ──────────
+_PERMANENT_FAILURES: dict[str, float] = {}
+_PERM_FAIL_TTL = 86400  # 24 hours
+
+_PERM_FAIL_PATTERNS = [
+    "Sign in to confirm your age",
+    "This video is private",
+    "Video unavailable",
+    "has been removed",
+    "account associated with this video has been terminated",
+]
+
+
+def _mark_permanent_failure(video_id: str) -> None:
+    _PERMANENT_FAILURES[video_id] = time.monotonic() + _PERM_FAIL_TTL
+
+
+def _is_permanently_failed(video_id: str) -> bool:
+    exp = _PERMANENT_FAILURES.get(video_id)
+    if exp is None:
+        return False
+    if time.monotonic() > exp:
+        del _PERMANENT_FAILURES[video_id]
+        return False
+    return True
+
+
+def _check_permanent_failure(video_id: str, error: Exception) -> None:
+    msg = str(error)
+    for pat in _PERM_FAIL_PATTERNS:
+        if pat in msg:
+            _mark_permanent_failure(video_id)
+            logger.warning("Marked %s as permanent failure (24h): %s", video_id, pat)
+            return
 
 
 # ── Staging helpers (shared by download_manager and providers) ──────────
@@ -136,6 +172,8 @@ async def resolve_youtube_audio_stream_url(video_id: str) -> str | None:
 
 
 def _resolve_youtube_sync(video_id: str) -> dict | None:
+    if _is_permanently_failed(video_id):
+        return None
     url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
         "quiet": True,
@@ -165,11 +203,14 @@ def _resolve_youtube_sync(video_id: str) -> dict | None:
                 "upload_year": _extract_year(info),
             }
     except Exception as e:
+        _check_permanent_failure(video_id, e)
         logger.error("YouTube resolve sync error for %s: %s", video_id, e)
         return None
 
 
 def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
+    if _is_permanently_failed(video_id):
+        return None
     url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
         "quiet": True,
@@ -207,6 +248,7 @@ def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
                     best_audio_url = fmt_url
             return best_audio_url
     except Exception as e:
+        _check_permanent_failure(video_id, e)
         logger.error("YouTube audio URL resolve sync error for %s: %s", video_id, e)
         return None
 
@@ -372,6 +414,8 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
 
 def _list_formats_debug(video_id: str) -> None:
     """Log available formats for a video (debug helper)."""
+    if _is_permanently_failed(video_id):
+        return
     try:
         with yt_dlp.YoutubeDL({
             "quiet": False, "verbose": True, "no_warnings": False,
@@ -398,6 +442,8 @@ def _list_formats_debug(video_id: str) -> None:
 
 
 def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=None, dl_id: str | None = None) -> Path:
+    if _is_permanently_failed(video_id):
+        raise yt_dlp.utils.DownloadError(f"Permanently failed (cached): {video_id}")
     url = f"https://www.youtube.com/watch?v={video_id}"
     file_stem = f"{video_id}_{dl_id}" if dl_id else video_id
     output_template = str(output_dir / f"{file_stem}.%(ext)s")
@@ -436,6 +482,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:
+        _check_permanent_failure(video_id, e)
         logger.error("Download failed for %s: %s", video_id, e)
         _list_formats_debug(video_id)
         raise

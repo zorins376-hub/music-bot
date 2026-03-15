@@ -350,7 +350,6 @@ async def _get_or_create_webapp_user(tg_user: dict):
                         await session.commit()
                     except IntegrityError:
                         await session.rollback()
-                        # Race condition: another request already created the user
                         db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
                         if db_user is None:
                             raise
