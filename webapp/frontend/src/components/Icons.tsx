@@ -182,45 +182,69 @@ export const IconSearch = ({ size = 18, color = "currentColor", strokeWidth = 2 
   </svg>
 );
 
-// Lime / citrus icon in cross-section (for Tequila theme)
-export const IconLime = ({ size = 18, color = "currentColor", strokeWidth = 1.8 }: IconProps) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-    {/* Outer peel */}
-    <circle cx="12" cy="12" r="10"/>
-    {/* Inner pith */}
-    <circle cx="12" cy="12" r="8" strokeDasharray="1 3" strokeWidth="1" opacity="0.8"/>
-    {/* Center core */}
-    <circle cx="12" cy="12" r="2" fill={color} fillOpacity="0.1"/>
-    {/* Segments (8 slices) */}
-    <path d="M12 4 L12 10" />
-    <path d="M12 20 L12 14" />
-    <path d="M4 12 L10 12" />
-    <path d="M20 12 L14 12" />
-    <path d="M6.34 6.34 L10.59 10.59" />
-    <path d="M17.66 17.66 L13.41 13.41" />
-    <path d="M17.66 6.34 L13.41 10.59" />
-    <path d="M6.34 17.66 L10.59 13.41" />
-    {/* Juice droplets (dots) in segments */}
-    <circle cx="14" cy="8" r="0.5" fill={color} stroke="none"/>
-    <circle cx="10" cy="16" r="0.5" fill={color} stroke="none"/>
-    <circle cx="8" cy="10" r="0.5" fill={color} stroke="none"/>
-    <circle cx="16" cy="14" r="0.5" fill={color} stroke="none"/>
+// ── Theme icons ─────────────────────────────────────────────────────
+
+// BLACK ROOM — dark cube with glow
+export const IconThemeBlackroom = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="3" fill={color} fillOpacity="0.15"/>
+    <rect x="4" y="4" width="16" height="16" rx="3"/>
+    <circle cx="12" cy="12" r="3" fill={color} fillOpacity="0.3"/>
+    <path d="M12 6v2M12 16v2M6 12h2M16 12h2" strokeWidth="1" opacity="0.5"/>
   </svg>
 );
 
-// Sunrise icon (for theme switch → Tequila)
-export const IconSunrise = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+// TEQUILA — sunset over horizon with rays
+export const IconThemeTequila = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 18h20"/>
+    <path d="M17 18a5 5 0 0 0-10 0" fill={color} fillOpacity="0.2"/>
     <path d="M17 18a5 5 0 0 0-10 0"/>
-    <line x1="12" y1="9" x2="12" y2="2"/>
-    <line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/>
-    <line x1="1" y1="18" x2="3" y2="18"/>
-    <line x1="21" y1="18" x2="23" y2="18"/>
-    <line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/>
-    <line x1="23" y1="22" x2="1" y2="22"/>
-    <polyline points="8 6 12 2 16 6"/>
+    <line x1="12" y1="9" x2="12" y2="5"/>
+    <line x1="8.46" y1="10.46" x2="6.34" y2="8.34"/>
+    <line x1="15.54" y1="10.46" x2="17.66" y2="8.34"/>
+    <line x1="5" y1="15" x2="3" y2="15" strokeWidth="1" opacity="0.5"/>
+    <line x1="19" y1="15" x2="21" y2="15" strokeWidth="1" opacity="0.5"/>
+    <path d="M2 21h20" strokeWidth="1" opacity="0.3"/>
   </svg>
 );
+
+// NEON CITY — neon sign / electric bolt
+export const IconThemeNeon = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill={color} fillOpacity="0.12"/>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    <circle cx="5" cy="5" r="1" fill={color} fillOpacity="0.4" stroke="none"/>
+    <circle cx="20" cy="18" r="0.7" fill={color} fillOpacity="0.3" stroke="none"/>
+  </svg>
+);
+
+// MIDNIGHT VELVET — crescent with stars
+export const IconThemeMidnight = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill={color} fillOpacity="0.1"/>
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    <circle cx="17" cy="6" r="0.8" fill={color} stroke="none"/>
+    <circle cx="20" cy="10" r="0.5" fill={color} stroke="none"/>
+    <circle cx="15" cy="3" r="0.5" fill={color} stroke="none"/>
+    <path d="M18.5 4l.5 1 1 .5-1 .5-.5 1-.5-1-1-.5 1-.5z" fill={color} stroke="none" opacity="0.7"/>
+  </svg>
+);
+
+// EMERALD LOUNGE — gemstone / leaf
+export const IconThemeEmerald = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2L4 9l8 13 8-13z" fill={color} fillOpacity="0.12"/>
+    <path d="M12 2L4 9l8 13 8-13z"/>
+    <path d="M4 9h16"/>
+    <path d="M9 2l3 7 3-7" strokeWidth="1" opacity="0.6"/>
+    <path d="M7.5 9L12 22l4.5-13" strokeWidth="1" opacity="0.4"/>
+  </svg>
+);
+
+// Keep old names for backward compat
+export const IconLime = IconThemeTequila;
+export const IconSunrise = IconThemeTequila;
 
 // Close / X icon
 export const IconClose = ({ size = 18, color = "currentColor", strokeWidth = 2 }: IconProps) => (

@@ -8,7 +8,7 @@ import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
 import { ForYouView } from "./components/ForYouView";
 import { ProfileView } from "./components/ProfileView";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
@@ -1529,11 +1529,11 @@ export function App() {
               overflow: "hidden",
             }}
           >
-            {theme.id === "tequila" ? <IconLime size={14} /> :
-             theme.id === "neon" ? <IconDiamond size={14} /> :
-             theme.id === "midnight" ? <IconMoon size={14} /> :
-             theme.id === "emerald" ? <IconPlaySmall size={14} /> :
-             <IconMoon size={14} />}
+            {theme.id === "tequila" ? <IconThemeTequila size={14} /> :
+             theme.id === "neon" ? <IconThemeNeon size={14} /> :
+             theme.id === "midnight" ? <IconThemeMidnight size={14} /> :
+             theme.id === "emerald" ? <IconThemeEmerald size={14} /> :
+             <IconThemeBlackroom size={14} />}
           </button>
         </nav>
       </div>
