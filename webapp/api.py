@@ -1984,36 +1984,57 @@ async def toggle_favorite(video_id: str, user: dict = Depends(get_current_user))
 
 @app.get("/api/favorites/list")
 async def list_favorites(user: dict = Depends(get_current_user)):
-    """List all favorite tracks for current user."""
+    """List all favorite tracks for current user (Redis set → DB lookup)."""
     user_id = user["id"]
-    from bot.models.base import async_session
-    async with async_session() as session:
+    r = await _get_redis()
+    video_ids = await r.smembers(_favorites_key(user_id))
+    if not video_ids:
+        return {"tracks": []}
+
+    # Decode bytes→str if needed
+    ids = [v.decode() if isinstance(v, bytes) else v for v in video_ids]
+
+    # Lookup metadata from tracks DB
+    try:
+        from bot.models.base import async_session
         from sqlalchemy import select
         from bot.models.track import Track
-        from bot.models.favorite import FavoriteTrack
 
-        q = await session.execute(
-            select(Track)
-            .join(FavoriteTrack, FavoriteTrack.track_id == Track.id)
-            .where(FavoriteTrack.user_id == user_id)
-            .order_by(FavoriteTrack.created_at.desc())
-            .limit(100)
-        )
-        tracks = q.scalars().all()
-        return {
-            "tracks": [
-                {
-                    "video_id": t.source_id,
-                    "title": t.title or "Unknown",
-                    "artist": t.artist or "Unknown",
-                    "duration": t.duration or 0,
-                    "duration_fmt": f"{(t.duration or 0) // 60}:{(t.duration or 0) % 60:02d}",
-                    "source": t.source or "youtube",
-                    "cover_url": t.cover_url,
-                }
-                for t in tracks
-            ]
-        }
+        async with async_session() as session:
+            q = await session.execute(
+                select(Track).where(Track.source_id.in_(ids)).limit(100)
+            )
+            tracks = q.scalars().all()
+            tracks_map = {t.source_id: t for t in tracks}
+
+            result = []
+            for vid in ids:
+                t = tracks_map.get(vid)
+                if t:
+                    result.append({
+                        "video_id": t.source_id,
+                        "title": t.title or "Unknown",
+                        "artist": t.artist or "Unknown",
+                        "duration": t.duration or 0,
+                        "duration_fmt": f"{(t.duration or 0) // 60}:{(t.duration or 0) % 60:02d}",
+                        "source": t.source or "youtube",
+                        "cover_url": t.cover_url,
+                    })
+                else:
+                    # Track not in DB yet — return minimal info
+                    result.append({
+                        "video_id": vid,
+                        "title": "Unknown",
+                        "artist": "Unknown",
+                        "duration": 0,
+                        "duration_fmt": "0:00",
+                        "source": "youtube",
+                        "cover_url": None,
+                    })
+            return {"tracks": result}
+    except Exception:
+        # Fallback — return IDs with no metadata
+        return {"tracks": [{"video_id": v, "title": "Unknown", "artist": "Unknown", "duration": 0, "duration_fmt": "0:00", "source": "youtube", "cover_url": None} for v in ids]}
 
 
 @app.get("/api/stats/{user_id}")
