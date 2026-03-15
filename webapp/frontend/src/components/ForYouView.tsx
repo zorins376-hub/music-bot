@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "preact/hooks";
+import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, type Track } from "../api";
 import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar } from "./Icons";
 
@@ -50,6 +50,56 @@ export function ForYouView({
 
   // --- Track of the Day ---
   const [todTrack, setTodTrack] = useState<Track | null>(null);
+
+  // --- Pull-to-refresh ---
+  const [refreshing, setRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullStartY = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const refreshAll = useCallback(async () => {
+    setRefreshing(true);
+    haptic("medium");
+    try {
+      const [w, t, tod] = await Promise.allSettled([
+        fetchWave(userId, 10),
+        fetchTrending(24, 15),
+        fetchTrackOfDay(),
+      ]);
+      if (w.status === "fulfilled") setWaveTracks(w.value);
+      if (t.status === "fulfilled") setTrendingTracks(t.value);
+      if (tod.status === "fulfilled") setTodTrack(tod.value);
+      if (currentTrack?.video_id) {
+        try { const s = await fetchSimilar(currentTrack.video_id, 8); setSimilarTracks(s); } catch {}
+      }
+    } catch {}
+    setRefreshing(false);
+  }, [userId, currentTrack?.video_id]);
+
+  const handlePullStart = useCallback((e: TouchEvent) => {
+    const el = containerRef.current;
+    if (el && el.scrollTop <= 0) {
+      pullStartY.current = e.touches[0].clientY;
+    } else {
+      pullStartY.current = 0;
+    }
+  }, []);
+
+  const handlePullMove = useCallback((e: TouchEvent) => {
+    if (!pullStartY.current) return;
+    const dy = e.touches[0].clientY - pullStartY.current;
+    if (dy > 0) {
+      setPullDistance(Math.min(80, dy * 0.4));
+    }
+  }, []);
+
+  const handlePullEnd = useCallback(() => {
+    if (pullDistance > 50 && !refreshing) {
+      refreshAll();
+    }
+    setPullDistance(0);
+    pullStartY.current = 0;
+  }, [pullDistance, refreshing, refreshAll]);
 
   // --- AI Playlist state ---
   const [aiPrompt, setAiPrompt] = useState("");
@@ -203,17 +253,67 @@ export function ForYouView({
   };
 
   return (
-    <div style={{ paddingBottom: 24 }}>
+    <div
+      ref={containerRef}
+      onTouchStart={handlePullStart}
+      onTouchMove={handlePullMove}
+      onTouchEnd={handlePullEnd}
+      style={{ paddingBottom: 24, touchAction: "pan-y" }}
+    >
+      {/* Pull-to-refresh indicator */}
+      {(pullDistance > 0 || refreshing) && (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: refreshing ? 40 : pullDistance,
+          overflow: "hidden",
+          transition: refreshing ? "height 0.3s ease" : "none",
+          marginBottom: 8,
+        }}>
+          <div style={{
+            opacity: refreshing ? 1 : Math.min(1, pullDistance / 50),
+            transform: `rotate(${refreshing ? 0 : pullDistance * 4}deg)`,
+            animation: refreshing ? "spinRefresh 0.8s linear infinite" : "none",
+          }}>
+            <IconSpinner size={20} color={accent} />
+          </div>
+          <style>{`@keyframes spinRefresh { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
       {/* ===== Page Header ===== */}
       <div style={{ marginBottom: 24 }}>
         <div style={{
-          fontSize: 22, fontWeight: 700, color: textColor,
-          letterSpacing: 0.3, marginBottom: 4,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
-          Для тебя
-        </div>
-        <div style={{ fontSize: 13, color: hintColor }}>
-          Персональные рекомендации
+          <div>
+            <div style={{
+              fontSize: 22, fontWeight: 700, color: textColor,
+              letterSpacing: 0.3, marginBottom: 4,
+            }}>
+              Для тебя
+            </div>
+            <div style={{ fontSize: 13, color: hintColor }}>
+              Персональные рекомендации
+            </div>
+          </div>
+          <button
+            onClick={() => { if (!refreshing) refreshAll(); }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              opacity: refreshing ? 0.5 : 0.7,
+              padding: 8,
+              color: hintColor,
+              fontSize: 18,
+              animation: refreshing ? "spinRefresh 0.8s linear infinite" : "none",
+            }}
+            title="Обновить"
+          >
+            ↻
+          </button>
         </div>
       </div>
 
