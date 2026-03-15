@@ -56,20 +56,67 @@ async def _read_cpu_percent(sample_seconds: float = 0.2) -> float:
         return 0.0
     return max(0.0, min(100.0, (1 - idle_delta / total_delta) * 100))
 
-# ── Auth ─────────────────────────────────────────────────────────────────
+# ── Auth — login/password with HMAC session tokens ──────────────────────
 
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-token-change-me")
+import hashlib
+import hmac
+import json
+import time as _time
+
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+_SESSION_SECRET = os.environ.get("ADMIN_SESSION_SECRET", hashlib.sha256(
+    (ADMIN_USERNAME + ADMIN_PASSWORD + "salt-music-bot").encode()
+).hexdigest())
+_SESSION_TTL = 86400 * 7  # 7 days
+
+
+def _make_session_token(username: str) -> str:
+    """Create HMAC-signed session token with expiry."""
+    payload = json.dumps({"u": username, "exp": int(_time.time()) + _SESSION_TTL})
+    sig = hmac.new(_SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    import base64
+    return base64.urlsafe_b64encode(f"{payload}|{sig}".encode()).decode()
+
+
+def _verify_session_token(token: str) -> bool:
+    """Verify HMAC signature and expiry of session token."""
+    try:
+        import base64
+        raw = base64.urlsafe_b64decode(token.encode()).decode()
+        payload_str, sig = raw.rsplit("|", 1)
+        expected = hmac.new(_SESSION_SECRET.encode(), payload_str.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        payload = json.loads(payload_str)
+        if payload.get("exp", 0) < _time.time():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login")
+async def admin_login(body: LoginRequest):
+    """Authenticate admin and return session token."""
+    if body.username == ADMIN_USERNAME and body.password == ADMIN_PASSWORD:
+        token = _make_session_token(body.username)
+        return {"ok": True, "token": token}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
 async def verify_admin(authorization: str = Header(None)) -> bool:
-    """Verify admin token from Authorization header."""
+    """Verify session token from Authorization header."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
-    
-    # Bearer token or plain token
     token = authorization.replace("Bearer ", "").strip()
-    if token != ADMIN_TOKEN:
-        raise HTTPException(status_code=403, detail="Invalid admin token")
+    if not _verify_session_token(token):
+        raise HTTPException(status_code=403, detail="Invalid or expired session")
     return True
 
 
@@ -625,3 +672,91 @@ async def get_source_stats(_: bool = Depends(verify_admin)):
         "plays_by_source": sources,
         "tracks_by_source": tracks_by_source,
     }
+
+
+# ── Active Parties ──────────────────────────────────────────────────────
+
+@router.get("/parties")
+async def get_active_parties(_: bool = Depends(verify_admin)):
+    """Get list of active parties from Redis."""
+    try:
+        from bot.db import redis_client
+        if not redis_client:
+            return {"parties": []}
+        keys = await redis_client.keys("party:*:state")
+        parties = []
+        for key in keys[:50]:
+            raw = await redis_client.get(key)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    parties.append({
+                        "code": data.get("invite_code", ""),
+                        "name": data.get("name", ""),
+                        "members": data.get("member_count", 0),
+                        "tracks": len(data.get("tracks", [])),
+                        "created_by": data.get("created_by", 0),
+                    })
+                except Exception:
+                    pass
+        return {"parties": parties}
+    except Exception as e:
+        logger.warning("Failed to list parties: %s", e)
+        return {"parties": []}
+
+
+# ── Audit Log ───────────────────────────────────────────────────────────
+
+@router.get("/audit")
+async def get_audit_log(
+    limit: int = Query(50, ge=1, le=500),
+    _: bool = Depends(verify_admin),
+):
+    """Get admin audit log."""
+    try:
+        from bot.models.admin_log import AdminLog
+        async with async_session() as session:
+            result = await session.execute(
+                select(AdminLog).order_by(desc(AdminLog.created_at)).limit(limit)
+            )
+            logs = result.scalars().all()
+            return {"logs": [
+                {
+                    "id": log.id,
+                    "admin_id": log.admin_id,
+                    "action": log.action,
+                    "target_user_id": log.target_user_id,
+                    "details": log.details,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                }
+                for log in logs
+            ]}
+    except Exception as e:
+        logger.warning("Audit log error: %s", e)
+        return {"logs": []}
+
+
+# ── Downloads health ────────────────────────────────────────────────────
+
+@router.get("/downloads")
+async def get_downloads_health(_: bool = Depends(verify_admin)):
+    """Get downloads directory stats."""
+    try:
+        dl_dir = settings.DOWNLOAD_DIR if hasattr(settings, "DOWNLOAD_DIR") else Path("downloads")
+        if not dl_dir.exists():
+            return {"total_files": 0, "total_size_mb": 0, "recent": []}
+        files = list(dl_dir.glob("*.mp3"))
+        total_size = sum(f.stat().st_size for f in files)
+        # Recent 20 files
+        recent = sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)[:20]
+        return {
+            "total_files": len(files),
+            "total_size_mb": round(total_size / 1024 / 1024, 1),
+            "recent": [
+                {"name": f.name, "size_mb": round(f.stat().st_size / 1024 / 1024, 2), "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()}
+                for f in recent
+            ],
+        }
+    except Exception as e:
+        logger.warning("Downloads health error: %s", e)
+        return {"total_files": 0, "total_size_mb": 0, "recent": []}

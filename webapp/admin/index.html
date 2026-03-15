@@ -10,35 +10,43 @@
     <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .stat-card { transition: transform 0.2s; }
-        .stat-card:hover { transform: translateY(-2px); }
+        body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e2e8f0; }
+        .card { background: #1a1d2e; border: 1px solid #2d3148; border-radius: 14px; }
+        .stat-card { transition: transform 0.2s, box-shadow 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
         .loading { animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .log-error { color: #ef4444; }
-        .log-warning { color: #f59e0b; }
-        .log-info { color: #3b82f6; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        .log-error { color: #f87171; }
+        .log-warning { color: #fbbf24; }
+        .log-info { color: #60a5fa; }
+        .glass { background: rgba(26,29,46,0.8); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        input, select { background: #12141f; border: 1px solid #2d3148; color: #e2e8f0; }
+        input:focus, select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 2px rgba(102,126,234,0.2); }
+        table thead { background: #12141f; }
+        table tbody tr { border-color: #2d3148; }
+        table tbody tr:hover { background: rgba(102,126,234,0.06); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #12141f; }
+        ::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 3px; }
+        .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useCallback } = React;
         const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } = Recharts;
 
-        // API Base URL
         const API = '/admin/api';
-        
-        // Auth token (from localStorage or prompt)
-        const getToken = () => localStorage.getItem('admin_token') || '';
-        const setToken = (t) => localStorage.setItem('admin_token', t);
+        const getToken = () => localStorage.getItem('admin_session') || '';
+        const setSessionToken = (t) => localStorage.setItem('admin_session', t);
+        const clearSession = () => localStorage.removeItem('admin_session');
 
-        // Fetch with auth
         const apiFetch = async (path, options = {}) => {
             const res = await fetch(`${API}${path}`, {
                 ...options,
@@ -49,66 +57,160 @@
                 },
             });
             if (res.status === 401 || res.status === 403) {
-                const token = prompt('Введите Admin Token:');
-                if (token) {
-                    setToken(token);
-                    return apiFetch(path, options);
-                }
-                throw new Error('Unauthorized');
+                clearSession();
+                window.location.reload();
+                throw new Error('Session expired');
             }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         };
 
-        // Format numbers
         const fmt = (n) => n?.toLocaleString('ru-RU') ?? '0';
         const fmtDate = (d) => d ? new Date(d).toLocaleDateString('ru-RU') : '-';
         const fmtDateTime = (d) => d ? new Date(d).toLocaleString('ru-RU') : '-';
+        const COLORS = ['#667eea', '#a78bfa', '#f59e0b', '#34d399', '#f87171', '#818cf8', '#fb923c', '#2dd4bf'];
 
-        // Colors
-        const COLORS = ['#667eea', '#764ba2', '#f59e0b', '#10b981', '#ef4444', '#6366f1'];
+        // ── SVG Icons ─────────────────────────────────────────────────────
+        const Icon = ({ d, size = 18, color = 'currentColor' }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d={d} />
+            </svg>
+        );
+        const IconUsers = (p) => <Icon {...p} d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2M9 7a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />;
+        const IconChart = (p) => <Icon {...p} d="M18 20V10M12 20V4M6 20v-6" />;
+        const IconMusic = (p) => <Icon {...p} d="M9 18V5l12-2v13M9 18a3 3 0 11-6 0 3 3 0 016 0zM21 16a3 3 0 11-6 0 3 3 0 016 0z" />;
+        const IconPlay = (p) => <Icon {...p} d="M5 3l14 9-14 9V3z" />;
+        const IconServer = (p) => <Icon {...p} d="M22 12H2M22 12a2 2 0 002-2V6a2 2 0 00-2-2H2a2 2 0 00-2 2v4a2 2 0 002 2M22 12a2 2 0 012 2v4a2 2 0 01-2 2H2a2 2 0 01-2-2v-4a2 2 0 012-2M6 8h.01M6 16h.01" />;
+        const IconLog = (p) => <Icon {...p} d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" />;
+        const IconParty = (p) => <Icon {...p} d="M5.8 11.3L2 22l10.7-3.8M15 3l-8.7 8.7a2.1 2.1 0 000 3l3 3a2.1 2.1 0 003 0L21 9" />;
+        const IconDownload = (p) => <Icon {...p} d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />;
+        const IconShield = (p) => <Icon {...p} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />;
+        const IconLogout = (p) => <Icon {...p} d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />;
+        const IconRefresh = (p) => <Icon {...p} d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />;
+        const IconTrash = (p) => <Icon {...p} d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />;
+        const IconStar = (p) => <Icon {...p} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />;
+        const IconBan = (p) => <Icon {...p} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />;
 
-        // ── Components ──────────────────────────────────────────────────
+        // ── Login Page ────────────────────────────────────────────────────
+        const LoginPage = ({ onLogin }) => {
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
 
-        const StatCard = ({ title, value, subtitle, icon, color = 'blue' }) => (
-            <div className={`card stat-card p-6 border-l-4 border-${color}-500`}>
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                try {
+                    const res = await fetch(`${API}/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password }),
+                    });
+                    if (!res.ok) {
+                        setError('Неверный логин или пароль');
+                        setLoading(false);
+                        return;
+                    }
+                    const data = await res.json();
+                    setSessionToken(data.token);
+                    onLogin();
+                } catch (e) {
+                    setError('Ошибка подключения');
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center px-4">
+                    <div className="card p-8 w-full max-w-sm fade-in">
+                        <div className="text-center mb-8">
+                            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                                <IconShield size={28} color="#fff" />
+                            </div>
+                            <h1 className="text-xl font-bold">Music Bot Admin</h1>
+                            <p className="text-sm text-gray-500 mt-1">Войдите для управления</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-400 mb-1.5">Логин</label>
+                                <input
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    className="w-full px-4 py-2.5 rounded-lg text-sm"
+                                    placeholder="admin"
+                                    autoFocus
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-400 mb-1.5">Пароль</label>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full px-4 py-2.5 rounded-lg text-sm"
+                                    placeholder="********"
+                                    required
+                                />
+                            </div>
+                            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold text-sm hover:opacity-90 transition disabled:opacity-50"
+                            >
+                                {loading ? 'Вход...' : 'Войти'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ── Components ────────────────────────────────────────────────────
+
+        const StatCard = ({ title, value, subtitle, icon, color = '#667eea' }) => (
+            <div className="card stat-card p-5" style={{ borderLeft: `3px solid ${color}` }}>
                 <div className="flex justify-between items-start">
                     <div>
-                        <p className="text-gray-500 text-sm font-medium">{title}</p>
-                        <p className="text-3xl font-bold mt-1">{fmt(value)}</p>
-                        {subtitle && <p className="text-gray-400 text-xs mt-1">{subtitle}</p>}
+                        <p className="text-gray-400 text-xs font-medium uppercase tracking-wide">{title}</p>
+                        <p className="text-2xl font-bold mt-1">{fmt(value)}</p>
+                        {subtitle && <p className="text-gray-500 text-xs mt-1">{subtitle}</p>}
                     </div>
-                    <div className={`text-${color}-500 text-2xl`}>{icon}</div>
+                    <div style={{ color }} className="opacity-60">{icon}</div>
                 </div>
             </div>
         );
 
         const SystemCard = ({ label, used, total, unit, percent }) => (
-            <div className="card p-4">
-                <div className="flex justify-between text-sm mb-2">
+            <div>
+                <div className="flex justify-between text-sm mb-1.5">
                     <span className="font-medium">{label}</span>
                     <span className="text-gray-500">{used.toFixed(1)} / {total.toFixed(1)} {unit}</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                    <div 
-                        className={`h-3 rounded-full ${percent > 80 ? 'bg-red-500' : percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                        style={{ width: `${Math.min(percent, 100)}%` }}
+                <div className="w-full bg-gray-800 rounded-full h-2.5">
+                    <div
+                        className="h-2.5 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(percent, 100)}%`, background: percent > 80 ? '#f87171' : percent > 60 ? '#fbbf24' : '#34d399' }}
                     />
                 </div>
-                <p className="text-right text-xs text-gray-400 mt-1">{percent.toFixed(1)}%</p>
+                <p className="text-right text-xs text-gray-500 mt-0.5">{percent.toFixed(1)}%</p>
             </div>
         );
 
         const Tabs = ({ tabs, active, onChange }) => (
-            <div className="flex space-x-1 bg-gray-200 p-1 rounded-lg">
+            <div className="flex gap-1 overflow-x-auto pb-1">
                 {tabs.map(tab => (
                     <button
                         key={tab.id}
                         onClick={() => onChange(tab.id)}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                            active === tab.id 
-                                ? 'bg-white shadow text-gray-900' 
-                                : 'text-gray-600 hover:text-gray-900'
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${
+                            active === tab.id
+                                ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
                         }`}
                     >
                         {tab.icon} {tab.label}
@@ -117,40 +219,38 @@
             </div>
         );
 
-        // ── Dashboard ───────────────────────────────────────────────────
+        // ── Dashboard ─────────────────────────────────────────────────────
 
         const Dashboard = ({ stats, system, growth, sources }) => (
-            <div className="space-y-6">
-                {/* Stats Grid */}
+            <div className="space-y-6 fade-in">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <StatCard title="Всего пользователей" value={stats?.total_users} subtitle={`+${stats?.users_today} сегодня`} icon="👥" color="blue" />
-                    <StatCard title="DAU / WAU / MAU" value={stats?.dau} subtitle={`${stats?.wau} / ${stats?.mau}`} icon="📊" color="green" />
-                    <StatCard title="Треков в базе" value={stats?.total_tracks} subtitle={`${fmt(stats?.total_downloads)} скачиваний`} icon="🎵" color="purple" />
-                    <StatCard title="Прослушиваний" value={stats?.total_plays} subtitle={`+${stats?.plays_today} сегодня`} icon="▶️" color="indigo" />
+                    <StatCard title="Пользователи" value={stats?.total_users} subtitle={`+${stats?.users_today || 0} сегодня`} icon={<IconUsers size={22} />} color="#667eea" />
+                    <StatCard title="DAU / WAU / MAU" value={stats?.dau} subtitle={`${fmt(stats?.wau)} / ${fmt(stats?.mau)}`} icon={<IconChart size={22} />} color="#34d399" />
+                    <StatCard title="Треков" value={stats?.total_tracks} subtitle={`${fmt(stats?.total_downloads)} скачиваний`} icon={<IconMusic size={22} />} color="#a78bfa" />
+                    <StatCard title="Прослушиваний" value={stats?.total_plays} subtitle={`+${fmt(stats?.plays_today || 0)} сегодня`} icon={<IconPlay size={22} />} color="#818cf8" />
                 </div>
 
-                {/* System Stats */}
                 {system && (
                     <div className="card p-6">
-                        <h3 className="font-semibold mb-4">📊 Ресурсы сервера</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <h3 className="font-semibold mb-4 flex items-center gap-2"><IconServer size={16} /> Ресурсы сервера</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <SystemCard label="CPU" used={system.cpu_percent} total={100} unit="%" percent={system.cpu_percent} />
                             <SystemCard label="RAM" used={system.memory_used_gb} total={system.memory_total_gb} unit="GB" percent={system.memory_percent} />
                             <SystemCard label="Disk" used={system.disk_used_gb} total={system.disk_total_gb} unit="GB" percent={system.disk_percent} />
                         </div>
-                        <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+                        <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
                             <span>Load: {system.load_avg?.join(' / ')}</span>
                             <span>Uptime: {(system.uptime_hours / 24).toFixed(1)} дней</span>
                         </div>
                         {system.containers?.length > 0 && (
-                            <div className="mt-4 border-t pt-4">
-                                <p className="text-sm font-medium mb-2">Контейнеры:</p>
+                            <div className="mt-4 pt-4 border-t border-gray-800">
+                                <p className="text-xs font-medium mb-2 text-gray-400">Контейнеры</p>
                                 <div className="space-y-1">
                                     {system.containers.map((c, i) => (
                                         <div key={i} className="flex items-center text-sm">
-                                            <span className={`w-2 h-2 rounded-full mr-2 ${c.status?.includes('healthy') ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                                            <span className="font-mono">{c.name}</span>
-                                            <span className="text-gray-400 ml-2">{c.status}</span>
+                                            <span className={`w-2 h-2 rounded-full mr-2 ${c.status?.includes('healthy') || c.status?.includes('Up') ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                                            <span className="font-mono text-xs">{c.name}</span>
+                                            <span className="text-gray-500 ml-2 text-xs">{c.status}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -159,45 +259,39 @@
                     </div>
                 )}
 
-                {/* Charts */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* User Growth */}
                     {growth?.length > 0 && (
                         <div className="card p-6">
-                            <h3 className="font-semibold mb-4">📈 Рост пользователей</h3>
-                            <ResponsiveContainer width="100%" height={250}>
+                            <h3 className="font-semibold mb-4 flex items-center gap-2"><IconChart size={16} /> Рост пользователей</h3>
+                            <ResponsiveContainer width="100%" height={240}>
                                 <LineChart data={growth}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} fontSize={12} />
-                                    <YAxis fontSize={12} />
-                                    <Tooltip />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#2d3148" />
+                                    <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} fontSize={11} stroke="#4a5568" />
+                                    <YAxis fontSize={11} stroke="#4a5568" />
+                                    <Tooltip contentStyle={{ background: '#1a1d2e', border: '1px solid #2d3148', borderRadius: 8 }} />
                                     <Line type="monotone" dataKey="cumulative" stroke="#667eea" strokeWidth={2} dot={false} />
-                                    <Line type="monotone" dataKey="count" stroke="#10b981" strokeWidth={2} dot={false} />
+                                    <Line type="monotone" dataKey="count" stroke="#34d399" strokeWidth={2} dot={false} />
                                 </LineChart>
                             </ResponsiveContainer>
                         </div>
                     )}
 
-                    {/* Sources */}
-                    {sources?.plays_by_source && (
+                    {sources?.plays_by_source && Object.keys(sources.plays_by_source).length > 0 && (
                         <div className="card p-6">
-                            <h3 className="font-semibold mb-4">🎧 Источники прослушиваний</h3>
-                            <ResponsiveContainer width="100%" height={250}>
+                            <h3 className="font-semibold mb-4 flex items-center gap-2"><IconMusic size={16} /> Источники</h3>
+                            <ResponsiveContainer width="100%" height={240}>
                                 <PieChart>
                                     <Pie
                                         data={Object.entries(sources.plays_by_source).map(([name, value]) => ({ name, value }))}
-                                        dataKey="value"
-                                        nameKey="name"
-                                        cx="50%"
-                                        cy="50%"
-                                        outerRadius={80}
+                                        dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}
                                         label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                        labelLine={false}
                                     >
                                         {Object.keys(sources.plays_by_source).map((_, i) => (
                                             <Cell key={i} fill={COLORS[i % COLORS.length]} />
                                         ))}
                                     </Pie>
-                                    <Tooltip />
+                                    <Tooltip contentStyle={{ background: '#1a1d2e', border: '1px solid #2d3148', borderRadius: 8 }} />
                                 </PieChart>
                             </ResponsiveContainer>
                         </div>
@@ -206,7 +300,7 @@
             </div>
         );
 
-        // ── Tracks ──────────────────────────────────────────────────────
+        // ── Tracks Panel ──────────────────────────────────────────────────
 
         const TracksPanel = () => {
             const [tracks, setTracks] = useState([]);
@@ -219,8 +313,7 @@
                 setLoading(true);
                 try {
                     const data = await apiFetch(`/tracks?page=${page}&per_page=20&search=${search}`);
-                    setTracks(data.items);
-                    setTotal(data.total);
+                    setTracks(data.items); setTotal(data.total);
                 } catch (e) { console.error(e); }
                 setLoading(false);
             }, [page, search]);
@@ -229,67 +322,61 @@
 
             const deleteTrack = async (id) => {
                 if (!confirm('Удалить трек?')) return;
-                try {
-                    await apiFetch(`/tracks/${id}`, { method: 'DELETE' });
-                    load();
-                } catch (e) { alert('Ошибка: ' + e.message); }
+                try { await apiFetch(`/tracks/${id}`, { method: 'DELETE' }); load(); }
+                catch (e) { alert('Ошибка: ' + e.message); }
             };
 
             return (
-                <div className="card">
-                    <div className="p-4 border-b flex items-center justify-between">
-                        <input
-                            type="text"
-                            placeholder="Поиск треков..."
-                            value={search}
+                <div className="card fade-in">
+                    <div className="p-4 border-b border-gray-800 flex items-center justify-between flex-wrap gap-3">
+                        <input type="text" placeholder="Поиск треков..." value={search}
                             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                            className="px-4 py-2 border rounded-lg w-64"
-                        />
-                        <span className="text-gray-500">Всего: {fmt(total)}</span>
+                            className="px-4 py-2 rounded-lg w-64 text-sm" />
+                        <span className="text-gray-500 text-sm">Всего: {fmt(total)}</span>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-gray-50">
+                            <thead>
                                 <tr>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">ID</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Трек</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Источник</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Скачиваний</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Дата</th>
-                                    <th className="px-4 py-3"></th>
+                                    <th className="px-4 py-3 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody className={loading ? 'loading' : ''}>
                                 {tracks.map(t => (
-                                    <tr key={t.id} className="border-t hover:bg-gray-50">
-                                        <td className="px-4 py-3 text-sm font-mono">{t.id}</td>
+                                    <tr key={t.id} className="border-t border-gray-800">
+                                        <td className="px-4 py-3 text-xs font-mono text-gray-500">{t.id}</td>
                                         <td className="px-4 py-3">
-                                            <div className="font-medium">{t.title}</div>
-                                            <div className="text-sm text-gray-500">{t.artist}</div>
+                                            <div className="font-medium text-sm">{t.title}</div>
+                                            <div className="text-xs text-gray-500">{t.artist}</div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            <span className="px-2 py-1 bg-gray-100 rounded text-xs">{t.source || 'youtube'}</span>
+                                            <span className="badge bg-gray-800 text-gray-300">{t.source || 'youtube'}</span>
                                         </td>
                                         <td className="px-4 py-3 text-sm">{fmt(t.downloads)}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(t.created_at)}</td>
+                                        <td className="px-4 py-3 text-xs text-gray-500">{fmtDate(t.created_at)}</td>
                                         <td className="px-4 py-3">
-                                            <button onClick={() => deleteTrack(t.id)} className="text-red-500 hover:text-red-700">🗑</button>
+                                            <button onClick={() => deleteTrack(t.id)} className="text-gray-500 hover:text-red-400 transition"><IconTrash size={15} /></button>
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                    <div className="p-4 border-t flex justify-between items-center">
-                        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-gray-100 rounded disabled:opacity-50">← Назад</button>
-                        <span>Страница {page}</span>
-                        <button onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-gray-100 rounded">Далее →</button>
+                    <div className="p-4 border-t border-gray-800 flex justify-between items-center">
+                        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 rounded-lg bg-gray-800 text-sm disabled:opacity-30 hover:bg-gray-700 transition">Назад</button>
+                        <span className="text-sm text-gray-500">Стр. {page} / {Math.max(1, Math.ceil(total / 20))}</span>
+                        <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)} className="px-4 py-2 rounded-lg bg-gray-800 text-sm disabled:opacity-30 hover:bg-gray-700 transition">Далее</button>
                     </div>
                 </div>
             );
         };
 
-        // ── Users ───────────────────────────────────────────────────────
+        // ── Users Panel ───────────────────────────────────────────────────
 
         const UsersPanel = () => {
             const [users, setUsers] = useState([]);
@@ -302,8 +389,7 @@
                 setLoading(true);
                 try {
                     const data = await apiFetch(`/users?page=${page}&per_page=20&search=${search}`);
-                    setUsers(data.items);
-                    setTotal(data.total);
+                    setUsers(data.items); setTotal(data.total);
                 } catch (e) { console.error(e); }
                 setLoading(false);
             }, [page, search]);
@@ -311,64 +397,60 @@
             useEffect(() => { load(); }, [load]);
 
             const toggleBan = async (id, isBanned) => {
-                try {
-                    await apiFetch(`/users/${id}/ban?unban=${isBanned}`, { method: 'POST' });
-                    load();
-                } catch (e) { alert('Ошибка: ' + e.message); }
+                try { await apiFetch(`/users/${id}/ban?unban=${isBanned}`, { method: 'POST' }); load(); }
+                catch (e) { alert('Ошибка: ' + e.message); }
             };
 
             const togglePremium = async (id, isPremium) => {
-                try {
-                    await apiFetch(`/users/${id}/premium?remove=${isPremium}`, { method: 'POST' });
-                    load();
-                } catch (e) { alert('Ошибка: ' + e.message); }
+                try { await apiFetch(`/users/${id}/premium?remove=${isPremium}`, { method: 'POST' }); load(); }
+                catch (e) { alert('Ошибка: ' + e.message); }
             };
 
             return (
-                <div className="card">
-                    <div className="p-4 border-b flex items-center justify-between">
-                        <input
-                            type="text"
-                            placeholder="Поиск пользователей..."
-                            value={search}
+                <div className="card fade-in">
+                    <div className="p-4 border-b border-gray-800 flex items-center justify-between flex-wrap gap-3">
+                        <input type="text" placeholder="Поиск пользователей..." value={search}
                             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                            className="px-4 py-2 border rounded-lg w-64"
-                        />
-                        <span className="text-gray-500">Всего: {fmt(total)}</span>
+                            className="px-4 py-2 rounded-lg w-64 text-sm" />
+                        <span className="text-gray-500 text-sm">Всего: {fmt(total)}</span>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-gray-50">
+                            <thead>
                                 <tr>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">ID</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Пользователь</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Статус</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Запросов</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Активность</th>
-                                    <th className="px-4 py-3"></th>
+                                    <th className="px-4 py-3 w-20"></th>
                                 </tr>
                             </thead>
                             <tbody className={loading ? 'loading' : ''}>
                                 {users.map(u => (
-                                    <tr key={u.id} className="border-t hover:bg-gray-50">
-                                        <td className="px-4 py-3 text-sm font-mono">{u.id}</td>
+                                    <tr key={u.id} className="border-t border-gray-800">
+                                        <td className="px-4 py-3 text-xs font-mono text-gray-500">{u.id}</td>
                                         <td className="px-4 py-3">
-                                            <div className="font-medium">{u.first_name || 'Anonymous'}</div>
-                                            <div className="text-sm text-gray-500">@{u.username || '-'}</div>
+                                            <div className="font-medium text-sm">{u.first_name || 'Anonymous'}</div>
+                                            <div className="text-xs text-gray-500">@{u.username || '-'}</div>
                                         </td>
-                                        <td className="px-4 py-3">
-                                            {u.is_premium && <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs mr-1">⭐ Premium</span>}
-                                            {u.is_banned && <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">🚫 Ban</span>}
-                                            {!u.is_premium && !u.is_banned && <span className="text-gray-400 text-xs">-</span>}
+                                        <td className="px-4 py-3 space-x-1">
+                                            {u.is_premium && <span className="badge bg-yellow-500/15 text-yellow-400">Premium</span>}
+                                            {u.is_banned && <span className="badge bg-red-500/15 text-red-400">Banned</span>}
+                                            {!u.is_premium && !u.is_banned && <span className="text-gray-600 text-xs">-</span>}
                                         </td>
                                         <td className="px-4 py-3 text-sm">{fmt(u.request_count)}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-500">{fmtDateTime(u.last_active)}</td>
-                                        <td className="px-4 py-3 space-x-2">
-                                            <button onClick={() => togglePremium(u.id, u.is_premium)} className="text-yellow-600 hover:text-yellow-800">
-                                                {u.is_premium ? '⭐' : '☆'}
+                                        <td className="px-4 py-3 text-xs text-gray-500">{fmtDateTime(u.last_active)}</td>
+                                        <td className="px-4 py-3 flex gap-2">
+                                            <button onClick={() => togglePremium(u.id, u.is_premium)}
+                                                className={`transition ${u.is_premium ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-600 hover:text-yellow-400'}`}
+                                                title={u.is_premium ? 'Убрать Premium' : 'Дать Premium'}>
+                                                <IconStar size={15} />
                                             </button>
-                                            <button onClick={() => toggleBan(u.id, u.is_banned)} className="text-red-500 hover:text-red-700">
-                                                {u.is_banned ? '✓' : '🚫'}
+                                            <button onClick={() => toggleBan(u.id, u.is_banned)}
+                                                className={`transition ${u.is_banned ? 'text-red-400 hover:text-red-300' : 'text-gray-600 hover:text-red-400'}`}
+                                                title={u.is_banned ? 'Разбанить' : 'Забанить'}>
+                                                <IconBan size={15} />
                                             </button>
                                         </td>
                                     </tr>
@@ -376,26 +458,27 @@
                             </tbody>
                         </table>
                     </div>
-                    <div className="p-4 border-t flex justify-between items-center">
-                        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-gray-100 rounded disabled:opacity-50">← Назад</button>
-                        <span>Страница {page}</span>
-                        <button onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-gray-100 rounded">Далее →</button>
+                    <div className="p-4 border-t border-gray-800 flex justify-between items-center">
+                        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 rounded-lg bg-gray-800 text-sm disabled:opacity-30 hover:bg-gray-700 transition">Назад</button>
+                        <span className="text-sm text-gray-500">Стр. {page} / {Math.max(1, Math.ceil(total / 20))}</span>
+                        <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)} className="px-4 py-2 rounded-lg bg-gray-800 text-sm disabled:opacity-30 hover:bg-gray-700 transition">Далее</button>
                     </div>
                 </div>
             );
         };
 
-        // ── Logs ────────────────────────────────────────────────────────
+        // ── Logs Panel ────────────────────────────────────────────────────
 
         const LogsPanel = () => {
             const [logs, setLogs] = useState([]);
             const [loading, setLoading] = useState(false);
             const [level, setLevel] = useState('');
+            const [search, setSearch] = useState('');
 
             const load = useCallback(async () => {
                 setLoading(true);
                 try {
-                    const data = await apiFetch(`/logs?lines=200${level ? `&level=${level}` : ''}`);
+                    const data = await apiFetch(`/logs?lines=300${level ? `&level=${level}` : ''}`);
                     setLogs(data.logs || []);
                 } catch (e) { console.error(e); }
                 setLoading(false);
@@ -403,43 +486,165 @@
 
             useEffect(() => { load(); }, [load]);
 
+            const filtered = search ? logs.filter(l => l.message?.toLowerCase().includes(search.toLowerCase()) || l.logger?.toLowerCase().includes(search.toLowerCase())) : logs;
+
             return (
-                <div className="card">
-                    <div className="p-4 border-b flex items-center justify-between">
-                        <div className="flex space-x-2">
-                            {['', 'ERROR', 'WARNING', 'INFO'].map(l => (
-                                <button
-                                    key={l}
-                                    onClick={() => setLevel(l)}
-                                    className={`px-3 py-1 rounded text-sm ${level === l ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}
-                                >
-                                    {l || 'Все'}
+                <div className="card fade-in">
+                    <div className="p-4 border-b border-gray-800 flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex gap-1">
+                            {[['', 'Все'], ['ERROR', 'Errors'], ['WARNING', 'Warnings'], ['INFO', 'Info']].map(([l, label]) => (
+                                <button key={l} onClick={() => setLevel(l)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                                        level === l ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30' : 'text-gray-500 hover:text-gray-300 border border-transparent'
+                                    }`}>
+                                    {label}
                                 </button>
                             ))}
                         </div>
-                        <button onClick={load} className="px-4 py-2 bg-blue-500 text-white rounded">🔄 Обновить</button>
+                        <div className="flex gap-2 items-center">
+                            <input type="text" placeholder="Фильтр..." value={search} onChange={(e) => setSearch(e.target.value)}
+                                className="px-3 py-1.5 rounded-lg w-40 text-xs" />
+                            <button onClick={load} className="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition text-gray-400 hover:text-white">
+                                <IconRefresh size={14} />
+                            </button>
+                        </div>
                     </div>
-                    <div className={`p-4 font-mono text-xs space-y-1 max-h-[600px] overflow-y-auto bg-gray-900 text-gray-200 ${loading ? 'loading' : ''}`}>
-                        {logs.length === 0 && <p className="text-gray-500">Логов нет</p>}
-                        {logs.slice().reverse().map((log, i) => (
-                            <div key={i} className={`log-${log.level?.toLowerCase()}`}>
-                                <span className="text-gray-500">{log.timestamp}</span>
-                                {' '}
-                                <span className={`font-bold log-${log.level?.toLowerCase()}`}>[{log.level}]</span>
-                                {' '}
-                                <span className="text-gray-400">{log.logger}:</span>
-                                {' '}
-                                {log.message}
+                    <div className={`p-3 font-mono text-xs space-y-0.5 max-h-[600px] overflow-y-auto bg-[#0a0c14] ${loading ? 'loading' : ''}`}>
+                        {filtered.length === 0 && <p className="text-gray-600 text-center py-8">Логов не найдено</p>}
+                        {filtered.slice().reverse().map((log, i) => (
+                            <div key={i} className="flex gap-2 py-0.5 px-1 rounded hover:bg-white/[0.02]">
+                                <span className="text-gray-600 shrink-0">{log.timestamp?.split(',')[0]}</span>
+                                <span className={`font-bold shrink-0 w-16 log-${log.level?.toLowerCase()}`}>{log.level}</span>
+                                <span className="text-gray-500 shrink-0 max-w-[120px] truncate">{log.logger}</span>
+                                <span className="text-gray-300 break-all">{log.message}</span>
                             </div>
                         ))}
+                    </div>
+                    <div className="p-3 border-t border-gray-800 text-xs text-gray-600 text-center">
+                        {filtered.length} записей
                     </div>
                 </div>
             );
         };
 
-        // ── Main App ────────────────────────────────────────────────────
+        // ── Parties Panel ─────────────────────────────────────────────────
 
-        const App = () => {
+        const PartiesPanel = () => {
+            const [parties, setParties] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                apiFetch('/parties').then(d => setParties(d.parties || [])).catch(() => {}).finally(() => setLoading(false));
+            }, []);
+
+            return (
+                <div className="card fade-in">
+                    <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+                        <h3 className="font-medium text-sm">Активные пати</h3>
+                        <span className="text-gray-500 text-sm">{parties.length} активных</span>
+                    </div>
+                    {loading ? (
+                        <div className="p-8 text-center text-gray-500 loading">Загрузка...</div>
+                    ) : parties.length === 0 ? (
+                        <div className="p-8 text-center text-gray-600">Нет активных пати</div>
+                    ) : (
+                        <div className="divide-y divide-gray-800">
+                            {parties.map((p, i) => (
+                                <div key={i} className="p-4 flex items-center justify-between">
+                                    <div>
+                                        <div className="font-medium text-sm">{p.name || 'Party'}</div>
+                                        <div className="text-xs text-gray-500 mt-0.5">#{p.code}</div>
+                                    </div>
+                                    <div className="flex gap-4 text-xs text-gray-400">
+                                        <span>{p.members} участников</span>
+                                        <span>{p.tracks} треков</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ── Downloads Panel ───────────────────────────────────────────────
+
+        const DownloadsPanel = () => {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                apiFetch('/downloads').then(setData).catch(() => {}).finally(() => setLoading(false));
+            }, []);
+
+            return (
+                <div className="space-y-4 fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <StatCard title="Файлов в кэше" value={data?.total_files || 0} icon={<IconDownload size={22} />} color="#34d399" />
+                        <StatCard title="Размер кэша" value={`${data?.total_size_mb || 0} MB`} icon={<IconServer size={22} />} color="#f59e0b" />
+                    </div>
+                    {data?.recent?.length > 0 && (
+                        <div className="card">
+                            <div className="p-4 border-b border-gray-800">
+                                <h3 className="font-medium text-sm">Последние загрузки</h3>
+                            </div>
+                            <div className="divide-y divide-gray-800 max-h-96 overflow-y-auto">
+                                {data.recent.map((f, i) => (
+                                    <div key={i} className="px-4 py-2.5 flex items-center justify-between">
+                                        <span className="font-mono text-xs text-gray-300 truncate max-w-sm">{f.name}</span>
+                                        <div className="flex gap-4 text-xs text-gray-500 shrink-0">
+                                            <span>{f.size_mb} MB</span>
+                                            <span>{fmtDateTime(f.modified)}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ── Audit Panel ───────────────────────────────────────────────────
+
+        const AuditPanel = () => {
+            const [logs, setLogs] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                apiFetch('/audit?limit=100').then(d => setLogs(d.logs || [])).catch(() => {}).finally(() => setLoading(false));
+            }, []);
+
+            return (
+                <div className="card fade-in">
+                    <div className="p-4 border-b border-gray-800">
+                        <h3 className="font-medium text-sm">Audit Log</h3>
+                    </div>
+                    {loading ? (
+                        <div className="p-8 text-center text-gray-500 loading">Загрузка...</div>
+                    ) : logs.length === 0 ? (
+                        <div className="p-8 text-center text-gray-600">Нет записей</div>
+                    ) : (
+                        <div className="divide-y divide-gray-800 max-h-[500px] overflow-y-auto">
+                            {logs.map((l, i) => (
+                                <div key={i} className="px-4 py-3 flex items-center justify-between">
+                                    <div>
+                                        <span className="badge bg-indigo-500/15 text-indigo-400 mr-2">{l.action}</span>
+                                        <span className="text-sm">Admin {l.admin_id}</span>
+                                        {l.target_user_id && <span className="text-gray-500 text-sm ml-2">→ User {l.target_user_id}</span>}
+                                    </div>
+                                    <span className="text-xs text-gray-500">{fmtDateTime(l.created_at)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ── Main App ──────────────────────────────────────────────────────
+
+        const AdminApp = () => {
             const [tab, setTab] = useState('dashboard');
             const [stats, setStats] = useState(null);
             const [system, setSystem] = useState(null);
@@ -456,55 +661,56 @@
                             apiFetch('/users/growth?days=30'),
                             apiFetch('/sources'),
                         ]);
-                        setStats(st);
-                        setSystem(sys);
-                        setGrowth(gr.growth || []);
-                        setSources(src);
-                    } catch (e) {
-                        console.error(e);
-                    }
+                        setStats(st); setSystem(sys); setGrowth(gr.growth || []); setSources(src);
+                    } catch (e) { console.error(e); }
                     setLoading(false);
                 };
                 loadAll();
-                const interval = setInterval(loadAll, 30000); // refresh every 30s
+                const interval = setInterval(loadAll, 30000);
                 return () => clearInterval(interval);
             }, []);
 
             const tabs = [
-                { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-                { id: 'tracks', label: 'Треки', icon: '🎵' },
-                { id: 'users', label: 'Пользователи', icon: '👥' },
-                { id: 'logs', label: 'Логи', icon: '📋' },
+                { id: 'dashboard', label: 'Dashboard', icon: <IconChart size={15} /> },
+                { id: 'tracks', label: 'Треки', icon: <IconMusic size={15} /> },
+                { id: 'users', label: 'Пользователи', icon: <IconUsers size={15} /> },
+                { id: 'logs', label: 'Логи', icon: <IconLog size={15} /> },
+                { id: 'parties', label: 'Пати', icon: <IconParty size={15} /> },
+                { id: 'downloads', label: 'Загрузки', icon: <IconDownload size={15} /> },
+                { id: 'audit', label: 'Audit', icon: <IconShield size={15} /> },
             ];
+
+            const handleLogout = () => { clearSession(); window.location.reload(); };
 
             return (
                 <div className="min-h-screen">
-                    {/* Header */}
-                    <header className="gradient-bg text-white py-6 px-8 shadow-lg">
-                        <div className="max-w-7xl mx-auto flex items-center justify-between">
-                            <div>
-                                <h1 className="text-2xl font-bold">🎵 Music Bot Admin</h1>
-                                <p className="text-white/70 text-sm">Панель управления</p>
+                    <header className="border-b border-gray-800 bg-[#12141f]">
+                        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                                    <IconMusic size={16} color="#fff" />
+                                </div>
+                                <div>
+                                    <h1 className="text-base font-bold">Music Bot Admin</h1>
+                                    <p className="text-xs text-gray-500">{new Date().toLocaleDateString('ru-RU')}</p>
+                                </div>
                             </div>
-                            <div className="text-right text-sm">
-                                <div>v1.0.0</div>
-                                <div className="text-white/50">{new Date().toLocaleDateString('ru-RU')}</div>
-                            </div>
+                            <button onClick={handleLogout} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition px-3 py-1.5 rounded-lg hover:bg-white/5">
+                                <IconLogout size={15} /> Выход
+                            </button>
                         </div>
                     </header>
 
-                    {/* Navigation */}
-                    <div className="bg-white shadow">
-                        <div className="max-w-7xl mx-auto px-8 py-3">
+                    <nav className="border-b border-gray-800 bg-[#0f1117] sticky top-0 z-10">
+                        <div className="max-w-7xl mx-auto px-6 py-2">
                             <Tabs tabs={tabs} active={tab} onChange={setTab} />
                         </div>
-                    </div>
+                    </nav>
 
-                    {/* Content */}
-                    <main className="max-w-7xl mx-auto px-8 py-6">
-                        {loading ? (
+                    <main className="max-w-7xl mx-auto px-6 py-6">
+                        {loading && tab === 'dashboard' ? (
                             <div className="flex items-center justify-center h-64">
-                                <div className="text-gray-400 loading">Загрузка...</div>
+                                <div className="text-gray-500 loading">Загрузка...</div>
                             </div>
                         ) : (
                             <>
@@ -512,19 +718,28 @@
                                 {tab === 'tracks' && <TracksPanel />}
                                 {tab === 'users' && <UsersPanel />}
                                 {tab === 'logs' && <LogsPanel />}
+                                {tab === 'parties' && <PartiesPanel />}
+                                {tab === 'downloads' && <DownloadsPanel />}
+                                {tab === 'audit' && <AuditPanel />}
                             </>
                         )}
                     </main>
-
-                    {/* Footer */}
-                    <footer className="text-center py-4 text-gray-400 text-sm">
-                        Music Bot Admin Panel • VPS Optimized
-                    </footer>
                 </div>
             );
         };
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        // ── Root ──────────────────────────────────────────────────────────
+
+        const Root = () => {
+            const [authenticated, setAuthenticated] = useState(!!getToken());
+
+            if (!authenticated) {
+                return <LoginPage onLogin={() => setAuthenticated(true)} />;
+            }
+            return <AdminApp />;
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
     </script>
 </body>
 </html>
