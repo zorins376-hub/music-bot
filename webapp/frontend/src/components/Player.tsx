@@ -49,6 +49,16 @@ interface Props {
   onStereoWiden?: (on: boolean) => void;
   softClip?: boolean;
   onSoftClip?: (on: boolean) => void;
+  nightMode?: boolean;
+  onNightMode?: (on: boolean) => void;
+  reverbEnabled?: boolean;
+  onReverb?: (on: boolean) => void;
+  reverbPreset?: "studio" | "concert" | "club" | "cathedral";
+  onReverbPreset?: (preset: "studio" | "concert" | "club" | "cathedral") => void;
+  reverbMix?: number;
+  onReverbMix?: (mix: number) => void;
+  karaokeMode?: boolean;
+  onKaraokeMode?: (on: boolean) => void;
   crossfadeDuration?: number;
   onCrossfadeDuration?: (sec: number) => void;
   coverMode?: "default" | "vinyl" | "cd" | "case";
@@ -250,7 +260,7 @@ function Marquee({ text, style }: { text: string; style?: Record<string, string 
   );
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
+export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
   const isTequila = themeId === "tequila";
   const vinylSpin = coverMode === "vinyl";
   const cdMode = coverMode === "cd";
@@ -685,6 +695,73 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
             <IconMood size={14} color={softClip ? "#fff" : hlColor} /> Limiter
           </button>
         </div>
+
+        {/* Pro Audio Effects */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          <button onClick={() => { haptic("medium"); onNightMode?.(!nightMode); }} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: nightMode ? `1px solid ${hlColor}` : panelBorder,
+            background: nightMode ? (warm ? "linear-gradient(135deg, #1a237e, #283593)" : "linear-gradient(135deg, #1a237e, #4527a0)") : inactiveBg,
+            color: nightMode ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconMoon size={14} color={nightMode ? "#fff" : hlColor} /> Night
+          </button>
+          <button onClick={() => { haptic("medium"); onReverb?.(!reverbEnabled); }} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: reverbEnabled ? `1px solid ${hlColor}` : panelBorder,
+            background: reverbEnabled ? activeGrad : inactiveBg,
+            color: reverbEnabled ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconSpatial size={14} color={reverbEnabled ? "#fff" : hlColor} /> Room
+          </button>
+          <button onClick={() => { haptic("medium"); onKaraokeMode?.(!karaokeMode); }} style={{
+            padding: "8px 14px", borderRadius: 16,
+            border: karaokeMode ? `1px solid ${hlColor}` : panelBorder,
+            background: karaokeMode ? (warm ? "linear-gradient(135deg, #ff6d00, #ff9100)" : "linear-gradient(135deg, #e040fb, #7c4dff)") : inactiveBg,
+            color: karaokeMode ? "#fff" : textColor,
+            fontSize: 12, fontWeight: 600, cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+          }}>
+            <IconMic size={14} color={karaokeMode ? "#fff" : hlColor} /> Karaoke
+          </button>
+        </div>
+
+        {/* Room Reverb Settings (when active) */}
+        {reverbEnabled && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 0" }}>
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              {(["studio", "concert", "club", "cathedral"] as const).map(preset => {
+                const labels = { studio: "Studio", concert: "Concert", club: "Club", cathedral: "Cathedral" };
+                const active = reverbPreset === preset;
+                return (
+                  <button key={preset} onClick={() => { haptic("light"); onReverbPreset?.(preset); }} style={{
+                    padding: "5px 10px", borderRadius: 12,
+                    border: active ? `1px solid ${hlColor}` : panelBorder,
+                    background: active ? activeGrad : inactiveBg,
+                    color: active ? "#fff" : textColor,
+                    fontSize: 10, fontWeight: 600, cursor: "pointer",
+                  }}>
+                    {labels[preset]}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, color: labelColor, fontWeight: 600, minWidth: 28 }}>DRY</span>
+              <input
+                type="range" min={0} max={100} step={5}
+                value={Math.round(reverbMix * 100)}
+                onInput={(e) => { onReverbMix?.(Number((e.target as HTMLInputElement).value) / 100); }}
+                style={{ flex: 1, height: 4, accentColor: hlColor, cursor: "pointer" }}
+              />
+              <span style={{ fontSize: 10, color: labelColor, fontWeight: 600, minWidth: 28 }}>WET</span>
+            </div>
+          </div>
+        )}
 
         {/* Crossfade Duration */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

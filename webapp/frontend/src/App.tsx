@@ -112,6 +112,35 @@ function createSoftClipCurve(samples = 8192): Float32Array<ArrayBuffer> {
   return curve as Float32Array<ArrayBuffer>;
 }
 
+// ── Virtual Room: algorithmically generated impulse responses ──
+type RoomPreset = "studio" | "concert" | "club" | "cathedral";
+
+const ROOM_PARAMS: Record<RoomPreset, { duration: number; decay: number; lpFreq: number; preDelay: number }> = {
+  studio:    { duration: 0.8,  decay: 2.0,  lpFreq: 8000,  preDelay: 0.005 },
+  concert:   { duration: 2.5,  decay: 3.5,  lpFreq: 5000,  preDelay: 0.020 },
+  club:      { duration: 1.2,  decay: 2.5,  lpFreq: 6000,  preDelay: 0.010 },
+  cathedral: { duration: 4.0,  decay: 5.0,  lpFreq: 3500,  preDelay: 0.035 },
+};
+
+function generateImpulseResponse(ctx: AudioContext, preset: RoomPreset): AudioBuffer {
+  const params = ROOM_PARAMS[preset];
+  const sampleRate = ctx.sampleRate;
+  const length = Math.ceil(sampleRate * params.duration);
+  const buffer = ctx.createBuffer(2, length, sampleRate);
+  const preDelaySamples = Math.floor(params.preDelay * sampleRate);
+
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = preDelaySamples; i < length; i++) {
+      const t = (i - preDelaySamples) / sampleRate;
+      const envelope = Math.exp(-t * params.decay);
+      const lpFade = Math.exp(-t * (sampleRate / params.lpFreq) * 0.001);
+      data[i] = (Math.random() * 2 - 1) * envelope * lpFade;
+    }
+  }
+  return buffer;
+}
+
 function getSavedEqPreset(): EqPreset {
   try {
     const value = localStorage.getItem(EQ_STORAGE_KEY);
@@ -189,6 +218,11 @@ export function App() {
   const [airBand, setAirBand] = useState(false);
   const [stereoWiden, setStereoWiden] = useState(false);
   const [softClip, setSoftClip] = useState(false);
+  const [nightMode, setNightMode] = useState(false);
+  const [reverbEnabled, setReverbEnabled] = useState(false);
+  const [reverbPreset, setReverbPreset] = useState<RoomPreset>("studio");
+  const [reverbMix, setReverbMix] = useState(0.3);
+  const [karaokeMode, setKaraokeMode] = useState(false);
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [a2pPlaylists, setA2pPlaylists] = useState<Playlist[]>([]);
   const [a2pAdding, setA2pAdding] = useState<number | null>(null);
@@ -201,6 +235,17 @@ export function App() {
   const stereoWidenLRRef = useRef<GainNode | null>(null);
   const stereoWidenRLRef = useRef<GainNode | null>(null);
   const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
+  // Night Mode (heavy dynamic range compression)
+  const nightCompressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const nightMakeupRef = useRef<GainNode | null>(null);
+  // Virtual Room (convolution reverb)
+  const reverbConvolverRef = useRef<ConvolverNode | null>(null);
+  const reverbDryGainRef = useRef<GainNode | null>(null);
+  const reverbWetGainRef = useRef<GainNode | null>(null);
+  const reverbMixGainRef = useRef<GainNode | null>(null);
+  // Karaoke (vocal removal via phase cancellation)
+  const karaokeWetGainRef = useRef<GainNode | null>(null);
+  const karaokeDryGainRef = useRef<GainNode | null>(null);
   // DJ dual-deck crossfade for party mode
   const mixDeckRef = useRef<HTMLAudioElement | null>(null);
   const mixDeckSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -493,6 +538,19 @@ export function App() {
       compressor.release.value = 0.08;   // 80ms — fast release, no artifacts since rarely triggers
       compressorRef.current = compressor;
 
+      // ── Night Mode: heavy dynamic range compression for quiet listening ──
+      const nightCompressor = ctx.createDynamicsCompressor();
+      nightCompressor.threshold.value = 0;    // pass-through default
+      nightCompressor.knee.value = 40;
+      nightCompressor.ratio.value = 1;        // 1:1 = no compression when off
+      nightCompressor.attack.value = 0.005;
+      nightCompressor.release.value = 0.2;
+      nightCompressorRef.current = nightCompressor;
+
+      const nightMakeup = ctx.createGain();
+      nightMakeup.gain.value = 1;
+      nightMakeupRef.current = nightMakeup;
+
       // ── Tape Saturation (WaveShaperNode) — warm analog character ──
       const tapeSat = ctx.createWaveShaper();
       tapeSat.curve = LINEAR_CURVE as Float32Array<ArrayBuffer>;
@@ -549,14 +607,62 @@ export function App() {
         node = filter;
       });
       node.connect(compressor);
-      compressor.connect(tapeSat);
+      compressor.connect(nightCompressor);
+      nightCompressor.connect(nightMakeup);
+      nightMakeup.connect(tapeSat);
       tapeSat.connect(airFilter);
       airFilter.connect(panner);
       panner.connect(splitter);
-      merger.connect(analyser);
+
+      // ── Virtual Room (convolution reverb) — parallel wet/dry after widener ──
+      const reverbDryGain = ctx.createGain();
+      reverbDryGain.gain.value = 1;
+      const reverbConvolver = ctx.createConvolver();
+      reverbConvolver.buffer = generateImpulseResponse(ctx, "studio");
+      const reverbWetGain = ctx.createGain();
+      reverbWetGain.gain.value = 0; // OFF by default
+      const reverbMixGain = ctx.createGain();
+      reverbMixGain.gain.value = 1;
+      reverbConvolverRef.current = reverbConvolver;
+      reverbDryGainRef.current = reverbDryGain;
+      reverbWetGainRef.current = reverbWetGain;
+      reverbMixGainRef.current = reverbMixGain;
+
+      merger.connect(reverbDryGain);
+      merger.connect(reverbConvolver);
+      reverbConvolver.connect(reverbWetGain);
+      reverbDryGain.connect(reverbMixGain);
+      reverbWetGain.connect(reverbMixGain);
+      reverbMixGain.connect(analyser);
+
       analyser.connect(clipper);
       clipper.connect(dcBlocker);
-      dcBlocker.connect(outputGain);
+
+      // ── Karaoke (vocal removal via center channel phase cancellation) ──
+      const karaokeSplitter = ctx.createChannelSplitter(2);
+      const karaokeInvert = ctx.createGain();
+      karaokeInvert.gain.value = -1;
+      const karaokeSummer = ctx.createGain();
+      karaokeSummer.gain.value = 0.5;
+      const karaokeMerger = ctx.createChannelMerger(2);
+      const karaokeWetGain = ctx.createGain();
+      karaokeWetGain.gain.value = 0; // OFF by default
+      const karaokeDryGain = ctx.createGain();
+      karaokeDryGain.gain.value = 1;
+      karaokeWetGainRef.current = karaokeWetGain;
+      karaokeDryGainRef.current = karaokeDryGain;
+
+      karaokeSplitter.connect(karaokeSummer, 0);
+      karaokeSplitter.connect(karaokeInvert, 1);
+      karaokeInvert.connect(karaokeSummer);
+      karaokeSummer.connect(karaokeMerger, 0, 0);
+      karaokeSummer.connect(karaokeMerger, 0, 1);
+      karaokeMerger.connect(karaokeWetGain);
+
+      dcBlocker.connect(karaokeSplitter);
+      dcBlocker.connect(karaokeDryGain);
+      karaokeWetGain.connect(outputGain);
+      karaokeDryGain.connect(outputGain);
       outputGain.connect(ctx.destination);
 
       sourceNodeRef.current = source;
@@ -700,6 +806,7 @@ export function App() {
         if (tapeWarmthRef.current) tapeWarmthRef.current.curve = (tapeWarmth ? createTapeCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
         if (airBandRef.current) airBandRef.current.gain.value = airBand ? 2 : 0;
         if (softClipRef.current) softClipRef.current.curve = (softClip ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
+        // Night mode, reverb, karaoke nodes stay connected and retain their params through bypass
       }
       const t2 = ctx.currentTime;
       // Fade in using setTargetAtTime
@@ -718,9 +825,9 @@ export function App() {
   // Persist luxury audio settings
   useEffect(() => {
     try {
-      localStorage.setItem("tma:luxury-audio", JSON.stringify({ tapeWarmth, airBand, stereoWiden, softClip }));
+      localStorage.setItem("tma:luxury-audio", JSON.stringify({ tapeWarmth, airBand, stereoWiden, softClip, nightMode, reverbEnabled, reverbPreset, reverbMix, karaokeMode }));
     } catch {}
-  }, [tapeWarmth, airBand, stereoWiden, softClip]);
+  }, [tapeWarmth, airBand, stereoWiden, softClip, nightMode, reverbEnabled, reverbPreset, reverbMix, karaokeMode]);
 
   // Listen for media control actions from Service Worker notifications
   useEffect(() => {
@@ -1241,6 +1348,97 @@ export function App() {
     if (node) node.curve = (on ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
   }, []);
 
+  // ── Night Mode toggle ──
+  const handleNightMode = useCallback((on: boolean) => {
+    setNightMode(on);
+    ensureEqualizerGraph();
+    const comp = nightCompressorRef.current;
+    const makeup = nightMakeupRef.current;
+    const ctx = audioContextRef.current;
+    if (!comp || !makeup || !ctx) return;
+    const now = ctx.currentTime;
+    if (on) {
+      comp.threshold.setValueAtTime(comp.threshold.value, now);
+      comp.threshold.setTargetAtTime(-30, now, 0.15);
+      comp.ratio.setValueAtTime(comp.ratio.value, now);
+      comp.ratio.setTargetAtTime(12, now, 0.15);
+      comp.knee.setValueAtTime(comp.knee.value, now);
+      comp.knee.setTargetAtTime(10, now, 0.15);
+      makeup.gain.setValueAtTime(makeup.gain.value, now);
+      makeup.gain.setTargetAtTime(dbToGain(6), now, 0.2);
+    } else {
+      comp.threshold.setValueAtTime(comp.threshold.value, now);
+      comp.threshold.setTargetAtTime(0, now, 0.15);
+      comp.ratio.setValueAtTime(comp.ratio.value, now);
+      comp.ratio.setTargetAtTime(1, now, 0.15);
+      comp.knee.setValueAtTime(comp.knee.value, now);
+      comp.knee.setTargetAtTime(40, now, 0.15);
+      makeup.gain.setValueAtTime(makeup.gain.value, now);
+      makeup.gain.setTargetAtTime(1, now, 0.2);
+    }
+  }, [ensureEqualizerGraph]);
+
+  // ── Virtual Room (reverb) toggles ──
+  const handleReverb = useCallback((on: boolean) => {
+    setReverbEnabled(on);
+    ensureEqualizerGraph();
+    const ctx = audioContextRef.current;
+    const wet = reverbWetGainRef.current;
+    const dry = reverbDryGainRef.current;
+    if (!ctx || !wet || !dry) return;
+    const now = ctx.currentTime;
+    if (on) {
+      const conv = reverbConvolverRef.current;
+      if (conv) conv.buffer = generateImpulseResponse(ctx, reverbPreset);
+      wet.gain.setValueAtTime(wet.gain.value, now);
+      wet.gain.setTargetAtTime(reverbMix, now, 0.15);
+      dry.gain.setValueAtTime(dry.gain.value, now);
+      dry.gain.setTargetAtTime(1 - reverbMix * 0.5, now, 0.15);
+    } else {
+      wet.gain.setValueAtTime(wet.gain.value, now);
+      wet.gain.setTargetAtTime(0, now, 0.15);
+      dry.gain.setValueAtTime(dry.gain.value, now);
+      dry.gain.setTargetAtTime(1, now, 0.15);
+    }
+  }, [ensureEqualizerGraph, reverbPreset, reverbMix]);
+
+  const handleReverbPreset = useCallback((preset: RoomPreset) => {
+    setReverbPreset(preset);
+    const ctx = audioContextRef.current;
+    const conv = reverbConvolverRef.current;
+    if (ctx && conv && reverbEnabled) {
+      conv.buffer = generateImpulseResponse(ctx, preset);
+    }
+  }, [reverbEnabled]);
+
+  const handleReverbMix = useCallback((mix: number) => {
+    setReverbMix(mix);
+    const ctx = audioContextRef.current;
+    const wet = reverbWetGainRef.current;
+    const dry = reverbDryGainRef.current;
+    if (!ctx || !wet || !dry || !reverbEnabled) return;
+    const now = ctx.currentTime;
+    wet.gain.setValueAtTime(wet.gain.value, now);
+    wet.gain.setTargetAtTime(mix, now, 0.15);
+    dry.gain.setValueAtTime(dry.gain.value, now);
+    dry.gain.setTargetAtTime(1 - mix * 0.5, now, 0.15);
+  }, [reverbEnabled]);
+
+  // ── Karaoke Mode toggle ──
+  const handleKaraokeMode = useCallback((on: boolean) => {
+    setKaraokeMode(on);
+    ensureEqualizerGraph();
+    const ctx = audioContextRef.current;
+    const wet = karaokeWetGainRef.current;
+    const dry = karaokeDryGainRef.current;
+    if (!ctx || !wet || !dry) return;
+    const now = ctx.currentTime;
+    wet.gain.setValueAtTime(wet.gain.value, now);
+    wet.gain.setTargetAtTime(on ? 1 : 0, now, 0.15);
+    dry.gain.setValueAtTime(dry.gain.value, now);
+    dry.gain.setTargetAtTime(on ? 0 : 1, now, 0.15);
+  }, [ensureEqualizerGraph]);
+
   // Restore luxury audio settings from localStorage on mount
   useEffect(() => {
     try {
@@ -1251,9 +1449,14 @@ export function App() {
         if (s.airBand) handleAirBand(true);
         if (s.stereoWiden) handleStereoWiden(true);
         if (s.softClip) handleSoftClip(true);
+        if (s.nightMode) handleNightMode(true);
+        if (s.reverbEnabled) handleReverb(true);
+        if (s.reverbPreset) setReverbPreset(s.reverbPreset);
+        if (s.reverbMix !== undefined) setReverbMix(s.reverbMix);
+        if (s.karaokeMode) handleKaraokeMode(true);
       }
     } catch {}
-  }, [handleTapeWarmth, handleAirBand, handleStereoWiden, handleSoftClip]);
+  }, [handleTapeWarmth, handleAirBand, handleStereoWiden, handleSoftClip, handleNightMode, handleReverb, handleKaraokeMode]);
 
   // ── Crossfade duration persistence ──
   const handleCrossfadeDuration = useCallback((sec: number) => {
@@ -1633,7 +1836,7 @@ export function App() {
       {/* Views */}
       {view === "player" && (
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
