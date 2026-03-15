@@ -161,14 +161,15 @@ export async function getStreamUrl(videoId: string, apiUrl: string): Promise<str
 }
 
 // Background fetch + cache (does not block playback)
-// Delayed start: avoid competing with <audio> element for the same stream connection
+// Heavily delayed: avoid competing with <audio> element for bandwidth on the same URL
 const _bgCacheInFlight = new Set<string>();
 function backgroundCache(videoId: string, apiUrl: string) {
   if (_bgCacheInFlight.has(videoId)) return;
   _bgCacheInFlight.add(videoId);
-  // Wait 2 seconds so the audio element starts buffering first
+  // Wait 8 seconds — enough for audio element to buffer the full track on decent connections.
+  // This prevents duplicate HTTP requests from fighting for bandwidth and causing underruns.
   setTimeout(() => {
-    fetch(apiUrl)
+    fetch(apiUrl, { priority: "low" } as RequestInit)
       .then(r => r.ok ? r.blob() : null)
       .then(blob => {
         if (blob && blob.size > 10240) {
@@ -177,7 +178,7 @@ function backgroundCache(videoId: string, apiUrl: string) {
       })
       .catch(() => {})
       .finally(() => _bgCacheInFlight.delete(videoId));
-  }, 2000);
+  }, 8000);
 }
 
 // Prefetch stream URLs for upcoming tracks (tells backend to resolve URLs in advance)

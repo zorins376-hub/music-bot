@@ -576,7 +576,7 @@ async def stream_audio(
                     if upstream.status in (200, 206):
                         async def _iter_upstream():
                             try:
-                                async for chunk in upstream.content.iter_chunked(64 * 1024):
+                                async for chunk in upstream.content.iter_chunked(128 * 1024):
                                     yield chunk
                             finally:
                                 upstream.close()

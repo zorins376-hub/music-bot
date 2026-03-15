@@ -33,9 +33,9 @@ const EQ_PRESETS: Record<EqPreset, EqProfile> = {
     makeup: 0,
   },
   bass: {
-    gains: [5.2, 4.8, 3.6, 2, 0.6, -0.8, -1.2, -1.6, -0.6, 0.8],
-    preamp: -2.5,
-    makeup: 0.35,
+    gains: [4.5, 4, 3, 1.5, 0.4, -0.6, -1, -1.2, -0.4, 0.6],
+    preamp: -3.5,
+    makeup: 0.2,
   },
   vocal: {
     gains: [-2, -1.6, -0.8, 0.6, 2.4, 3.8, 3.6, 2, 0.4, -0.6],
@@ -43,9 +43,9 @@ const EQ_PRESETS: Record<EqPreset, EqProfile> = {
     makeup: 0.28,
   },
   club: {
-    gains: [3.8, 2.8, 1.2, -0.8, -1.4, 0.6, 2, 3, 2.6, 1],
-    preamp: -2,
-    makeup: 0.42,
+    gains: [3.2, 2.4, 1, -0.6, -1.2, 0.4, 1.6, 2.4, 2, 0.8],
+    preamp: -2.5,
+    makeup: 0.3,
   },
   bright: {
     gains: [-1.2, -0.8, -0.4, 0.2, 1, 1.8, 3, 4, 4.5, 3],
@@ -63,14 +63,14 @@ const EQ_PRESETS: Record<EqPreset, EqProfile> = {
     makeup: 0.18,
   },
   techno: {
-    gains: [4.2, 3.6, 2.2, 0.4, -1.2, -0.4, 1.6, 3.2, 4, 2.4],
-    preamp: -2.2,
-    makeup: 0.4,
+    gains: [3.5, 3, 1.8, 0.3, -1, -0.3, 1.2, 2.6, 3.2, 2],
+    preamp: -3,
+    makeup: 0.25,
   },
   vocal_boost: {
-    gains: [-2.8, -2.2, -1, 0.6, 2.6, 4.2, 4.8, 3, 0.6, -0.4],
-    preamp: -1.6,
-    makeup: 0.32,
+    gains: [-2.4, -1.8, -0.8, 0.4, 2.2, 3.5, 4, 2.4, 0.4, -0.3],
+    preamp: -2,
+    makeup: 0.2,
   },
 };
 
@@ -86,7 +86,7 @@ const LINEAR_CURVE = new Float32Array([-1, 1]) as Float32Array<ArrayBuffer>;
 
 function createTapeCurve(samples = 8192): Float32Array<ArrayBuffer> {
   const curve = new Float32Array(samples);
-  const k = 1.5;
+  const k = 0.8; // gentler saturation — subtle warmth without harsh harmonics
   const norm = Math.tanh(k);
   for (let i = 0; i < samples; i++) {
     const x = (2 * i) / (samples - 1) - 1;
@@ -217,11 +217,10 @@ export function App() {
     const outGain = eqOutputGainRef.current;
     if (ctx && outGain && !audio.paused) {
       const t = ctx.currentTime;
-      // Cancel any scheduled ramps, then fade to zero
       outGain.gain.cancelScheduledValues(t);
       outGain.gain.setValueAtTime(outGain.gain.value, t);
-      outGain.gain.setTargetAtTime(0.0001, t, 0.03); // 30ms time constant
-      await new Promise(r => setTimeout(r, 120)); // wait ~4 time constants for -99% attenuation
+      outGain.gain.setTargetAtTime(0.0001, t, 0.035); // 35ms τ ≈ 140ms to silence
+      await new Promise(r => setTimeout(r, 160)); // wait ~4.5 time constants
     }
     audio.pause();
   }, []);
@@ -230,15 +229,13 @@ export function App() {
     const ctx = audioContextRef.current;
     const outGain = eqOutputGainRef.current;
     if (ctx && outGain) {
-      // Ensure gain is near-zero before unpausing to prevent click
       outGain.gain.cancelScheduledValues(ctx.currentTime);
       outGain.gain.setValueAtTime(0.0001, ctx.currentTime);
     }
     await audio.play().catch(() => {});
     if (ctx && outGain) {
       const t = ctx.currentTime;
-      // Smooth ramp up using setTargetAtTime — 40ms time constant (~120ms to 95%)
-      outGain.gain.setTargetAtTime(1, t, 0.04);
+      outGain.gain.setTargetAtTime(1, t, 0.06); // 60ms τ ≈ 240ms to 98% — no pop
     }
   }, []);
 
@@ -429,10 +426,9 @@ export function App() {
     const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return;
 
-    // Use 44100 Hz (standard for MP3) and interactive latency for responsive playback
+    // Let browser pick optimal sampleRate (avoids resampling artifacts when source is 48kHz)
     const ctx = audioContextRef.current || new AudioContextCtor({
-      sampleRate: 44100,
-      latencyHint: "interactive",
+      latencyHint: "playback", // "playback" = larger buffer = fewer underrun glitches
     });
     audioContextRef.current = ctx;
 
@@ -463,19 +459,19 @@ export function App() {
         return filter;
       });
 
-      // ── Transparent peak limiter — only catches true peaks, no audible pumping ──
+      // ── Transparent peak limiter — brickwall safety net, NOT a compressor ──
       const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -3;   // Only catch true peaks above -3dB
-      compressor.knee.value = 6;         // Narrow knee — minimal coloring below threshold
-      compressor.ratio.value = 4;        // Higher ratio but only on peaks (limiter-style)
-      compressor.attack.value = 0.003;   // 3ms — fast enough to catch transients without pumping
-      compressor.release.value = 0.25;   // 250ms — slow release avoids breathing/pumping artifacts
+      compressor.threshold.value = -1;   // Only true 0dBFS peaks (after EQ boost headroom)
+      compressor.knee.value = 1;         // Hard knee = true limiter behavior
+      compressor.ratio.value = 20;       // Brickwall ratio — clamps peaks, doesn't compress
+      compressor.attack.value = 0.001;   // 1ms — instant catch
+      compressor.release.value = 0.1;    // 100ms — fast release, no pumping since it rarely triggers
       compressorRef.current = compressor;
 
       // ── Tape Saturation (WaveShaperNode) — warm analog character ──
       const tapeSat = ctx.createWaveShaper();
       tapeSat.curve = LINEAR_CURVE as Float32Array<ArrayBuffer>;
-      tapeSat.oversample = "none"; // no oversample: lower latency, tape sat is subtle enough
+      tapeSat.oversample = "2x"; // oversample prevents aliasing crackle from waveshaper
       tapeWarmthRef.current = tapeSat;
 
       // ── Air Band — high shelf +2dB at 12kHz for sparkle/detail ──
@@ -587,58 +583,65 @@ export function App() {
     }
   }, [ensureEqualizerGraph]);
 
-  // ── Loudness normalization: measure RMS and adjust gain towards -14 LUFS ──
+  // ── Loudness normalization: measure RMS of raw source and gently nudge gain ──
   const measureLoudness = useCallback(() => {
     if (loudnessTimerRef.current) clearInterval(loudnessTimerRef.current);
-    const analyser = analyserRef.current;
     const ctx = audioContextRef.current;
     const lg = loudnessGainRef.current;
-    if (!analyser || !ctx || !lg) return;
+    if (!ctx || !lg) return;
 
     // Ensure audio is actually playing before measuring
     const audio = audioRef.current;
     if (!audio || audio.paused || audio.currentTime < 0.5) return;
 
-    const buf = new Float32Array(analyser.fftSize);
-    const TARGET_LUFS = -14;
-    const MEASURE_DURATION = 2; // seconds — longer window for more stable measurement
-    const measurementsNeeded = Math.ceil((ctx.sampleRate * MEASURE_DURATION) / analyser.fftSize);
-    let measurementCount = 0;
+    // Create a temporary analyser connected BEFORE the processing chain
+    // to measure raw source level, not post-EQ/compressor level
+    const rawAnalyser = ctx.createAnalyser();
+    rawAnalyser.fftSize = 2048; // larger FFT = more accurate RMS
+    rawAnalyser.smoothingTimeConstant = 0;
+    const source = sourceNodeRef.current;
+    if (!source) return;
+    source.connect(rawAnalyser); // tap raw signal (doesn't affect chain)
+
+    const buf = new Float32Array(rawAnalyser.fftSize);
+    const TARGET_RMS_DB = -16; // conservative target
+    const MEASURE_WINDOW = 3; // seconds
+    const framesNeeded = Math.ceil((ctx.sampleRate * MEASURE_WINDOW) / rawAnalyser.fftSize);
+    let frameCount = 0;
     let sumSquares = 0;
     let totalSamples = 0;
 
     loudnessTimerRef.current = window.setInterval(() => {
-      analyser.getFloatTimeDomainData(buf);
+      rawAnalyser.getFloatTimeDomainData(buf);
 
-      // Skip silent or near-silent frames (not yet playing or gap between chunks)
+      // Skip silent frames
       let frameEnergy = 0;
       for (let i = 0; i < buf.length; i++) frameEnergy += buf[i] * buf[i];
-      if (frameEnergy / buf.length < 1e-8) return; // skip this frame
+      if (frameEnergy / buf.length < 1e-8) return;
 
-      for (let i = 0; i < buf.length; i++) {
-        sumSquares += buf[i] * buf[i];
-      }
+      for (let i = 0; i < buf.length; i++) sumSquares += buf[i] * buf[i];
       totalSamples += buf.length;
-      measurementCount++;
+      frameCount++;
 
-      if (measurementCount >= measurementsNeeded) {
+      if (frameCount >= framesNeeded) {
         if (loudnessTimerRef.current) clearInterval(loudnessTimerRef.current);
         loudnessTimerRef.current = null;
+        rawAnalyser.disconnect(); // clean up tap
 
         const rms = Math.sqrt(sumSquares / totalSamples);
-        if (rms > 0.001) { // only adjust if signal is meaningful
-          const currentLUFS = 20 * Math.log10(rms);
-          const correction = TARGET_LUFS - currentLUFS;
-          // Clamp to ±4dB (more conservative to avoid audible gain jumps)
-          const clampedDb = Math.max(-4, Math.min(4, correction));
+        if (rms > 0.002) {
+          const currentDb = 20 * Math.log10(rms);
+          const correction = TARGET_RMS_DB - currentDb;
+          // Clamp to ±3dB — very conservative, just levels out loud vs quiet tracks
+          const clampedDb = Math.max(-3, Math.min(3, correction));
           const gain = Math.pow(10, clampedDb / 20);
           const t = ctx.currentTime;
-          // Very slow ramp: 2 seconds to reach target (imperceptible transition)
+          // 1s time constant = ~3s to settle — completely imperceptible
           lg.gain.setValueAtTime(Math.max(lg.gain.value, 0.01), t);
-          lg.gain.setTargetAtTime(Math.max(gain, 0.1), t, 0.6); // 600ms time constant = ~1.8s
+          lg.gain.setTargetAtTime(Math.max(gain, 0.25), t, 1.0);
         }
       }
-    }, 200); // Slower polling = less CPU
+    }, 250); // 4x/sec
   }, []);
 
   // Bypass all processing (raw audio signal)
@@ -776,52 +779,48 @@ export function App() {
         await ctx.resume().catch(() => {});
       }
 
-      // Crossfade out (150ms) before switching source — exponential for smooth hearing
+      // Crossfade out before switching source — setTargetAtTime avoids numerical artifacts
       const cfGain = crossfadeGainRef.current;
-      if (ctx && cfGain && !audio.paused) {
+      const outGain = eqOutputGainRef.current;
+      if (ctx && outGain && !audio.paused) {
         const t = ctx.currentTime;
-        cfGain.gain.cancelScheduledValues(t);
-        cfGain.gain.setValueAtTime(cfGain.gain.value, t);
-        cfGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-        await new Promise(r => setTimeout(r, 160));
+        outGain.gain.cancelScheduledValues(t);
+        outGain.gain.setValueAtTime(outGain.gain.value, t);
+        outGain.gain.setTargetAtTime(0.0001, t, 0.025); // 25ms τ ≈ 100ms to silence
+        await new Promise(r => setTimeout(r, 120));
       }
 
       audio.pause();
-      // Ensure outputGain is near-zero during source swap to prevent any click
-      const outGain = eqOutputGainRef.current;
-      if (ctx && outGain) {
-        outGain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      }
 
       // Resolve source URL: try cache first (instant), fallback to API stream
       const apiUrl = getStreamUrl(track.video_id);
       const cachedUrl = await getCachedStreamUrl(track.video_id, apiUrl);
       audio.src = cachedUrl; // uses cache blob URL if available, otherwise API URL
-      audio.load();
+      // No audio.load() — setting src already triggers load; explicit load() aborts & restarts connection
 
       // Wait for browser to buffer enough before playing (prevents underrun clicks)
       if (state.is_playing) {
         await new Promise<void>((resolve) => {
-          const onReady = () => { audio.removeEventListener("canplay", onReady); resolve(); };
-          if (audio.readyState >= 3) { resolve(); } // HAVE_FUTURE_DATA — already buffered
-          else { audio.addEventListener("canplay", onReady, { once: true }); }
+          const onReady = () => { audio.removeEventListener("canplaythrough", onReady); resolve(); };
+          if (audio.readyState >= 4) { resolve(); } // HAVE_ENOUGH_DATA — fully buffered
+          else { audio.addEventListener("canplaythrough", onReady, { once: true }); }
           // Timeout fallback: don't block forever on slow networks
-          setTimeout(resolve, 3000);
+          setTimeout(resolve, 5000);
         });
         await audio.play().catch(() => {});
       }
 
-      // Crossfade in (300ms) — smooth ramp from zero through both gains
-      if (ctx && cfGain) {
-        const t = ctx.currentTime;
-        cfGain.gain.setValueAtTime(0.001, t);
-        cfGain.gain.exponentialRampToValueAtTime(1, t + 0.3);
-      }
+      // Smooth fade in — single gain node, no competing ramps
       if (ctx && outGain) {
         const t = ctx.currentTime;
-        // Use setTargetAtTime for click-free fade (never linear from/to zero)
+        outGain.gain.cancelScheduledValues(t);
         outGain.gain.setValueAtTime(0.0001, t);
-        outGain.gain.setTargetAtTime(1, t, 0.06); // 60ms time constant = smoother fade
+        outGain.gain.setTargetAtTime(1, t, 0.05); // 50ms τ ≈ 200ms to full volume
+      }
+      // Reset crossfade gain to unity (it may have been touched by DJ crossfade)
+      if (ctx && cfGain) {
+        cfGain.gain.cancelScheduledValues(ctx.currentTime);
+        cfGain.gain.setValueAtTime(1, ctx.currentTime);
       }
 
       // Reset loudness gain to unity, then measure after audio is actually playing
