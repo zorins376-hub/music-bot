@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import { Component } from "preact";
 import type { Track } from "../api";
 import { fetchFavoritesList } from "../api";
 import { getThemeById, themeColors } from "../themes";
@@ -7,6 +8,24 @@ import {
   IconDiamond, IconSpinner, IconHeadphones, IconMusic, IconHeart,
   IconMoon, IconParty, IconRocket, IconDiscover, IconEdit,
 } from "./Icons";
+
+// ── ErrorBoundary for ProfileView ──────────────────────────────────────
+
+class ProfileErrorBoundary extends Component<{ fallbackColor?: string }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(err: Error) { return { error: err.message || "render error" }; }
+  componentDidCatch(err: Error) { console.error("[ProfileView] render crash:", err); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ textAlign: "center", padding: 64, color: this.props.fallbackColor || "#aaa", fontSize: 14 }}>
+          Не удалось отобразить профиль
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -234,12 +253,18 @@ export function ProfileView({
     );
   }
 
-  const maxArtistCount = stats.top_artists.length > 0
-    ? Math.max(...stats.top_artists.map((a) => a.count))
+  // Defensive: normalize arrays that might be null from API
+  const topArtists = stats.top_artists || [];
+  const topGenres = stats.top_genres || [];
+  const badges = stats.badges || [];
+  const recentTracks = stats.recent_tracks || [];
+
+  const maxArtistCount = topArtists.length > 0
+    ? Math.max(...topArtists.map((a) => a.count))
     : 1;
 
-  const xpForNext = stats.level * 100;
-  const xpProgress = xpForNext > 0 ? Math.min(stats.xp / xpForNext, 1) : 0;
+  const xpForNext = (stats.level || 1) * 100;
+  const xpProgress = xpForNext > 0 ? Math.min((stats.xp || 0) / xpForNext, 1) : 0;
 
   const displayName = firstName || username || "User";
   const avatarLetter = displayName.charAt(0).toUpperCase();
@@ -395,6 +420,7 @@ export function ProfileView({
   );
 
   return (
+    <ProfileErrorBoundary fallbackColor={tc.hintColor}>
     <div style={{ paddingBottom: 24 }}>
       {/* ── Profile header ─────────────────────────────────────────── */}
       {isPremium ? (
@@ -417,7 +443,7 @@ export function ProfileView({
         }}>
           <IconMusicNote size={18} color={tc.highlight} />
           <div style={{ fontSize: 20, fontWeight: 700, color: tc.textColor, marginTop: 4 }}>
-            {stats.total_plays.toLocaleString()}
+            {(stats.total_plays || 0).toLocaleString()}
           </div>
           <div style={{ fontSize: 11, color: tc.hintColor }}>треков</div>
         </div>
@@ -432,7 +458,7 @@ export function ProfileView({
         }}>
           <IconHeadphones size={18} color={tc.highlight} />
           <div style={{ fontSize: 20, fontWeight: 700, color: tc.textColor, marginTop: 4 }}>
-            {formatTime(stats.total_time)}
+            {formatTime(stats.total_time || 0)}
           </div>
           <div style={{ fontSize: 11, color: tc.hintColor }}>прослушано</div>
         </div>
@@ -447,14 +473,14 @@ export function ProfileView({
         }}>
           <IconDiamond size={18} color={tc.highlight} />
           <div style={{ fontSize: 20, fontWeight: 700, color: tc.textColor, marginTop: 4 }}>
-            {stats.total_favorites.toLocaleString()}
+            {(stats.total_favorites || 0).toLocaleString()}
           </div>
           <div style={{ fontSize: 11, color: tc.hintColor }}>избранных</div>
         </div>
       </div>
 
       {/* ── Top Artists ────────────────────────────────────────────── */}
-      {stats.top_artists.length > 0 && (
+      {topArtists.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -462,7 +488,7 @@ export function ProfileView({
           }}>
             Топ исполнители
           </div>
-          {stats.top_artists.map((artist, idx) => (
+          {topArtists.map((artist, idx) => (
             <div key={artist.name} style={{
               display: "flex", alignItems: "center", gap: 10,
               padding: "8px 12px", borderRadius: 12, marginBottom: 6,
@@ -504,7 +530,7 @@ export function ProfileView({
       )}
 
       {/* ── Top Genres ─────────────────────────────────────────────── */}
-      {stats.top_genres.length > 0 && (
+      {topGenres.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -513,7 +539,7 @@ export function ProfileView({
             Жанры
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {stats.top_genres.map((genre) => (
+            {topGenres.map((genre) => (
               <div key={genre.name} style={{
                 padding: "5px 12px", borderRadius: 12,
                 background: tc.cardBg, border: tc.cardBorder,
@@ -536,7 +562,7 @@ export function ProfileView({
       )}
 
       {/* ── Achievements ───────────────────────────────────────────── */}
-      {stats.badges.length > 0 && (
+      {badges.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -547,7 +573,7 @@ export function ProfileView({
           <div style={{
             display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8,
           }}>
-            {stats.badges.map((badgeId) => {
+            {badges.map((badgeId) => {
               const def = BADGE_DEFS[badgeId];
               if (!def) return null;
               const BadgeIcon = BADGE_ICONS[badgeId] || IconCrown;
@@ -647,7 +673,7 @@ export function ProfileView({
       )}
 
       {/* ── Recent History ─────────────────────────────────────────── */}
-      {stats.recent_tracks.length > 0 && (
+      {recentTracks.length > 0 && (
         <div>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -655,7 +681,7 @@ export function ProfileView({
           }}>
             История
           </div>
-          {stats.recent_tracks.slice(0, 20).map((t, idx) => (
+          {recentTracks.slice(0, 20).map((t, idx) => (
             <div
               key={`${t.video_id}-${idx}`}
               onClick={() => { haptic("light"); onPlayTrack(t); }}
@@ -716,5 +742,6 @@ export function ProfileView({
         </div>
       )}
     </div>
+    </ProfileErrorBoundary>
   );
 }

@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = "blackroom-v2";
+const CACHE_NAME = "blackroom-v3";
 const AUDIO_CACHE_NAME = "blackroom-audio-v1";
 
 // Static assets to precache
@@ -54,7 +54,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets: Cache-first
+  // Navigation / HTML: Network-first (always get fresh index.html)
+  if (request.mode === "navigate" || url.pathname === "/" || url.pathname.endsWith(".html")) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  // Hashed static assets: Cache-first
   event.respondWith(cacheFirst(request));
 });
 
