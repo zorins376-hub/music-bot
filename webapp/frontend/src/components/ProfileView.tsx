@@ -157,10 +157,29 @@ export function ProfileView({
   }, [isPremium]);
 
   useEffect(() => {
+    // Guard: don't fetch if userId is 0 (WebApp not ready)
+    if (!userId) {
+      setLoading(false);
+      setError(true);
+      return;
+    }
+
+    let cancelled = false;
     setLoading(true);
     setError(false);
+
+    // Aggressive timeout: if ANYTHING takes >6s, just show what we have
+    const hardTimeout = setTimeout(() => {
+      if (!cancelled) {
+        setLoading(false);
+        if (!stats) setError(true);
+      }
+    }, 6000);
+
+    // Fetch stats with its own timeout
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000); // 10s timeout
+    const fetchTimer = setTimeout(() => ctrl.abort(), 5000);
+
     fetch(`/api/stats/${userId}`, {
       headers: {
         "Content-Type": "application/json",
@@ -172,12 +191,27 @@ export function ProfileView({
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: UserStats) => setStats(data))
-      .catch(() => setError(true))
-      .finally(() => { clearTimeout(timer); setLoading(false); });
-    fetchFavoritesList().then(setFavorites).catch(() => {});
-    fetchChallenges(userId).then(setChallenges).catch(() => {});
-    return () => { ctrl.abort(); clearTimeout(timer); };
+      .then((data: UserStats) => {
+        if (!cancelled) setStats(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        clearTimeout(fetchTimer);
+        if (!cancelled) setLoading(false);
+      });
+
+    // These are non-blocking — if they fail, profile still shows
+    fetchFavoritesList().then((f) => { if (!cancelled) setFavorites(f); }).catch(() => {});
+    fetchChallenges(userId).then((c) => { if (!cancelled) setChallenges(c); }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      clearTimeout(fetchTimer);
+      clearTimeout(hardTimeout);
+    };
   }, [userId]);
 
   // ── Avatar upload handler ────────────────────────────────────────────
@@ -213,18 +247,57 @@ export function ProfileView({
 
   // ── Loading / error states ──────────────────────────────────────────
 
+  // Retry function
+  const retryLoad = () => {
+    setStats(null);
+    setError(false);
+    setLoading(true);
+    // Re-trigger the effect by forcing a state cycle
+    const ctrl = new AbortController();
+    const fetchTimer = setTimeout(() => ctrl.abort(), 5000);
+    fetch(`/api/stats/${userId}`, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+      },
+      signal: ctrl.signal,
+    })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((data: UserStats) => setStats(data))
+      .catch(() => setError(true))
+      .finally(() => { clearTimeout(fetchTimer); setLoading(false); });
+    fetchFavoritesList().then(setFavorites).catch(() => {});
+    fetchChallenges(userId).then(setChallenges).catch(() => {});
+  };
+
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: 64 }}>
         <IconSpinner size={28} color={tc.hintColor} />
+        <div style={{ fontSize: 12, color: tc.hintColor, marginTop: 12 }}>
+          Загрузка профиля...
+        </div>
       </div>
     );
   }
 
   if (error || !stats) {
     return (
-      <div style={{ textAlign: "center", padding: 64, color: tc.hintColor, fontSize: 14 }}>
-        Не удалось загрузить профиль
+      <div style={{ textAlign: "center", padding: 48 }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>😕</div>
+        <div style={{ fontSize: 14, color: tc.hintColor, marginBottom: 16 }}>
+          Не удалось загрузить профиль
+        </div>
+        <button
+          onClick={() => { haptic("light"); retryLoad(); }}
+          style={{
+            padding: "10px 28px", borderRadius: 12, border: tc.cardBorder,
+            background: tc.cardBg, color: tc.highlight,
+            fontSize: 13, fontWeight: 600, cursor: "pointer",
+          }}
+        >
+          Повторить
+        </button>
       </div>
     );
   }

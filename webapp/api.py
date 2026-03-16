@@ -2415,67 +2415,95 @@ async def list_favorites(user: dict = Depends(get_current_user)):
 
 @app.get("/api/stats/{user_id}")
 async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
-    """Listening statistics for profile page."""
+    """Listening statistics for profile page — with hard 4s timeout."""
     _defaults = {
         "total_plays": 0, "total_time": 0, "total_favorites": 0,
         "top_artists": [], "top_genres": [], "recent_tracks": [],
         "xp": 0, "level": 1, "streak_days": 0, "badges": [], "member_since": None,
+        "next_streak_milestone": None,
     }
-    try:
+
+    async def _fetch():
         from bot.models.base import async_session
         async with async_session() as session:
             from sqlalchemy import select, func
             from bot.models.track import ListeningHistory, Track
             from bot.models.user import User
-            from bot.models.favorite import FavoriteTrack
 
-            total_plays = (await session.execute(
-                select(func.count()).where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
-            )).scalar() or 0
-
-            total_time = (await session.execute(
-                select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
-            )).scalar() or 0
-
-            total_favs = (await session.execute(
-                select(func.count()).where(FavoriteTrack.user_id == user_id)
-            )).scalar() or 0
-
-            top_artists_q = await session.execute(
-                select(Track.artist, func.count().label("cnt"))
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.artist.isnot(None))
-                .group_by(Track.artist).order_by(func.count().desc()).limit(10)
-            )
-            top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
-
-            top_genres_q = await session.execute(
-                select(Track.genre, func.count().label("cnt"))
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.genre.isnot(None))
-                .group_by(Track.genre).order_by(func.count().desc()).limit(5)
-            )
-            top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
-
-            recent_q = await session.execute(
-                select(Track.source_id, Track.title, Track.artist, Track.duration, Track.cover_url, ListeningHistory.created_at)
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
-                .order_by(ListeningHistory.created_at.desc()).limit(20)
-            )
-            recent = [{
-                "video_id": r[0], "title": r[1], "artist": r[2],
-                "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
-                "cover_url": r[4], "source": "db",
-            } for r in recent_q.all()]
-
+            # User info first (fastest, most important)
             u = (await session.execute(select(User).where(User.id == user_id))).scalar()
 
-            # Streak milestones
+            total_plays = 0
+            total_time = 0
+            total_favs = 0
+            top_artists: list = []
+            top_genres: list = []
+            recent: list = []
+
+            # Each sub-query wrapped separately — partial data is better than nothing
+            try:
+                total_plays = (await session.execute(
+                    select(func.count()).where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                )).scalar() or 0
+            except Exception:
+                pass
+
+            try:
+                total_time = (await session.execute(
+                    select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                )).scalar() or 0
+            except Exception:
+                pass
+
+            try:
+                from bot.models.favorite import FavoriteTrack
+                total_favs = (await session.execute(
+                    select(func.count()).where(FavoriteTrack.user_id == user_id)
+                )).scalar() or 0
+            except Exception:
+                pass
+
+            try:
+                top_artists_q = await session.execute(
+                    select(Track.artist, func.count().label("cnt"))
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.artist.isnot(None))
+                    .group_by(Track.artist).order_by(func.count().desc()).limit(10)
+                )
+                top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+            except Exception:
+                pass
+
+            try:
+                top_genres_q = await session.execute(
+                    select(Track.genre, func.count().label("cnt"))
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.genre.isnot(None))
+                    .group_by(Track.genre).order_by(func.count().desc()).limit(5)
+                )
+                top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+            except Exception:
+                pass
+
+            try:
+                recent_q = await session.execute(
+                    select(Track.source_id, Track.title, Track.artist, Track.duration, Track.cover_url, ListeningHistory.created_at)
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                    .order_by(ListeningHistory.created_at.desc()).limit(20)
+                )
+                recent = [{
+                    "video_id": r[0], "title": r[1], "artist": r[2],
+                    "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
+                    "cover_url": r[4], "source": "db",
+                } for r in recent_q.all()]
+            except Exception:
+                pass
+
             streak = u.streak_days if u else 0
             try:
-                from bot.services.streak_rewards import get_next_milestone, STREAK_MILESTONES
+                from bot.services.streak_rewards import get_next_milestone
                 next_ms = get_next_milestone(streak)
             except Exception:
                 next_ms = None
@@ -2489,6 +2517,13 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
                 "member_since": u.created_at.isoformat() if u and u.created_at else None,
                 "next_streak_milestone": next_ms,
             }
+
+    try:
+        # Hard 4-second server-side timeout — NEVER hang the frontend
+        return await asyncio.wait_for(_fetch(), timeout=4.0)
+    except asyncio.TimeoutError:
+        logger.warning("Stats endpoint timed out for user %s", user_id)
+        return _defaults
     except Exception as exc:
         logger.error("Stats endpoint failed for user %s: %s", user_id, exc)
         return _defaults
