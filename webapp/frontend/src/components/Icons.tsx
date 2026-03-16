@@ -742,3 +742,50 @@ export const IconCheck = ({ size = 18, color = "currentColor", strokeWidth = 2 }
     <polyline points="20 6 9 17 4 12"/>
   </svg>
 );
+
+/** Vinyl record icon */
+export const IconVinyl = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <circle cx="12" cy="12" r="3"/>
+    <circle cx="12" cy="12" r="1" fill={color}/>
+    <path d="M12 2a10 10 0 0 1 0 20" stroke={color} strokeWidth="0.5" opacity="0.4"/>
+    <circle cx="12" cy="12" r="6" strokeDasharray="2 2" opacity="0.5"/>
+    <circle cx="12" cy="12" r="8" strokeDasharray="1.5 2.5" opacity="0.3"/>
+  </svg>
+);
+
+/** CD disc icon */
+export const IconCD = ({ size = 18, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <circle cx="12" cy="12" r="3"/>
+    <circle cx="12" cy="12" r="0.8" fill={color}/>
+    <path d="M7 5.5 C9 7, 9 10, 6.5 11" opacity="0.4"/>
+    <path d="M17.5 7 C15.5 9, 16 12, 18 13.5" opacity="0.4"/>
+    <path d="M8 17 C10 15.5, 13 16, 14.5 18.5" opacity="0.4"/>
+  </svg>
+);
+
+/** Jewel case icon */
+export const IconCase = ({ size = 18, color = "currentColor", strokeWidth = 1.5 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="2" width="18" height="20" rx="2"/>
+    <line x1="3" y1="6" x2="21" y2="6"/>
+    <line x1="3" y1="18" x2="21" y2="18"/>
+    <circle cx="12" cy="12" r="3"/>
+    <circle cx="12" cy="12" r="0.8" fill={color}/>
+    <line x1="8" y1="4" x2="8" y2="4.01" strokeWidth="2"/>
+  </svg>
+);
+
+/** Picture frame / cover art icon */
+export const IconCoverArt = ({ size = 18, color = "currentColor", strokeWidth = 1.5 }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="2" width="20" height="20" rx="2"/>
+    <rect x="5" y="5" width="14" height="14" rx="1" opacity="0.5"/>
+    <circle cx="9" cy="10" r="2"/>
+    <path d="M21 15l-3.5-3.5a2 2 0 0 0-2.83 0L5 21"/>
+    <path d="M14 9l.01 0" strokeWidth="2"/>
+  </svg>
+);

@@ -402,6 +402,227 @@ export async function fetchUserStats(userId: number): Promise<UserStats> {
   return r.json();
 }
 
+// ── Leaderboard & Challenges ────────────────────────────────────────────
+
+export interface LeaderboardEntry {
+  user_id: number;
+  name: string;
+  score: number;
+  level: number;
+}
+
+export interface LeaderboardData {
+  entries: LeaderboardEntry[];
+  my_rank: number | null;
+  my_xp: number;
+  my_level: number;
+  period: string;
+}
+
+export async function fetchLeaderboard(period: "weekly" | "alltime" = "weekly"): Promise<LeaderboardData> {
+  const r = await fetchWithRetry(`${API_BASE}/leaderboard/${period}`, { headers: getHeaders(), retries: 1 });
+  if (!r.ok) throw new Error("Failed to fetch leaderboard");
+  return r.json();
+}
+
+export interface Challenge {
+  id: string;
+  title: Record<string, string>;
+  icon: string;
+  target: number;
+  progress: number;
+  completed: boolean;
+  xp_reward: number;
+}
+
+export interface ChallengesData {
+  challenges: Challenge[];
+  week: string;
+  week_end: string;
+}
+
+export async function fetchChallenges(userId: number): Promise<ChallengesData> {
+  const r = await fetchWithRetry(`${API_BASE}/challenges/${userId}`, { headers: getHeaders(), retries: 1 });
+  if (!r.ok) throw new Error("Failed to fetch challenges");
+  return r.json();
+}
+
+// ── Story Cards ─────────────────────────────────────────────────────────
+
+export function getStoryCardUrl(videoId: string): string {
+  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  return `${API_BASE}/story-card/${videoId}?token=${initData}`;
+}
+
+// ── Music Battles ───────────────────────────────────────────────────────
+
+export interface BattleOption {
+  title: string;
+  artist: string;
+  video_id: string;
+}
+
+export interface BattleRound {
+  round: number;
+  stream_id: string;
+  correct_idx: number;
+  options: BattleOption[];
+  cover_url?: string;
+}
+
+export interface BattleData {
+  rounds: BattleRound[];
+  total: number;
+}
+
+export async function startBattle(): Promise<BattleData> {
+  const r = await fetchWithRetry(`${API_BASE}/battle/start`, {
+    method: "POST",
+    headers: getHeaders(),
+    retries: 1,
+  });
+  if (!r.ok) throw new Error("Failed to start battle");
+  return r.json();
+}
+
+export interface BattleScoreResult {
+  correct: number;
+  total: number;
+  xp_earned: number;
+}
+
+export async function submitBattleScore(correct: number, total: number): Promise<BattleScoreResult> {
+  const r = await fetch(`${API_BASE}/battle/score`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ correct, total }),
+  });
+  if (!r.ok) throw new Error("Failed to submit score");
+  return r.json();
+}
+
+// ── Activity Feed ───────────────────────────────────────────────────────
+
+export interface ActivityItem {
+  user_id: number;
+  user_name: string;
+  track_title: string;
+  track_artist: string;
+  video_id: string;
+  cover_url?: string;
+  played_at: string | null;
+}
+
+export async function fetchActivityFeed(limit = 30): Promise<ActivityItem[]> {
+  const r = await fetchWithRetry(`${API_BASE}/activity/feed?limit=${limit}`, {
+    headers: getHeaders(),
+    retries: 1,
+  });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.feed;
+}
+
+// ── Collaborative Playlists ──────────────────────────────────────────────
+
+export interface CollabInfo {
+  enabled: boolean;
+  invite_code?: string;
+  member_count: number;
+  is_member: boolean;
+  is_owner: boolean;
+}
+
+export async function enableCollab(playlistId: number): Promise<{ invite_code: string }> {
+  const r = await fetch(`${API_BASE}/playlist/${playlistId}/collab/enable`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to enable collab");
+  return r.json();
+}
+
+export async function joinCollab(code: string): Promise<{ playlist_id: number }> {
+  const r = await fetch(`${API_BASE}/playlist/collab/join/${encodeURIComponent(code)}`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to join collab");
+  return r.json();
+}
+
+export async function fetchCollabInfo(playlistId: number): Promise<CollabInfo> {
+  const r = await fetch(`${API_BASE}/playlist/${playlistId}/collab/info`, { headers: getHeaders() });
+  if (!r.ok) return { enabled: false, member_count: 0, is_member: false, is_owner: false };
+  return r.json();
+}
+
+export async function disableCollab(playlistId: number): Promise<void> {
+  await fetch(`${API_BASE}/playlist/${playlistId}/collab/disable`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+}
+
+// ── Radio Mode ───────────────────────────────────────────────────────
+
+export async function fetchRadioNext(seedVideoId: string, exclude: string[] = [], limit = 8): Promise<Track[]> {
+  const r = await fetchWithRetry(`${API_BASE}/radio/next`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ seed_video_id: seedVideoId, exclude, limit }),
+    retries: 1,
+  });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}
+
+// ── Wrapped / Music Recap ────────────────────────────────────────────
+
+export interface WrappedData {
+  total_plays: number;
+  total_time: number;
+  total_favorites: number;
+  unique_artists: number;
+  unique_tracks: number;
+  top_artists: Array<{ name: string; count: number }>;
+  top_genres: Array<{ name: string; count: number }>;
+  top_track: { video_id: string; title: string; artist: string; cover_url?: string; play_count: number } | null;
+  top_tracks: Array<Track & { play_count: number }>;
+  listening_hours: number[];
+  peak_hour: number;
+  personality: string;
+  level: number;
+  xp: number;
+  streak_days: number;
+  member_since: string | null;
+  error?: string;
+}
+
+export async function fetchWrapped(): Promise<WrappedData> {
+  const r = await fetchWithRetry(`${API_BASE}/wrapped`, { headers: getHeaders(), retries: 1, timeout: 10000 });
+  if (!r.ok) throw new Error("Failed to fetch wrapped");
+  return r.json();
+}
+
+// ── Smart Playlists (auto-generated) ──────────────────────────────────
+
+export interface SmartPlaylist {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  tracks: Track[];
+}
+
+export async function fetchSmartPlaylists(): Promise<SmartPlaylist[]> {
+  const r = await fetchWithRetry(`${API_BASE}/smart-playlists`, { headers: getHeaders(), retries: 1, timeout: 8000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.playlists;
+}
+
 export async function fetchFavoritesList(): Promise<Track[]> {
   const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
   if (!r.ok) return [];

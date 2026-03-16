@@ -261,6 +261,10 @@ app.include_router(admin_router)
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
+    except asyncio.CancelledError:
+        # Client disconnected — don't log as error, just return 499
+        logger.debug("Request cancelled: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=499, content={"detail": "Client closed request"})
     except Exception as exc:
         logger.error(
             "Unhandled %s %s → %s\n%s",
@@ -386,11 +390,18 @@ async def _get_or_create_webapp_user(tg_user: dict):
                     changed = True
 
                 if changed:
-                    await session.commit()
+                    try:
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+                        raise
                 return db_user
         except IntegrityError:
             if attempt < 2:
                 continue
+            raise
+        except asyncio.CancelledError:
+            logger.debug("_get_or_create_webapp_user cancelled for user %s", user_id)
             raise
         except Exception as exc:
             if attempt < 2:
@@ -1658,6 +1669,176 @@ async def track_of_day(user: dict = Depends(get_current_user)):
     return track_data or {}
 
 
+# ── Story Cards API ──────────────────────────────────────────────────────
+
+@app.get("/api/story-card/{video_id}")
+async def get_story_card(video_id: str, user: dict = Depends(get_current_user)):
+    """Generate a shareable story card image for a track."""
+    from bot.services.story_cards import generate_track_card
+    import httpx
+
+    # Resolve track info
+    title, artist, duration_fmt, cover_bytes = "Unknown", "Unknown", "", None
+    try:
+        from bot.models.base import async_session
+        from bot.models.track import Track
+        from sqlalchemy import select
+        async with async_session() as session:
+            q = await session.execute(select(Track).where(Track.source_id == video_id).limit(1))
+            t = q.scalar_one_or_none()
+            if t:
+                title = t.title or title
+                artist = t.artist or artist
+                dur = t.duration or 0
+                duration_fmt = f"{dur // 60}:{dur % 60:02d}"
+                if t.cover_url:
+                    try:
+                        async with httpx.AsyncClient(timeout=5) as client:
+                            resp = await client.get(t.cover_url)
+                            if resp.status_code == 200:
+                                cover_bytes = resp.content
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    png_bytes = generate_track_card(artist, title, video_id, duration_fmt, cover_bytes)
+    if not png_bytes:
+        raise HTTPException(status_code=500, detail="Story card generation failed")
+
+    from starlette.responses import Response
+    return Response(content=png_bytes, media_type="image/png",
+                    headers={"Content-Disposition": f'inline; filename="story_{video_id}.png"'})
+
+
+# ── Music Battles API ───────────────────────────────────────────────────
+
+import random as _random
+
+@app.post("/api/battle/start")
+async def start_battle(user: dict = Depends(get_current_user)):
+    """Start a music quiz battle — returns 5 rounds with audio snippets and 4 answer choices."""
+    from bot.models.base import async_session
+    from bot.models.track import Track
+    from sqlalchemy import select, func
+
+    async with async_session() as session:
+        # Get random tracks that have audio
+        q = await session.execute(
+            select(Track).where(Track.downloads > 0, Track.title.isnot(None), Track.artist.isnot(None))
+            .order_by(func.random()).limit(50)
+        )
+        all_tracks = q.scalars().all()
+
+    if len(all_tracks) < 8:
+        raise HTTPException(status_code=400, detail="Not enough tracks for a battle")
+
+    rounds = []
+    used = set()
+    for i in range(min(5, len(all_tracks) // 4)):
+        # Pick correct answer
+        correct = None
+        for t in all_tracks:
+            if t.source_id not in used:
+                correct = t
+                used.add(t.source_id)
+                break
+        if not correct:
+            break
+
+        # Pick 3 wrong answers
+        wrong = [t for t in all_tracks if t.source_id not in used and t.source_id != correct.source_id]
+        _random.shuffle(wrong)
+        wrong = wrong[:3]
+        for w in wrong:
+            used.add(w.source_id)
+
+        options = [{"title": correct.title, "artist": correct.artist, "video_id": correct.source_id}]
+        for w in wrong:
+            options.append({"title": w.title, "artist": w.artist, "video_id": w.source_id})
+        _random.shuffle(options)
+
+        correct_idx = next(i for i, o in enumerate(options) if o["video_id"] == correct.source_id)
+
+        rounds.append({
+            "round": i + 1,
+            "stream_id": correct.source_id,
+            "correct_idx": correct_idx,
+            "options": options,
+            "cover_url": correct.cover_url,
+        })
+
+    return {"rounds": rounds, "total": len(rounds)}
+
+
+@app.post("/api/battle/score")
+async def submit_battle_score(
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Submit battle score — awards XP based on correct answers."""
+    correct = body.get("correct", 0)
+    total = body.get("total", 5)
+    user_id = user["id"]
+
+    xp_earned = correct * 15  # 15 XP per correct answer
+    if correct == total:
+        xp_earned += 25  # perfect bonus
+
+    try:
+        from bot.services.leaderboard import add_xp
+        await add_xp(user_id, xp_earned)
+    except Exception:
+        pass
+
+    return {"correct": correct, "total": total, "xp_earned": xp_earned}
+
+
+# ── Friends Activity Feed API ───────────────────────────────────────────
+
+@app.get("/api/activity/feed")
+async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_user)):
+    """Get recent listening activity from all users (public feed)."""
+    from bot.models.base import async_session
+    from bot.models.track import ListeningHistory, Track
+    from bot.models.user import User
+    from sqlalchemy import select, desc
+
+    async with async_session() as session:
+        q = await session.execute(
+            select(
+                ListeningHistory.user_id,
+                ListeningHistory.created_at,
+                Track.title,
+                Track.artist,
+                Track.source_id,
+                Track.cover_url,
+                User.first_name,
+                User.username,
+            )
+            .join(Track, Track.id == ListeningHistory.track_id)
+            .join(User, User.id == ListeningHistory.user_id)
+            .where(ListeningHistory.action == "play")
+            .order_by(desc(ListeningHistory.created_at))
+            .limit(min(limit, 50))
+        )
+        rows = q.all()
+
+    feed = []
+    for row in rows:
+        feed.append({
+            "user_id": row.user_id,
+            "user_name": row.first_name or row.username or "User",
+            "track_title": row.title,
+            "track_artist": row.artist,
+            "video_id": row.source_id,
+            "cover_url": row.cover_url,
+            "played_at": row.created_at.isoformat() if row.created_at else None,
+        })
+
+    return {"feed": feed}
+
+
 # ── Charts API ───────────────────────────────────────────────────────────
 
 @app.post("/api/charts/refresh")
@@ -1799,8 +1980,20 @@ async def add_track_to_playlist(
 
     async with async_session() as session:
         pl = await session.get(Playlist, playlist_id)
-        if not pl or pl.user_id != user["id"]:
+        if not pl:
             raise HTTPException(status_code=404, detail="Playlist not found")
+        # Allow owner OR collaborator
+        is_owner = pl.user_id == user["id"]
+        if not is_owner:
+            try:
+                from bot.services.cache import cache
+                members = await cache.redis.smembers(_collab_key(playlist_id) + ":members")
+                if str(user["id"]) not in members:
+                    raise HTTPException(status_code=403, detail="Not a collaborator")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="Not authorized")
 
         db_track = (
             await session.execute(select(Track).where(Track.source_id == body.video_id))
@@ -1936,6 +2129,111 @@ async def delete_playlist(playlist_id: int, user: dict = Depends(get_current_use
             mirror_playlist_delete(playlist_id)
         except Exception:
             pass
+    return {"ok": True}
+
+
+# ── Collaborative Playlists (Redis-based, no schema change) ─────────────
+
+import secrets as _secrets
+
+def _collab_key(playlist_id: int) -> str:
+    return f"collab:pl:{playlist_id}"
+
+def _collab_invite_key(code: str) -> str:
+    return f"collab:invite:{code}"
+
+
+@app.post("/api/playlist/{playlist_id}/collab/enable")
+async def enable_collab(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Enable collaborative mode for a playlist. Returns invite code."""
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist
+    from bot.services.cache import cache
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user["id"]:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+    # Generate invite code
+    code = _secrets.token_urlsafe(8)
+    key = _collab_key(playlist_id)
+    invite_key = _collab_invite_key(code)
+
+    # Store in Redis
+    await cache.redis.hset(key, mapping={
+        "owner": str(user["id"]),
+        "invite_code": code,
+        "enabled": "1",
+    })
+    await cache.redis.sadd(f"{key}:members", str(user["id"]))
+    await cache.redis.set(invite_key, str(playlist_id), ex=86400 * 30)  # 30 days
+
+    return {"invite_code": code, "playlist_id": playlist_id}
+
+
+@app.post("/api/playlist/collab/join/{code}")
+async def join_collab(code: str, user: dict = Depends(get_current_user)):
+    """Join a collaborative playlist via invite code."""
+    from bot.services.cache import cache
+
+    invite_key = _collab_invite_key(code)
+    pl_id_raw = await cache.redis.get(invite_key)
+    if not pl_id_raw:
+        raise HTTPException(status_code=404, detail="Invalid or expired invite code")
+
+    playlist_id = int(pl_id_raw)
+    key = _collab_key(playlist_id)
+
+    # Check if collab is enabled
+    enabled = await cache.redis.hget(key, "enabled")
+    if enabled != "1":
+        raise HTTPException(status_code=400, detail="Collaborative mode is not enabled")
+
+    # Add user to members
+    await cache.redis.sadd(f"{key}:members", str(user["id"]))
+
+    return {"playlist_id": playlist_id, "joined": True}
+
+
+@app.get("/api/playlist/{playlist_id}/collab/info")
+async def collab_info(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Get collaborative playlist info."""
+    from bot.services.cache import cache
+
+    key = _collab_key(playlist_id)
+    info = await cache.redis.hgetall(key)
+    if not info or info.get("enabled") != "1":
+        return {"enabled": False}
+
+    members = await cache.redis.smembers(f"{key}:members")
+    is_member = str(user["id"]) in members
+    is_owner = info.get("owner") == str(user["id"])
+
+    return {
+        "enabled": True,
+        "invite_code": info.get("invite_code") if is_owner else None,
+        "member_count": len(members),
+        "is_member": is_member,
+        "is_owner": is_owner,
+    }
+
+
+@app.post("/api/playlist/{playlist_id}/collab/disable")
+async def disable_collab(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Disable collaborative mode (owner only)."""
+    from bot.services.cache import cache
+
+    key = _collab_key(playlist_id)
+    owner = await cache.redis.hget(key, "owner")
+    if owner != str(user["id"]):
+        raise HTTPException(status_code=403, detail="Only owner can disable")
+
+    invite_code = await cache.redis.hget(key, "invite_code")
+    if invite_code:
+        await cache.redis.delete(_collab_invite_key(invite_code))
+
+    await cache.redis.delete(key, f"{key}:members")
     return {"ok": True}
 
 
@@ -2128,14 +2426,15 @@ async def list_favorites(user: dict = Depends(get_current_user)):
 
 @app.get("/api/stats/{user_id}")
 async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
-    """Listening statistics for profile page (4s hard timeout)."""
+    """Listening statistics for profile page — with hard 4s timeout."""
     _defaults = {
         "total_plays": 0, "total_time": 0, "total_favorites": 0,
         "top_artists": [], "top_genres": [], "recent_tracks": [],
         "xp": 0, "level": 1, "streak_days": 0, "badges": [], "member_since": None,
+        "next_streak_milestone": None,
     }
 
-    async def _fetch_stats():
+    async def _fetch():
         from bot.models.base import async_session
         from sqlalchemy import select, func
         from bot.models.track import ListeningHistory, Track
@@ -2144,32 +2443,43 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
         result = dict(_defaults)
 
         async with async_session() as session:
-            # Each query isolated — if one fails, others still return data
+            from sqlalchemy import select, func
+            from bot.models.track import ListeningHistory, Track
+            from bot.models.user import User
+
+            # User info first (fastest, most important)
+            u = (await session.execute(select(User).where(User.id == user_id))).scalar()
+
+            total_plays = 0
+            total_time = 0
+            total_favs = 0
+            top_artists: list = []
+            top_genres: list = []
+            recent: list = []
+
+            # Each sub-query wrapped separately — partial data is better than nothing
             try:
                 total_plays = (await session.execute(
                     select(func.count()).where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
                 )).scalar() or 0
-                result["total_plays"] = total_plays
-            except Exception as e:
-                logger.warning("Stats: total_plays query failed for %s: %s", user_id, e)
+            except Exception:
+                pass
 
             try:
                 total_time = (await session.execute(
                     select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
                     .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
                 )).scalar() or 0
-                result["total_time"] = total_time
-            except Exception as e:
-                logger.warning("Stats: total_time query failed for %s: %s", user_id, e)
+            except Exception:
+                pass
 
             try:
                 from bot.models.favorite import FavoriteTrack
                 total_favs = (await session.execute(
                     select(func.count()).where(FavoriteTrack.user_id == user_id)
                 )).scalar() or 0
-                result["total_favorites"] = total_favs
-            except Exception as e:
-                logger.warning("Stats: total_favorites query failed for %s: %s", user_id, e)
+            except Exception:
+                pass
 
             try:
                 top_artists_q = await session.execute(
@@ -2178,9 +2488,9 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
                     .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.artist.isnot(None))
                     .group_by(Track.artist).order_by(func.count().desc()).limit(10)
                 )
-                result["top_artists"] = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
-            except Exception as e:
-                logger.warning("Stats: top_artists query failed for %s: %s", user_id, e)
+                top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+            except Exception:
+                pass
 
             try:
                 top_genres_q = await session.execute(
@@ -2189,9 +2499,9 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
                     .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.genre.isnot(None))
                     .group_by(Track.genre).order_by(func.count().desc()).limit(5)
                 )
-                result["top_genres"] = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
-            except Exception as e:
-                logger.warning("Stats: top_genres query failed for %s: %s", user_id, e)
+                top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+            except Exception:
+                pass
 
             try:
                 recent_q = await session.execute(
@@ -2200,36 +2510,104 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
                     .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
                     .order_by(ListeningHistory.created_at.desc()).limit(20)
                 )
-                result["recent_tracks"] = [{
+                recent = [{
                     "video_id": r[0], "title": r[1], "artist": r[2],
                     "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
                     "cover_url": r[4], "source": "db",
                 } for r in recent_q.all()]
-            except Exception as e:
-                logger.warning("Stats: recent_tracks query failed for %s: %s", user_id, e)
+            except Exception:
+                pass
 
+            streak = u.streak_days if u else 0
             try:
-                u = (await session.execute(select(User).where(User.id == user_id))).scalar()
-                if u:
-                    result["xp"] = u.xp
-                    result["level"] = u.level
-                    result["streak_days"] = u.streak_days
-                    result["badges"] = u.badges or []
-                    result["member_since"] = u.created_at.isoformat() if u.created_at else None
-            except Exception as e:
-                logger.warning("Stats: user query failed for %s: %s", user_id, e)
+                from bot.services.streak_rewards import get_next_milestone
+                next_ms = get_next_milestone(streak)
+            except Exception:
+                next_ms = None
 
-        return result
+            return {
+                "total_plays": total_plays, "total_time": total_time, "total_favorites": total_favs,
+                "top_artists": top_artists, "top_genres": top_genres, "recent_tracks": recent,
+                "xp": u.xp if u else 0, "level": u.level if u else 1,
+                "streak_days": streak,
+                "badges": (u.badges or []) if u else [],
+                "member_since": u.created_at.isoformat() if u and u.created_at else None,
+                "next_streak_milestone": next_ms,
+            }
 
     try:
-        import asyncio
-        return await asyncio.wait_for(_fetch_stats(), timeout=4.0)
+        # Hard 4-second server-side timeout — NEVER hang the frontend
+        return await asyncio.wait_for(_fetch(), timeout=4.0)
     except asyncio.TimeoutError:
-        logger.error("Stats endpoint TIMEOUT (4s) for user %s", user_id)
+        logger.warning("Stats endpoint timed out for user %s", user_id)
         return _defaults
     except Exception as exc:
         logger.error("Stats endpoint failed for user %s: %s", user_id, exc)
         return _defaults
+
+
+# ── Leaderboard ────────────────────────────────────────────────────────────
+
+@app.get("/api/leaderboard/{period}")
+async def leaderboard(period: str = "weekly", user: dict = Depends(get_current_user)):
+    """Get leaderboard (weekly or alltime). Returns top 50 + user's rank."""
+    if period not in ("weekly", "alltime"):
+        period = "weekly"
+    try:
+        from bot.services.leaderboard import get_leaderboard, get_user_rank
+        from bot.models.base import async_session
+        from bot.models.user import User
+        from sqlalchemy import select
+
+        user_id = user.get("id", 0)
+        entries = await get_leaderboard(period, limit=50)
+        my_rank = await get_user_rank(user_id, period)
+
+        # Fetch names for top users
+        user_ids = [uid for uid, _ in entries[:50]]
+        names: dict[int, dict] = {}
+        if user_ids:
+            async with async_session() as session:
+                result = await session.execute(
+                    select(User.id, User.first_name, User.username, User.level, User.xp)
+                    .where(User.id.in_(user_ids))
+                )
+                for row in result.all():
+                    names[row[0]] = {
+                        "name": row[1] or row[2] or str(row[0]),
+                        "level": row[3] or 1,
+                        "xp": row[4] or 0,
+                    }
+
+        board = []
+        for rank, (uid, score) in enumerate(entries, 1):
+            info = names.get(uid, {"name": str(uid), "level": 1, "xp": 0})
+            board.append({
+                "rank": rank,
+                "user_id": uid,
+                "name": info["name"],
+                "level": info["level"],
+                "xp": info["xp"],
+                "score": int(score),
+            })
+
+        return {"period": period, "entries": board, "my_rank": my_rank}
+    except Exception as exc:
+        logger.error("Leaderboard failed: %s", exc)
+        return {"period": period, "entries": [], "my_rank": None}
+
+
+# ── Weekly Challenges ──────────────────────────────────────────────────────
+
+@app.get("/api/challenges/{user_id}")
+async def user_challenges(user_id: int, user: dict = Depends(get_current_user)):
+    """Get active weekly challenges and user's progress."""
+    try:
+        from bot.services.challenges import get_user_challenges
+        return await get_user_challenges(user_id)
+    except Exception as exc:
+        logger.error("Challenges failed for user %s: %s", user_id, exc)
+        return {"challenges": [], "week": ""}
 
 
 # ── Queue Reorder ────────────────────────────────────────────────────────
@@ -3563,6 +3941,399 @@ async def my_parties(user: dict = Depends(get_current_user)):
             )
             for party in parties
         ]
+
+
+# ── Radio Mode (infinite autoplay) ─────────────────────────────────────
+
+@app.post("/api/radio/next")
+async def radio_next(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Get next batch of radio tracks based on seed track.
+    Uses similar tracks + trending mix for variety.
+    """
+    body = await request.json()
+    seed_id = body.get("seed_video_id", "")
+    exclude = body.get("exclude", [])
+    limit = min(body.get("limit", 8), 20)
+
+    if not seed_id:
+        raise HTTPException(400, "seed_video_id required")
+
+    tracks = []
+    try:
+        # Try similar tracks first
+        from bot.services.search_engine import search as _search
+        from bot.services.downloader import resolve_youtube_url
+
+        # Get track info for search
+        from bot.models.base import async_session as _as
+        from bot.models.track import Track as TrackModel
+        from sqlalchemy import select
+
+        seed_title = ""
+        seed_artist = ""
+        async with _as() as session:
+            t = (await session.execute(
+                select(TrackModel).where(TrackModel.source_id == seed_id)
+            )).scalar_one_or_none()
+            if t:
+                seed_title = t.title or ""
+                seed_artist = t.artist or ""
+
+        # Mix strategy: similar + artist radio + random trending
+        queries = []
+        if seed_artist:
+            queries.append(f"{seed_artist} mix")
+            queries.append(f"{seed_artist} best songs")
+        if seed_title and seed_artist:
+            queries.append(f"{seed_title} {seed_artist} similar")
+
+        exclude_set = set(exclude + [seed_id])
+        seen = set()
+
+        for q in queries[:3]:
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(
+                        None, lambda qq=q: _search(qq, max_results=8)
+                    ),
+                    timeout=5.0,
+                )
+                for r in (results or []):
+                    vid = r.get("video_id") or r.get("id", "")
+                    if vid and vid not in exclude_set and vid not in seen:
+                        seen.add(vid)
+                        tracks.append({
+                            "video_id": vid,
+                            "title": r.get("title", ""),
+                            "artist": r.get("uploader", r.get("artist", "")),
+                            "duration": r.get("duration", 0),
+                            "duration_fmt": r.get("duration_fmt", "0:00"),
+                            "source": "youtube",
+                            "cover_url": r.get("cover_url"),
+                        })
+                        if len(tracks) >= limit:
+                            break
+            except Exception:
+                continue
+            if len(tracks) >= limit:
+                break
+
+    except Exception as e:
+        logger.error("Radio next failed: %s", e)
+
+    return {"tracks": tracks[:limit]}
+
+
+# ── Wrapped / Music Recap ──────────────────────────────────────────────
+
+@app.get("/api/wrapped")
+async def get_wrapped(user: dict = Depends(get_current_user)):
+    """
+    Personalized music recap — like Spotify Wrapped but available anytime.
+    Returns top artists, genres, moods, listening stats, favorite tracks, etc.
+    """
+    user_id = user.get("id", 0)
+
+    async def _build():
+        from bot.models.base import async_session as _as
+        from bot.models.track import ListeningHistory, Track as TrackModel
+        from bot.models.user import User
+        from bot.models.favorite import FavoriteTrack
+        from sqlalchemy import select, func, extract
+
+        async with _as() as session:
+            # User info
+            u = (await session.execute(select(User).where(User.id == user_id))).scalar()
+            if not u:
+                return {"error": "User not found"}
+
+            # Total plays
+            total_plays = (await session.execute(
+                select(func.count()).where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                )
+            )).scalar() or 0
+
+            # Total listening time (seconds)
+            total_time = (await session.execute(
+                select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            )).scalar() or 0
+
+            # Total favorites
+            total_favs = (await session.execute(
+                select(func.count()).where(FavoriteTrack.user_id == user_id)
+            )).scalar() or 0
+
+            # Top 10 artists
+            top_artists_q = await session.execute(
+                select(TrackModel.artist, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", TrackModel.artist.isnot(None))
+                .group_by(TrackModel.artist).order_by(func.count().desc()).limit(10)
+            )
+            top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+
+            # Top 5 genres
+            top_genres_q = await session.execute(
+                select(TrackModel.genre, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", TrackModel.genre.isnot(None))
+                .group_by(TrackModel.genre).order_by(func.count().desc()).limit(5)
+            )
+            top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+
+            # Most played track (all time)
+            top_track_q = await session.execute(
+                select(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url)
+                .order_by(func.count().desc()).limit(1)
+            )
+            top_track_row = top_track_q.first()
+            top_track = None
+            if top_track_row:
+                top_track = {
+                    "video_id": top_track_row[0], "title": top_track_row[1],
+                    "artist": top_track_row[2], "cover_url": top_track_row[3],
+                    "play_count": top_track_row[4],
+                }
+
+            # Most played tracks (top 10)
+            top_tracks_q = await session.execute(
+                select(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, TrackModel.duration, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, TrackModel.duration)
+                .order_by(func.count().desc()).limit(10)
+            )
+            top_tracks = [{
+                "video_id": r[0], "title": r[1], "artist": r[2], "cover_url": r[3],
+                "duration": r[4] or 0, "duration_fmt": f"{(r[4] or 0)//60}:{(r[4] or 0)%60:02d}",
+                "play_count": r[5], "source": "db",
+            } for r in top_tracks_q.all()]
+
+            # Listening by hour (24 buckets)
+            hours_q = await session.execute(
+                select(
+                    extract("hour", ListeningHistory.created_at).label("hr"),
+                    func.count(),
+                )
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .group_by("hr")
+            )
+            hours_map = {int(r[0]): r[1] for r in hours_q.all()}
+            listening_hours = [hours_map.get(h, 0) for h in range(24)]
+            peak_hour = max(range(24), key=lambda h: listening_hours[h]) if total_plays > 0 else 12
+
+            # Unique artists count
+            unique_artists = (await session.execute(
+                select(func.count(func.distinct(TrackModel.artist)))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            )).scalar() or 0
+
+            # Unique tracks count
+            unique_tracks = (await session.execute(
+                select(func.count(func.distinct(TrackModel.id)))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            )).scalar() or 0
+
+            # Personality label based on listening patterns
+            personality = "Explorer"
+            if top_artists and top_artists[0]["count"] > total_plays * 0.3:
+                personality = "Loyalist"
+            elif unique_artists > 50:
+                personality = "Explorer"
+            elif len(top_genres) >= 4:
+                personality = "Eclectic"
+            elif total_time > 36000:
+                personality = "Marathon Runner"
+            elif peak_hour >= 22 or peak_hour <= 4:
+                personality = "Night Owl"
+
+            return {
+                "total_plays": total_plays,
+                "total_time": total_time,
+                "total_favorites": total_favs,
+                "unique_artists": unique_artists,
+                "unique_tracks": unique_tracks,
+                "top_artists": top_artists,
+                "top_genres": top_genres,
+                "top_track": top_track,
+                "top_tracks": top_tracks,
+                "listening_hours": listening_hours,
+                "peak_hour": peak_hour,
+                "personality": personality,
+                "level": u.level if u else 1,
+                "xp": u.xp if u else 0,
+                "streak_days": u.streak_days if u else 0,
+                "member_since": u.created_at.isoformat() if u and u.created_at else None,
+            }
+
+    try:
+        return await asyncio.wait_for(_build(), timeout=8.0)
+    except asyncio.TimeoutError:
+        return {"error": "timeout", "total_plays": 0}
+    except Exception as e:
+        logger.error("Wrapped failed: %s", e)
+        return {"error": str(e), "total_plays": 0}
+
+
+# ── Smart Playlists (auto-generated) ──────────────────────────────────
+
+@app.get("/api/smart-playlists")
+async def smart_playlists(user: dict = Depends(get_current_user)):
+    """
+    Auto-generated smart playlists based on user listening data.
+    Returns playlist definitions, each with tracks.
+    """
+    user_id = user.get("id", 0)
+
+    async def _build():
+        from bot.models.base import async_session as _as
+        from bot.models.track import ListeningHistory, Track as TrackModel
+        from bot.models.favorite import FavoriteTrack
+        from sqlalchemy import select, func, desc
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+        playlists = []
+
+        async with _as() as session:
+            # 1) Most Played (all time top 20)
+            try:
+                top_q = await session.execute(
+                    select(
+                        TrackModel.source_id, TrackModel.title, TrackModel.artist,
+                        TrackModel.duration, TrackModel.cover_url,
+                        func.count().label("cnt"),
+                    )
+                    .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                    .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.duration, TrackModel.cover_url)
+                    .order_by(desc("cnt")).limit(20)
+                )
+                tracks = [{
+                    "video_id": r[0], "title": r[1], "artist": r[2],
+                    "duration": r[3] or 0,
+                    "duration_fmt": f"{(r[3] or 0)//60}:{(r[3] or 0)%60:02d}",
+                    "source": "db", "cover_url": r[4],
+                } for r in top_q.all()]
+                if tracks:
+                    playlists.append({
+                        "id": "most_played", "name": "Most Played",
+                        "icon": "fire", "description": "Your all-time favorites",
+                        "tracks": tracks,
+                    })
+            except Exception:
+                pass
+
+            # 2) Recently Discovered (first listen in last 7 days)
+            try:
+                week_ago = now - timedelta(days=7)
+                recent_q = await session.execute(
+                    select(
+                        TrackModel.source_id, TrackModel.title, TrackModel.artist,
+                        TrackModel.duration, TrackModel.cover_url,
+                        func.min(ListeningHistory.created_at).label("first_listen"),
+                    )
+                    .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                    .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.duration, TrackModel.cover_url)
+                    .having(func.min(ListeningHistory.created_at) >= week_ago)
+                    .order_by(desc("first_listen")).limit(20)
+                )
+                tracks = [{
+                    "video_id": r[0], "title": r[1], "artist": r[2],
+                    "duration": r[3] or 0,
+                    "duration_fmt": f"{(r[3] or 0)//60}:{(r[3] or 0)%60:02d}",
+                    "source": "db", "cover_url": r[4],
+                } for r in recent_q.all()]
+                if tracks:
+                    playlists.append({
+                        "id": "recently_discovered", "name": "Recently Discovered",
+                        "icon": "discover", "description": "New tracks from this week",
+                        "tracks": tracks,
+                    })
+            except Exception:
+                pass
+
+            # 3) Favorites Mix (shuffled favorites)
+            try:
+                favs_q = await session.execute(
+                    select(
+                        TrackModel.source_id, TrackModel.title, TrackModel.artist,
+                        TrackModel.duration, TrackModel.cover_url,
+                    )
+                    .join(FavoriteTrack, FavoriteTrack.track_id == TrackModel.id)
+                    .where(FavoriteTrack.user_id == user_id)
+                    .order_by(func.random()).limit(25)
+                )
+                tracks = [{
+                    "video_id": r[0], "title": r[1], "artist": r[2],
+                    "duration": r[3] or 0,
+                    "duration_fmt": f"{(r[3] or 0)//60}:{(r[3] or 0)%60:02d}",
+                    "source": "db", "cover_url": r[4],
+                } for r in favs_q.all()]
+                if tracks:
+                    playlists.append({
+                        "id": "favorites_mix", "name": "Favorites Mix",
+                        "icon": "heart", "description": "Your liked tracks shuffled",
+                        "tracks": tracks,
+                    })
+            except Exception:
+                pass
+
+            # 4) Late Night (tracks played after 10pm)
+            try:
+                from sqlalchemy import extract
+                night_q = await session.execute(
+                    select(
+                        TrackModel.source_id, TrackModel.title, TrackModel.artist,
+                        TrackModel.duration, TrackModel.cover_url,
+                        func.count().label("cnt"),
+                    )
+                    .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                    .where(
+                        ListeningHistory.user_id == user_id,
+                        ListeningHistory.action == "play",
+                        extract("hour", ListeningHistory.created_at).in_([22, 23, 0, 1, 2, 3]),
+                    )
+                    .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.duration, TrackModel.cover_url)
+                    .order_by(desc("cnt")).limit(20)
+                )
+                tracks = [{
+                    "video_id": r[0], "title": r[1], "artist": r[2],
+                    "duration": r[3] or 0,
+                    "duration_fmt": f"{(r[3] or 0)//60}:{(r[3] or 0)%60:02d}",
+                    "source": "db", "cover_url": r[4],
+                } for r in night_q.all()]
+                if tracks:
+                    playlists.append({
+                        "id": "late_night", "name": "Late Night",
+                        "icon": "moon", "description": "What you listen to after dark",
+                        "tracks": tracks,
+                    })
+            except Exception:
+                pass
+
+        return {"playlists": playlists}
+
+    try:
+        return await asyncio.wait_for(_build(), timeout=6.0)
+    except asyncio.TimeoutError:
+        return {"playlists": []}
+    except Exception as e:
+        logger.error("Smart playlists failed: %s", e)
+        return {"playlists": []}
 
 
 # ── Frontend SPA serving ────────────────────────────────────────────────

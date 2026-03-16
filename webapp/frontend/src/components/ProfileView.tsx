@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { Component } from "preact";
 import type { Track } from "../api";
-import { fetchFavoritesList } from "../api";
+import { fetchFavoritesList, fetchChallenges, type ChallengesData } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
   IconCrown, IconFire, IconMusicNote, IconChart, IconPlaySmall,
@@ -29,6 +29,12 @@ class ProfileErrorBoundary extends Component<{ fallbackColor?: string }, { error
 
 // ── Types ───────────────────────────────────────────────────────────────
 
+interface StreakMilestone {
+  days: number;
+  xp: number;
+  remaining: number;
+}
+
 interface UserStats {
   total_plays: number;
   total_time: number; // seconds
@@ -41,6 +47,7 @@ interface UserStats {
   streak_days: number;
   badges: string[];
   member_since: string | null;
+  next_streak_milestone?: StreakMilestone | null;
 }
 
 interface Props {
@@ -151,7 +158,7 @@ export function ProfileView({
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [showAllFavs, setShowAllFavs] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
+  const [challenges, setChallenges] = useState<ChallengesData | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -169,23 +176,28 @@ export function ProfileView({
   }, [isPremium]);
 
   useEffect(() => {
-    // Skip fetch entirely for invalid userId — show error immediately
-    if (!userId || userId <= 0) {
+    // Guard: don't fetch if userId is 0 (WebApp not ready)
+    if (!userId) {
       setLoading(false);
       setError(true);
       return;
     }
 
+    let cancelled = false;
     setLoading(true);
     setError(false);
-    let cancelled = false;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000); // 5s fetch timeout
 
-    // Hard fallback: force loading=false after 6s no matter what
-    const fallback = setTimeout(() => {
-      if (!cancelled) { cancelled = true; setLoading(false); setError(true); }
+    // Aggressive timeout: if ANYTHING takes >6s, just show what we have
+    const hardTimeout = setTimeout(() => {
+      if (!cancelled) {
+        setLoading(false);
+        if (!stats) setError(true);
+      }
     }, 6000);
+
+    // Fetch stats with its own timeout
+    const ctrl = new AbortController();
+    const fetchTimer = setTimeout(() => ctrl.abort(), 5000);
 
     fetch(`/api/stats/${userId}`, {
       headers: {
@@ -198,12 +210,28 @@ export function ProfileView({
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: UserStats) => { if (!cancelled) setStats(data); })
-      .catch(() => { if (!cancelled) setError(true); })
-      .finally(() => { cancelled = true; clearTimeout(timer); clearTimeout(fallback); setLoading(false); });
+      .then((data: UserStats) => {
+        if (!cancelled) setStats(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        clearTimeout(fetchTimer);
+        if (!cancelled) setLoading(false);
+      });
+
+    // These are non-blocking — if they fail, profile still shows
     fetchFavoritesList().then((f) => { if (!cancelled) setFavorites(f); }).catch(() => {});
-    return () => { cancelled = true; ctrl.abort(); clearTimeout(timer); clearTimeout(fallback); };
-  }, [userId, retryCount]);
+    fetchChallenges(userId).then((c) => { if (!cancelled) setChallenges(c); }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      clearTimeout(fetchTimer);
+      clearTimeout(hardTimeout);
+    };
+  }, [userId]);
 
   // ── Avatar upload handler ────────────────────────────────────────────
 
@@ -247,30 +275,57 @@ export function ProfileView({
 
   // ── Loading / error states ──────────────────────────────────────────
 
+  // Retry function
+  const retryLoad = () => {
+    setStats(null);
+    setError(false);
+    setLoading(true);
+    // Re-trigger the effect by forcing a state cycle
+    const ctrl = new AbortController();
+    const fetchTimer = setTimeout(() => ctrl.abort(), 5000);
+    fetch(`/api/stats/${userId}`, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+      },
+      signal: ctrl.signal,
+    })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((data: UserStats) => setStats(data))
+      .catch(() => setError(true))
+      .finally(() => { clearTimeout(fetchTimer); setLoading(false); });
+    fetchFavoritesList().then(setFavorites).catch(() => {});
+    fetchChallenges(userId).then(setChallenges).catch(() => {});
+  };
+
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: 64 }}>
         <IconSpinner size={28} color={tc.hintColor} />
+        <div style={{ fontSize: 12, color: tc.hintColor, marginTop: 12 }}>
+          Загрузка профиля...
+        </div>
       </div>
     );
   }
 
   if (error || !stats) {
     return (
-      <div style={{ textAlign: "center", padding: 64, color: tc.hintColor, fontSize: 14 }}>
-        Не удалось загрузить профиль
-        <div style={{ marginTop: 16 }}>
-          <button
-            onClick={retry}
-            style={{
-              padding: "8px 24px", borderRadius: 12, border: "none",
-              background: tc.accentGradient, color: "#fff",
-              fontSize: 14, fontWeight: 600, cursor: "pointer",
-            }}
-          >
-            Повторить
-          </button>
+      <div style={{ textAlign: "center", padding: 48 }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>😕</div>
+        <div style={{ fontSize: 14, color: tc.hintColor, marginBottom: 16 }}>
+          Не удалось загрузить профиль
         </div>
+        <button
+          onClick={() => { haptic("light"); retryLoad(); }}
+          style={{
+            padding: "10px 28px", borderRadius: 12, border: tc.cardBorder,
+            background: tc.cardBg, color: tc.highlight,
+            fontSize: 13, fontWeight: 600, cursor: "pointer",
+          }}
+        >
+          Повторить
+        </button>
       </div>
     );
   }
@@ -427,15 +482,25 @@ export function ProfileView({
         </div>
       </div>
 
-      {/* Streak */}
+      {/* Streak + next milestone */}
       {stats.streak_days > 0 && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 4,
-          marginTop: 12, fontSize: 13, fontWeight: 600,
-          color: tc.isTequila ? "#ffab40" : "#ff7043",
-        }}>
-          <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} />
-          {stats.streak_days} дней подряд
+        <div style={{ marginTop: 12, textAlign: "center" }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            fontSize: 13, fontWeight: 600,
+            color: tc.isTequila ? "#ffab40" : "#ff7043",
+          }}>
+            <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} />
+            {stats.streak_days} дней подряд
+          </div>
+          {stats.next_streak_milestone && (
+            <div style={{
+              fontSize: 11, color: tc.hintColor, marginTop: 4,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            }}>
+              ещё {stats.next_streak_milestone.remaining}д до бонуса +{stats.next_streak_milestone.xp} XP
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -625,6 +690,64 @@ export function ProfileView({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── Weekly Challenges ──────────────────────────────────── */}
+      {challenges && challenges.challenges.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{
+            fontSize: 15, fontWeight: 600, color: tc.textColor,
+            letterSpacing: 0.4, marginBottom: 10,
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} /> Челленджи
+          </div>
+          {challenges.challenges.map((ch) => {
+            const pct = ch.target > 0 ? Math.min(ch.progress / ch.target, 1) : 0;
+            return (
+              <div
+                key={ch.id}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 12px", borderRadius: 12, marginBottom: 6,
+                  background: ch.completed
+                    ? (tc.isTequila ? "rgba(255,143,0,0.08)" : `${accentColor}08`)
+                    : tc.cardBg,
+                  border: tc.cardBorder,
+                  backdropFilter: "blur(16px)",
+                }}
+              >
+                <div style={{ fontSize: 20, flexShrink: 0, filter: ch.completed ? "none" : "grayscale(0.3)" }}>
+                  {ch.icon}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, color: tc.textColor, marginBottom: 4,
+                  }}>
+                    {ch.title.ru || ch.title.en}
+                  </div>
+                  <div style={{
+                    width: "100%", height: 4, borderRadius: 2,
+                    background: "rgba(255,255,255,0.06)",
+                  }}>
+                    <div style={{
+                      width: `${pct * 100}%`, height: "100%", borderRadius: 2,
+                      background: ch.completed ? tc.accentGradient : tc.accentGradient,
+                      transition: "width 0.3s ease",
+                    }} />
+                  </div>
+                </div>
+                <div style={{
+                  fontSize: 10, color: ch.completed ? tc.highlight : tc.hintColor,
+                  flexShrink: 0, textAlign: "right",
+                }}>
+                  <div>{ch.progress}/{ch.target}</div>
+                  <div>+{ch.xp_reward} XP</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -8,16 +8,22 @@ import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconStar, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
 import { ForYouView } from "./components/ForYouView";
 import { ProfileView } from "./components/ProfileView";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { LeaderboardView } from "./components/LeaderboardView";
+import { BattleView } from "./components/BattleView";
+import { ActivityFeedView } from "./components/ActivityFeedView";
+import { WrappedView } from "./components/WrappedView";
+import { SleepSoundsView } from "./components/SleepSoundsView";
+import { ActionSheet } from "./components/ActionSheet";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
 
-type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile";
+type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -226,6 +232,14 @@ export function App() {
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [a2pPlaylists, setA2pPlaylists] = useState<Playlist[]>([]);
   const [a2pAdding, setA2pAdding] = useState<number | null>(null);
+  // ── Radio Mode ──
+  const [radioMode, setRadioMode] = useState(false);
+  const radioSeedRef = useRef<string | null>(null);
+  const radioLoadingRef = useRef(false);
+  const radioPlayedRef = useRef<string[]>([]);
+  // ── Action Sheet ──
+  const [actionSheetTrack, setActionSheetTrack] = useState<Track | null>(null);
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
   const loudnessGainRef = useRef<GainNode | null>(null);
@@ -356,13 +370,22 @@ export function App() {
       const s = stateRef.current;
       const isLastTrack = s.queue.length > 0 && s.position >= s.queue.length - 1;
 
-      if (isLastTrack && autoplayCountRef.current < 3) {
-        // Infinity autoplay: queue exhausted — fetch similar/wave tracks
+      if (isLastTrack && autoplayCountRef.current < (radioMode ? 50 : 3)) {
+        // Infinity autoplay: queue exhausted — fetch more tracks
         autoplayCountRef.current++;
         try {
           const currentId = s.current_track?.video_id;
           let recs: Track[] = [];
-          if (currentId) recs = await fetchSimilar(currentId, 8);
+          if (radioMode && currentId) {
+            // Radio mode: use dedicated radio endpoint with seed
+            const seed = radioSeedRef.current || currentId;
+            recs = await fetchRadioNext(seed, radioPlayedRef.current.slice(-30), 8);
+            if (recs.length > 0) {
+              recs.forEach(t => radioPlayedRef.current.push(t.video_id));
+            }
+          } else if (currentId) {
+            recs = await fetchSimilar(currentId, 8);
+          }
           if (recs.length === 0) recs = await fetchWave(userIdRef.current, 8, null);
           if (recs.length > 0) {
             for (const t of recs) await sendAction("add", t.video_id, undefined, t);
@@ -1654,7 +1677,7 @@ export function App() {
           maxWidth: "100%",
           margin: "0 auto",
         }}>
-          {(["player", "foryou", "playlists", "party", "charts", "search", "profile"] as View[]).map((v) => {
+          {(["player", "foryou", "playlists", "party", "charts", "leaderboard", "battle", "feed", "wrapped", "sleep", "search", "profile"] as View[]).map((v) => {
             const isActive = view === v;
             const isParty = v === "party";
             return (
@@ -1701,7 +1724,7 @@ export function App() {
                   transform: isActive ? "translateY(-1px) scale(1.02)" : "translateY(0) scale(1)",
                 }}
               >
-                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
+                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "leaderboard" ? (<><IconCrown size={13} color="currentColor" /> Рейтинг</>) : v === "battle" ? (<><IconFire size={13} color="currentColor" /> Батл</>) : v === "feed" ? (<><IconHeadphones size={13} color="currentColor" /> Лента</>) : v === "wrapped" ? (<><IconStar size={13} color="currentColor" filled /> Рекап</>) : v === "sleep" ? (<><IconMoon size={13} color="currentColor" /> Sleep</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
               </button>
             );
           })}
@@ -1886,6 +1909,55 @@ export function App() {
                 height={100}
                 style={spectrumStyle}
               />
+            </div>
+          )}
+
+          {/* Radio Mode Toggle */}
+          {state.current_track && (
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+              margin: "8px 0",
+            }}>
+              <button
+                onClick={() => {
+                  try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("medium"); } catch {}
+                  if (!radioMode) {
+                    radioSeedRef.current = state.current_track?.video_id || null;
+                    radioPlayedRef.current = state.current_track ? [state.current_track.video_id] : [];
+                    setRadioMode(true);
+                    showToast("Radio Mode ON — endless similar tracks");
+                  } else {
+                    setRadioMode(false);
+                    radioSeedRef.current = null;
+                    radioPlayedRef.current = [];
+                    showToast("Radio Mode OFF");
+                  }
+                }}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: 16,
+                  border: radioMode
+                    ? (isTequila ? "1px solid rgba(255,213,79,0.4)" : `1px solid ${accentColor}`)
+                    : (isTequila ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(255,255,255,0.08)"),
+                  background: radioMode
+                    ? (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.4), rgba(255,213,79,0.25))" : `linear-gradient(135deg, ${accentColor}, rgba(224,64,251,0.7))`)
+                    : (isTequila ? "rgba(255,213,79,0.05)" : "rgba(255,255,255,0.04)"),
+                  color: radioMode ? "#fff" : theme.hintColor,
+                  fontSize: 13,
+                  fontWeight: radioMode ? 700 : 600,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  transition: "all 0.3s ease",
+                  boxShadow: radioMode
+                    ? (isTequila ? "0 4px 20px rgba(255,143,0,0.3)" : `0 4px 20px ${accentColorAlpha}`)
+                    : "none",
+                }}
+              >
+                <IconRocket size={14} color={radioMode ? "#fff" : theme.hintColor} />
+                {radioMode ? "Radio ON" : "Radio"}
+              </button>
             </div>
           )}
 
@@ -2159,6 +2231,16 @@ export function App() {
 
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
+      {view === "leaderboard" && <LeaderboardView userId={userId} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "battle" && <BattleView userId={userId} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "sleep" && <SleepSoundsView accentColor={accentColor} themeId={theme.id} />}
+
       {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "lyrics" && lyricsTrackId && (
@@ -2215,6 +2297,59 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Action Sheet — context menu for tracks */}
+      <ActionSheet
+        track={actionSheetTrack}
+        visible={actionSheetVisible}
+        onClose={() => setActionSheetVisible(false)}
+        accentColor={accentColor}
+        themeId={theme.id}
+        onAction={(actionId, t) => {
+          switch (actionId) {
+            case "play":
+              action("play", t.video_id, undefined, t);
+              setView("player");
+              break;
+            case "queue":
+              action("add", t.video_id, undefined, t);
+              showToast("Added to queue");
+              break;
+            case "playlist":
+              setShowAddToPlaylist(true);
+              fetchPlaylists(userId).then(setA2pPlaylists).catch(() => {});
+              break;
+            case "similar":
+              fetchSimilar(t.video_id, 10).then(async (similar) => {
+                if (similar.length > 0) {
+                  for (const s of similar) await sendAction("add", s.video_id, undefined, s);
+                  showToast(`Added ${similar.length} similar tracks`);
+                }
+              }).catch(() => {});
+              break;
+            case "radio":
+              radioSeedRef.current = t.video_id;
+              radioPlayedRef.current = [t.video_id];
+              setRadioMode(true);
+              action("play", t.video_id, undefined, t);
+              setView("player");
+              showToast("Radio mode ON");
+              break;
+            case "share": {
+              const text = `${t.title} — ${t.artist}`;
+              const url = `https://t.me/TSmymusicbot_bot/app?startapp=play_${t.video_id}`;
+              try {
+                window.Telegram?.WebApp?.openTelegramLink?.(
+                  `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
+                );
+              } catch {
+                window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, "_blank");
+              }
+              break;
+            }
+          }
+        }}
+      />
 
       {/* Floating Mini-Player (visible when NOT on Player view) */}
       {view !== "player" && state.current_track && (

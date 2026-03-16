@@ -2,23 +2,44 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchPlaylists, fetchPlaylistTracks, createPlaylist, deletePlaylist,
   renamePlaylist, removeTrackFromPlaylist, getStreamUrl,
-  type Playlist, type Track,
+  enableCollab, fetchCollabInfo, disableCollab,
+  type Playlist, type Track, type CollabInfo,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck, IconLink, IconUser, IconFire, IconWave, IconParty, IconMoon, IconBolt, IconHeart, IconStar, IconRocket, IconVinyl, IconCD, IconCase, IconCoverArt } from "./Icons";
 import { showToast } from "./Toast";
 import { downloadPlaylistOffline, countCachedTracks, isPlaylistDownloading, cancelPlaylistDownload } from "../offlineCache";
 import { getThemeById, themeColors } from "../themes";
 
 // ── Preset playlist covers ──
+// SVG icon renderers keyed by cover id
+const COVER_ICONS: Record<string, (size: number) => any> = {
+  fire:   (s) => <IconFire size={s} color="#fff" />,
+  chill:  (s) => <IconWave size={s} color="#fff" />,
+  party:  (s) => <IconParty size={s} color="#fff" />,
+  night:  (s) => <IconMoon size={s} color="#fff" />,
+  energy: (s) => <IconBolt size={s} color="#fff" />,
+  love:   (s) => <IconHeart size={s} color="#fff" filled />,
+  gold:   (s) => <IconStar size={s} color="#fff" filled />,
+  space:  (s) => <IconRocket size={s} color="#fff" />,
+  vinyl:  (s) => <IconVinyl size={s} color="#fff" />,
+  cd:     (s) => <IconCD size={s} color="#fff" />,
+  case_:  (s) => <IconCase size={s} color="#fff" />,
+  cover:  (s) => <IconCoverArt size={s} color="#fff" />,
+};
+
 const PLAYLIST_COVERS = [
-  { id: "fire",   gradient: "linear-gradient(135deg, #ff4444, #ff8800)", icon: "🔥" },
-  { id: "chill",  gradient: "linear-gradient(135deg, #4488ff, #aa44ff)", icon: "🌊" },
-  { id: "party",  gradient: "linear-gradient(135deg, #ff44aa, #ffcc00)", icon: "🎉" },
-  { id: "night",  gradient: "linear-gradient(135deg, #1a1a5e, #6633aa)", icon: "🌙" },
-  { id: "energy", gradient: "linear-gradient(135deg, #22cc66, #00cccc)", icon: "⚡" },
-  { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)", icon: "❤️" },
-  { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)", icon: "✨" },
-  { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)", icon: "🚀" },
+  { id: "fire",   gradient: "linear-gradient(135deg, #ff4444, #ff8800)" },
+  { id: "chill",  gradient: "linear-gradient(135deg, #4488ff, #aa44ff)" },
+  { id: "party",  gradient: "linear-gradient(135deg, #ff44aa, #ffcc00)" },
+  { id: "night",  gradient: "linear-gradient(135deg, #1a1a5e, #6633aa)" },
+  { id: "energy", gradient: "linear-gradient(135deg, #22cc66, #00cccc)" },
+  { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)" },
+  { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)" },
+  { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)" },
+  { id: "vinyl",  gradient: "linear-gradient(135deg, #1a1a1a, #444444)" },
+  { id: "cd",     gradient: "linear-gradient(135deg, #6688cc, #aaccee)" },
+  { id: "case_",  gradient: "linear-gradient(135deg, #334455, #667788)" },
+  { id: "cover",  gradient: "linear-gradient(135deg, #cc5588, #8844aa)" },
 ] as const;
 
 type CoverId = (typeof PLAYLIST_COVERS)[number]["id"];
@@ -40,13 +61,13 @@ function setPlaylistCover(playlistId: number, coverId: CoverId) {
 function CoverPreview({ coverId, size = 42 }: { coverId: CoverId | null; size?: number }) {
   const cover = coverId ? PLAYLIST_COVERS.find((c) => c.id === coverId) : null;
   if (!cover) return null;
+  const renderIcon = COVER_ICONS[cover.id];
   return (
     <div style={{
       width: size, height: size, borderRadius: size > 40 ? 12 : 10, background: cover.gradient,
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.48, lineHeight: 1,
     }}>
-      {cover.icon}
+      {renderIcon ? renderIcon(Math.round(size * 0.48)) : <IconMusic size={Math.round(size * 0.48)} color="#fff" />}
     </div>
   );
 }
@@ -54,21 +75,24 @@ function CoverPreview({ coverId, size = 42 }: { coverId: CoverId | null; size?: 
 function CoverPicker({ selected, onSelect, size = 44 }: { selected: CoverId | null; onSelect: (id: CoverId) => void; size?: number }) {
   return (
     <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
-      {PLAYLIST_COVERS.map((c) => (
-        <div
-          key={c.id}
-          onClick={() => onSelect(c.id)}
-          style={{
-            width: size, height: size, borderRadius: 12, background: c.gradient, flexShrink: 0,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: size * 0.45, lineHeight: 1, cursor: "pointer",
-            outline: selected === c.id ? "2px solid #fff" : "2px solid transparent",
-            outlineOffset: 2, transition: "outline 0.15s ease",
-          }}
-        >
-          {c.icon}
-        </div>
-      ))}
+      {PLAYLIST_COVERS.map((c) => {
+        const renderIcon = COVER_ICONS[c.id];
+        return (
+          <div
+            key={c.id}
+            onClick={() => onSelect(c.id)}
+            style={{
+              width: size, height: size, borderRadius: 12, background: c.gradient, flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+              outline: selected === c.id ? "2px solid #fff" : "2px solid transparent",
+              outlineOffset: 2, transition: "outline 0.15s ease",
+            }}
+          >
+            {renderIcon ? renderIcon(Math.round(size * 0.45)) : <IconMusic size={Math.round(size * 0.45)} color="#fff" />}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -108,6 +132,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
   const [cachedCount, setCachedCount] = useState(0);
   const [showCoverPicker, setShowCoverPicker] = useState(false);
   const [detailCover, setDetailCover] = useState<CoverId | null>(null);
+  const [collabInfo, setCollabInfo] = useState<CollabInfo | null>(null);
+  const [collabLoading, setCollabLoading] = useState(false);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -123,10 +149,13 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
     if (selectedId !== null) {
       setLoading(true);
       setDetailCover(getPlaylistCover(selectedId));
+      setCollabInfo(null);
       fetchPlaylistTracks(selectedId)
         .then(setTracks)
         .catch(() => {})
         .finally(() => setLoading(false));
+      // Load collab info (non-blocking)
+      fetchCollabInfo(selectedId).then(setCollabInfo).catch(() => {});
     }
   }, [selectedId]);
 
@@ -356,6 +385,112 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
         {dlProgress?.current && (
           <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             Скачивание: {dlProgress.current}...
+          </div>
+        )}
+
+        {/* Collab section */}
+        {selectedId && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
+            padding: "10px 12px", borderRadius: 14,
+            background: tc.cardBg, border: tc.cardBorder,
+          }}>
+            <IconUser size={16} color={collabInfo?.enabled ? tc.highlight : tc.hintColor} />
+            {collabInfo?.enabled ? (
+              <>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: tc.highlight }}>
+                    Совместный · {collabInfo.member_count} чел.
+                  </div>
+                  {collabInfo.invite_code && (
+                    <div style={{ fontSize: 10, color: tc.hintColor, marginTop: 2 }}>
+                      Код: {collabInfo.invite_code}
+                    </div>
+                  )}
+                </div>
+                {collabInfo.invite_code && (
+                  <button
+                    onClick={() => {
+                      haptic("light");
+                      const code = collabInfo?.invite_code;
+                      if (!code) return;
+                      const url = `https://t.me/TSmymusicbot_bot/app?startapp=collab_${code}`;
+                      try {
+                        window.Telegram?.WebApp?.openTelegramLink?.(
+                          `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(`Присоединяйся к плейлисту "${selectedName}"! 🎵`)}`
+                        );
+                      } catch {
+                        navigator.clipboard?.writeText(code);
+                        showToast("Код скопирован!");
+                      }
+                    }}
+                    style={{
+                      padding: "6px 12px", borderRadius: 10, border: "none",
+                      background: tc.activeBg, color: tc.highlight,
+                      fontSize: 11, fontWeight: 600, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}
+                  >
+                    <IconLink size={12} color={tc.highlight} /> Пригласить
+                  </button>
+                )}
+                {collabInfo.is_owner && (
+                  <button
+                    onClick={async () => {
+                      haptic("medium");
+                      setCollabLoading(true);
+                      try {
+                        await disableCollab(selectedId);
+                        setCollabInfo({ ...collabInfo, enabled: false });
+                        showToast("Совместный доступ отключён");
+                      } catch {}
+                      setCollabLoading(false);
+                    }}
+                    disabled={collabLoading}
+                    style={{
+                      padding: "6px 10px", borderRadius: 10, border: "none",
+                      background: "rgba(239,83,80,0.15)", color: "#ef5350",
+                      fontSize: 11, cursor: "pointer",
+                    }}
+                  >
+                    <IconClose size={12} />
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ flex: 1, fontSize: 12, color: tc.hintColor }}>
+                  Совместный доступ
+                </div>
+                <button
+                  onClick={async () => {
+                    haptic("medium");
+                    setCollabLoading(true);
+                    try {
+                      const res = await enableCollab(selectedId);
+                      setCollabInfo({
+                        enabled: true,
+                        invite_code: res.invite_code,
+                        member_count: 1,
+                        is_member: true,
+                        is_owner: true,
+                      });
+                      showToast("Совместный доступ включён!");
+                    } catch {}
+                    setCollabLoading(false);
+                  }}
+                  disabled={collabLoading}
+                  style={{
+                    padding: "6px 14px", borderRadius: 10, border: "none",
+                    background: tc.activeBg, color: tc.highlight,
+                    fontSize: 11, fontWeight: 600, cursor: "pointer",
+                    opacity: collabLoading ? 0.5 : 1,
+                  }}
+                >
+                  {collabLoading ? <IconSpinner size={12} color={tc.highlight} /> : "Включить"}
+                </button>
+              </>
+            )}
           </div>
         )}
 
