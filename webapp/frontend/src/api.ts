@@ -606,6 +606,23 @@ export async function fetchWrapped(): Promise<WrappedData> {
   return r.json();
 }
 
+// ── Smart Playlists (auto-generated) ──────────────────────────────────
+
+export interface SmartPlaylist {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  tracks: Track[];
+}
+
+export async function fetchSmartPlaylists(): Promise<SmartPlaylist[]> {
+  const r = await fetchWithRetry(`${API_BASE}/smart-playlists`, { headers: getHeaders(), retries: 1, timeout: 8000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.playlists;
+}
+
 export async function fetchFavoritesList(): Promise<Track[]> {
   const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
   if (!r.ok) return [];

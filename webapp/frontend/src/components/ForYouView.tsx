@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
-import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, type Track } from "../api";
+import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, type Track, type SmartPlaylist } from "../api";
 import { getThemeById, themeColors } from "../themes";
-import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar } from "./Icons";
+import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar, IconHeart, IconMoon, IconDiscover, IconChart } from "./Icons";
 
 interface Props {
   userId: number;
@@ -44,6 +44,10 @@ export function ForYouView({
 
   // --- Track of the Day ---
   const [todTrack, setTodTrack] = useState<Track | null>(null);
+
+  // --- Smart Playlists ---
+  const [smartPlaylists, setSmartPlaylists] = useState<SmartPlaylist[]>([]);
+  const [smartExpanded, setSmartExpanded] = useState<string | null>(null);
 
   // --- Pull-to-refresh ---
   const [refreshing, setRefreshing] = useState(false);
@@ -101,9 +105,10 @@ export function ForYouView({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(false);
 
-  // --- Fetch Track of Day ---
+  // --- Fetch Track of Day + Smart Playlists ---
   useEffect(() => {
     fetchTrackOfDay().then(setTodTrack).catch(() => {});
+    fetchSmartPlaylists().then(setSmartPlaylists).catch(() => {});
   }, []);
 
   // --- Fetch wave ---
@@ -609,6 +614,114 @@ export function ForYouView({
           </div>
         )}
       </div>
+
+      {/* ===== Smart Playlists Section ===== */}
+      {smartPlaylists.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="Smart Playlists" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {smartPlaylists.map((sp) => {
+              const isExpanded = smartExpanded === sp.id;
+              const iconMap: Record<string, any> = {
+                fire: <IconFire size={18} color="#fff" />,
+                heart: <IconHeart size={18} color="#fff" filled />,
+                discover: <IconDiscover size={18} color="#fff" />,
+                moon: <IconMoon size={18} color="#fff" />,
+              };
+              const gradientMap: Record<string, string> = {
+                fire: "linear-gradient(135deg, #ff4444, #ff8800)",
+                heart: "linear-gradient(135deg, #ee2244, #ff66aa)",
+                discover: "linear-gradient(135deg, #22cc66, #00cccc)",
+                moon: "linear-gradient(135deg, #1a1a5e, #6633aa)",
+              };
+              return (
+                <div key={sp.id} style={{
+                  borderRadius: 16, border: tc.cardBorder,
+                  background: tc.cardBg, overflow: "hidden",
+                  backdropFilter: "blur(16px)",
+                }}>
+                  <div
+                    onClick={() => {
+                      haptic("light");
+                      setSmartExpanded(isExpanded ? null : sp.id);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "12px 14px", cursor: "pointer",
+                    }}
+                  >
+                    <div style={{
+                      width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+                      background: gradientMap[sp.icon] || tc.accentGradient,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {iconMap[sp.icon] || <IconMusicNote size={18} color="#fff" />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: tc.textColor }}>{sp.name}</div>
+                      <div style={{ fontSize: 12, color: tc.hintColor }}>{sp.description} &middot; {sp.tracks.length} tracks</div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        haptic("medium");
+                        handlePlayAll(sp.tracks);
+                      }}
+                      style={{
+                        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                        background: tc.activeBg, border: "none",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <IconPlaySmall size={14} color={tc.highlight} />
+                    </button>
+                  </div>
+                  {isExpanded && (
+                    <div style={{ padding: "0 8px 8px" }}>
+                      {sp.tracks.slice(0, 10).map((t, i) => (
+                        <div
+                          key={t.video_id}
+                          onClick={() => handlePlayTrack(t)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            padding: "8px 8px", borderRadius: 10,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 700, color: tc.hintColor, width: 20, textAlign: "center" }}>{i + 1}</span>
+                          <div style={{
+                            width: 36, height: 36, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+                            background: tc.coverPlaceholderBg,
+                          }}>
+                            {t.cover_url ? (
+                              <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ) : (
+                              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                <IconMusicNote size={14} color={tc.hintColor} />
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 500, color: tc.textColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                            <div style={{ fontSize: 11, color: tc.hintColor }}>{t.artist}</div>
+                          </div>
+                          <IconPlaySmall size={12} color={tc.hintColor} />
+                        </div>
+                      ))}
+                      {sp.tracks.length > 10 && (
+                        <div style={{ textAlign: "center", padding: "6px 0", fontSize: 12, color: tc.hintColor }}>
+                          +{sp.tracks.length - 10} more
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

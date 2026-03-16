@@ -15,6 +15,7 @@ import { LeaderboardView } from "./components/LeaderboardView";
 import { BattleView } from "./components/BattleView";
 import { ActivityFeedView } from "./components/ActivityFeedView";
 import { WrappedView } from "./components/WrappedView";
+import { SleepSoundsView } from "./components/SleepSoundsView";
 import { ActionSheet } from "./components/ActionSheet";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
@@ -22,7 +23,7 @@ import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCac
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
 
-type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped";
+type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -1676,7 +1677,7 @@ export function App() {
           maxWidth: "100%",
           margin: "0 auto",
         }}>
-          {(["player", "foryou", "playlists", "party", "charts", "leaderboard", "battle", "feed", "wrapped", "search", "profile"] as View[]).map((v) => {
+          {(["player", "foryou", "playlists", "party", "charts", "leaderboard", "battle", "feed", "wrapped", "sleep", "search", "profile"] as View[]).map((v) => {
             const isActive = view === v;
             const isParty = v === "party";
             return (
@@ -1723,7 +1724,7 @@ export function App() {
                   transform: isActive ? "translateY(-1px) scale(1.02)" : "translateY(0) scale(1)",
                 }}
               >
-                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "leaderboard" ? (<><IconCrown size={13} color="currentColor" /> Рейтинг</>) : v === "battle" ? (<><IconFire size={13} color="currentColor" /> Батл</>) : v === "feed" ? (<><IconHeadphones size={13} color="currentColor" /> Лента</>) : v === "wrapped" ? (<><IconStar size={13} color="currentColor" filled /> Рекап</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
+                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "leaderboard" ? (<><IconCrown size={13} color="currentColor" /> Рейтинг</>) : v === "battle" ? (<><IconFire size={13} color="currentColor" /> Батл</>) : v === "feed" ? (<><IconHeadphones size={13} color="currentColor" /> Лента</>) : v === "wrapped" ? (<><IconStar size={13} color="currentColor" filled /> Рекап</>) : v === "sleep" ? (<><IconMoon size={13} color="currentColor" /> Sleep</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
               </button>
             );
           })}
@@ -2237,6 +2238,8 @@ export function App() {
       {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "sleep" && <SleepSoundsView accentColor={accentColor} themeId={theme.id} />}
 
       {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
