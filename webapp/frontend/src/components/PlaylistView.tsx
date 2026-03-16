@@ -5,7 +5,7 @@ import {
   enableCollab, fetchCollabInfo, disableCollab,
   type Playlist, type Track, type CollabInfo,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck, IconLink, IconUser, IconFire, IconWave, IconParty, IconMoon, IconBolt, IconHeart, IconStar, IconRocket } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck, IconLink, IconUser, IconFire, IconWave, IconParty, IconMoon, IconBolt, IconHeart, IconStar, IconRocket, IconVinyl, IconCD, IconCase, IconCoverArt } from "./Icons";
 import { showToast } from "./Toast";
 import { downloadPlaylistOffline, countCachedTracks, isPlaylistDownloading, cancelPlaylistDownload } from "../offlineCache";
 import { getThemeById, themeColors } from "../themes";
@@ -21,6 +21,10 @@ const COVER_ICONS: Record<string, (size: number) => any> = {
   love:   (s) => <IconHeart size={s} color="#fff" filled />,
   gold:   (s) => <IconStar size={s} color="#fff" filled />,
   space:  (s) => <IconRocket size={s} color="#fff" />,
+  vinyl:  (s) => <IconVinyl size={s} color="#fff" />,
+  cd:     (s) => <IconCD size={s} color="#fff" />,
+  case_:  (s) => <IconCase size={s} color="#fff" />,
+  cover:  (s) => <IconCoverArt size={s} color="#fff" />,
 };
 
 const PLAYLIST_COVERS = [
@@ -32,6 +36,10 @@ const PLAYLIST_COVERS = [
   { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)" },
   { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)" },
   { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)" },
+  { id: "vinyl",  gradient: "linear-gradient(135deg, #1a1a1a, #444444)" },
+  { id: "cd",     gradient: "linear-gradient(135deg, #6688cc, #aaccee)" },
+  { id: "case_",  gradient: "linear-gradient(135deg, #334455, #667788)" },
+  { id: "cover",  gradient: "linear-gradient(135deg, #cc5588, #8844aa)" },
 ] as const;
 
 type CoverId = (typeof PLAYLIST_COVERS)[number]["id"];
