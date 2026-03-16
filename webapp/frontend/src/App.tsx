@@ -11,13 +11,14 @@ import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
 import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
 import { ForYouView } from "./components/ForYouView";
 import { ProfileView } from "./components/ProfileView";
+import { LeaderboardView } from "./components/LeaderboardView";
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
 
-type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile";
+type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -1654,7 +1655,7 @@ export function App() {
           maxWidth: "100%",
           margin: "0 auto",
         }}>
-          {(["player", "foryou", "playlists", "party", "charts", "search", "profile"] as View[]).map((v) => {
+          {(["player", "foryou", "playlists", "party", "charts", "leaderboard", "search", "profile"] as View[]).map((v) => {
             const isActive = view === v;
             const isParty = v === "party";
             return (
@@ -1701,7 +1702,7 @@ export function App() {
                   transform: isActive ? "translateY(-1px) scale(1.02)" : "translateY(0) scale(1)",
                 }}
               >
-                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
+                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "leaderboard" ? (<><IconCrown size={13} color="currentColor" /> Рейтинг</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
               </button>
             );
           })}
@@ -2158,6 +2159,8 @@ export function App() {
       {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "leaderboard" && <LeaderboardView userId={userId} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 

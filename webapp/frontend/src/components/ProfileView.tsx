@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import type { Track } from "../api";
-import { fetchFavoritesList } from "../api";
+import { fetchFavoritesList, fetchChallenges, type ChallengesData } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
   IconCrown, IconFire, IconMusicNote, IconChart, IconPlaySmall,
@@ -132,6 +132,7 @@ export function ProfileView({
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [showAllFavs, setShowAllFavs] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [challenges, setChallenges] = useState<ChallengesData | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -168,6 +169,7 @@ export function ProfileView({
       .catch(() => setError(true))
       .finally(() => { clearTimeout(timer); setLoading(false); });
     fetchFavoritesList().then(setFavorites).catch(() => {});
+    fetchChallenges(userId).then(setChallenges).catch(() => {});
     return () => { ctrl.abort(); clearTimeout(timer); };
   }, [userId]);
 
@@ -563,6 +565,64 @@ export function ProfileView({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── Weekly Challenges ──────────────────────────────────── */}
+      {challenges && challenges.challenges.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{
+            fontSize: 15, fontWeight: 600, color: tc.textColor,
+            letterSpacing: 0.4, marginBottom: 10,
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} /> Челленджи
+          </div>
+          {challenges.challenges.map((ch) => {
+            const pct = ch.target > 0 ? Math.min(ch.progress / ch.target, 1) : 0;
+            return (
+              <div
+                key={ch.id}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 12px", borderRadius: 12, marginBottom: 6,
+                  background: ch.completed
+                    ? (tc.isTequila ? "rgba(255,143,0,0.08)" : `${accentColor}08`)
+                    : tc.cardBg,
+                  border: tc.cardBorder,
+                  backdropFilter: "blur(16px)",
+                }}
+              >
+                <div style={{ fontSize: 20, flexShrink: 0, filter: ch.completed ? "none" : "grayscale(0.3)" }}>
+                  {ch.icon}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, color: tc.textColor, marginBottom: 4,
+                  }}>
+                    {ch.title.ru || ch.title.en}
+                  </div>
+                  <div style={{
+                    width: "100%", height: 4, borderRadius: 2,
+                    background: "rgba(255,255,255,0.06)",
+                  }}>
+                    <div style={{
+                      width: `${pct * 100}%`, height: "100%", borderRadius: 2,
+                      background: ch.completed ? tc.accentGradient : tc.accentGradient,
+                      transition: "width 0.3s ease",
+                    }} />
+                  </div>
+                </div>
+                <div style={{
+                  fontSize: 10, color: ch.completed ? tc.highlight : tc.hintColor,
+                  flexShrink: 0, textAlign: "right",
+                }}>
+                  <div>{ch.progress}/{ch.target}</div>
+                  <div>+{ch.xp_reward} XP</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

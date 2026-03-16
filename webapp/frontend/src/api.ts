@@ -402,6 +402,51 @@ export async function fetchUserStats(userId: number): Promise<UserStats> {
   return r.json();
 }
 
+// ── Leaderboard & Challenges ────────────────────────────────────────────
+
+export interface LeaderboardEntry {
+  user_id: number;
+  name: string;
+  score: number;
+  level: number;
+}
+
+export interface LeaderboardData {
+  entries: LeaderboardEntry[];
+  my_rank: number | null;
+  my_xp: number;
+  my_level: number;
+  period: string;
+}
+
+export async function fetchLeaderboard(period: "weekly" | "alltime" = "weekly"): Promise<LeaderboardData> {
+  const r = await fetchWithRetry(`${API_BASE}/leaderboard/${period}`, { headers: getHeaders(), retries: 1 });
+  if (!r.ok) throw new Error("Failed to fetch leaderboard");
+  return r.json();
+}
+
+export interface Challenge {
+  id: string;
+  title: Record<string, string>;
+  icon: string;
+  target: number;
+  progress: number;
+  completed: boolean;
+  xp_reward: number;
+}
+
+export interface ChallengesData {
+  challenges: Challenge[];
+  week: string;
+  week_end: string;
+}
+
+export async function fetchChallenges(userId: number): Promise<ChallengesData> {
+  const r = await fetchWithRetry(`${API_BASE}/challenges/${userId}`, { headers: getHeaders(), retries: 1 });
+  if (!r.ok) throw new Error("Failed to fetch challenges");
+  return r.json();
+}
+
 export async function fetchFavoritesList(): Promise<Track[]> {
   const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
   if (!r.ok) return [];

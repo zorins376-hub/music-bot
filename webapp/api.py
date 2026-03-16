@@ -2198,6 +2198,70 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
         return _defaults
 
 
+# ── Leaderboard ────────────────────────────────────────────────────────────
+
+@app.get("/api/leaderboard/{period}")
+async def leaderboard(period: str = "weekly", user: dict = Depends(get_current_user)):
+    """Get leaderboard (weekly or alltime). Returns top 50 + user's rank."""
+    if period not in ("weekly", "alltime"):
+        period = "weekly"
+    try:
+        from bot.services.leaderboard import get_leaderboard, get_user_rank
+        from bot.models.base import async_session
+        from bot.models.user import User
+        from sqlalchemy import select
+
+        user_id = user.get("id", 0)
+        entries = await get_leaderboard(period, limit=50)
+        my_rank = await get_user_rank(user_id, period)
+
+        # Fetch names for top users
+        user_ids = [uid for uid, _ in entries[:50]]
+        names: dict[int, dict] = {}
+        if user_ids:
+            async with async_session() as session:
+                result = await session.execute(
+                    select(User.id, User.first_name, User.username, User.level, User.xp)
+                    .where(User.id.in_(user_ids))
+                )
+                for row in result.all():
+                    names[row[0]] = {
+                        "name": row[1] or row[2] or str(row[0]),
+                        "level": row[3] or 1,
+                        "xp": row[4] or 0,
+                    }
+
+        board = []
+        for rank, (uid, score) in enumerate(entries, 1):
+            info = names.get(uid, {"name": str(uid), "level": 1, "xp": 0})
+            board.append({
+                "rank": rank,
+                "user_id": uid,
+                "name": info["name"],
+                "level": info["level"],
+                "xp": info["xp"],
+                "score": int(score),
+            })
+
+        return {"period": period, "entries": board, "my_rank": my_rank}
+    except Exception as exc:
+        logger.error("Leaderboard failed: %s", exc)
+        return {"period": period, "entries": [], "my_rank": None}
+
+
+# ── Weekly Challenges ──────────────────────────────────────────────────────
+
+@app.get("/api/challenges/{user_id}")
+async def user_challenges(user_id: int, user: dict = Depends(get_current_user)):
+    """Get active weekly challenges and user's progress."""
+    try:
+        from bot.services.challenges import get_user_challenges
+        return await get_user_challenges(user_id)
+    except Exception as exc:
+        logger.error("Challenges failed for user %s: %s", user_id, exc)
+        return {"challenges": [], "week": ""}
+
+
 # ── Queue Reorder ────────────────────────────────────────────────────────
 
 class ReorderRequest(BaseModel):
