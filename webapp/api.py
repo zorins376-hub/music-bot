@@ -2128,71 +2128,105 @@ async def list_favorites(user: dict = Depends(get_current_user)):
 
 @app.get("/api/stats/{user_id}")
 async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
-    """Listening statistics for profile page."""
+    """Listening statistics for profile page (4s hard timeout)."""
     _defaults = {
         "total_plays": 0, "total_time": 0, "total_favorites": 0,
         "top_artists": [], "top_genres": [], "recent_tracks": [],
         "xp": 0, "level": 1, "streak_days": 0, "badges": [], "member_since": None,
     }
-    try:
+
+    async def _fetch_stats():
         from bot.models.base import async_session
+        from sqlalchemy import select, func
+        from bot.models.track import ListeningHistory, Track
+        from bot.models.user import User
+
+        result = dict(_defaults)
+
         async with async_session() as session:
-            from sqlalchemy import select, func
-            from bot.models.track import ListeningHistory, Track
-            from bot.models.user import User
-            from bot.models.favorite import FavoriteTrack
+            # Each query isolated — if one fails, others still return data
+            try:
+                total_plays = (await session.execute(
+                    select(func.count()).where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                )).scalar() or 0
+                result["total_plays"] = total_plays
+            except Exception as e:
+                logger.warning("Stats: total_plays query failed for %s: %s", user_id, e)
 
-            total_plays = (await session.execute(
-                select(func.count()).where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
-            )).scalar() or 0
+            try:
+                total_time = (await session.execute(
+                    select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                )).scalar() or 0
+                result["total_time"] = total_time
+            except Exception as e:
+                logger.warning("Stats: total_time query failed for %s: %s", user_id, e)
 
-            total_time = (await session.execute(
-                select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
-            )).scalar() or 0
+            try:
+                from bot.models.favorite import FavoriteTrack
+                total_favs = (await session.execute(
+                    select(func.count()).where(FavoriteTrack.user_id == user_id)
+                )).scalar() or 0
+                result["total_favorites"] = total_favs
+            except Exception as e:
+                logger.warning("Stats: total_favorites query failed for %s: %s", user_id, e)
 
-            total_favs = (await session.execute(
-                select(func.count()).where(FavoriteTrack.user_id == user_id)
-            )).scalar() or 0
+            try:
+                top_artists_q = await session.execute(
+                    select(Track.artist, func.count().label("cnt"))
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.artist.isnot(None))
+                    .group_by(Track.artist).order_by(func.count().desc()).limit(10)
+                )
+                result["top_artists"] = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+            except Exception as e:
+                logger.warning("Stats: top_artists query failed for %s: %s", user_id, e)
 
-            top_artists_q = await session.execute(
-                select(Track.artist, func.count().label("cnt"))
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.artist.isnot(None))
-                .group_by(Track.artist).order_by(func.count().desc()).limit(10)
-            )
-            top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+            try:
+                top_genres_q = await session.execute(
+                    select(Track.genre, func.count().label("cnt"))
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.genre.isnot(None))
+                    .group_by(Track.genre).order_by(func.count().desc()).limit(5)
+                )
+                result["top_genres"] = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+            except Exception as e:
+                logger.warning("Stats: top_genres query failed for %s: %s", user_id, e)
 
-            top_genres_q = await session.execute(
-                select(Track.genre, func.count().label("cnt"))
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", Track.genre.isnot(None))
-                .group_by(Track.genre).order_by(func.count().desc()).limit(5)
-            )
-            top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+            try:
+                recent_q = await session.execute(
+                    select(Track.source_id, Track.title, Track.artist, Track.duration, Track.cover_url, ListeningHistory.created_at)
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                    .order_by(ListeningHistory.created_at.desc()).limit(20)
+                )
+                result["recent_tracks"] = [{
+                    "video_id": r[0], "title": r[1], "artist": r[2],
+                    "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
+                    "cover_url": r[4], "source": "db",
+                } for r in recent_q.all()]
+            except Exception as e:
+                logger.warning("Stats: recent_tracks query failed for %s: %s", user_id, e)
 
-            recent_q = await session.execute(
-                select(Track.source_id, Track.title, Track.artist, Track.duration, Track.cover_url, ListeningHistory.created_at)
-                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
-                .order_by(ListeningHistory.created_at.desc()).limit(20)
-            )
-            recent = [{
-                "video_id": r[0], "title": r[1], "artist": r[2],
-                "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
-                "cover_url": r[4], "source": "db",
-            } for r in recent_q.all()]
+            try:
+                u = (await session.execute(select(User).where(User.id == user_id))).scalar()
+                if u:
+                    result["xp"] = u.xp
+                    result["level"] = u.level
+                    result["streak_days"] = u.streak_days
+                    result["badges"] = u.badges or []
+                    result["member_since"] = u.created_at.isoformat() if u.created_at else None
+            except Exception as e:
+                logger.warning("Stats: user query failed for %s: %s", user_id, e)
 
-            u = (await session.execute(select(User).where(User.id == user_id))).scalar()
+        return result
 
-            return {
-                "total_plays": total_plays, "total_time": total_time, "total_favorites": total_favs,
-                "top_artists": top_artists, "top_genres": top_genres, "recent_tracks": recent,
-                "xp": u.xp if u else 0, "level": u.level if u else 1,
-                "streak_days": u.streak_days if u else 0,
-                "badges": (u.badges or []) if u else [],
-                "member_since": u.created_at.isoformat() if u and u.created_at else None,
-            }
+    try:
+        import asyncio
+        return await asyncio.wait_for(_fetch_stats(), timeout=4.0)
+    except asyncio.TimeoutError:
+        logger.error("Stats endpoint TIMEOUT (4s) for user %s", user_id)
+        return _defaults
     except Exception as exc:
         logger.error("Stats endpoint failed for user %s: %s", user_id, exc)
         return _defaults

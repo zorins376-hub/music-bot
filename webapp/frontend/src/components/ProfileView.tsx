@@ -151,6 +151,7 @@ export function ProfileView({
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [showAllFavs, setShowAllFavs] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -177,14 +178,14 @@ export function ProfileView({
 
     setLoading(true);
     setError(false);
-    let settled = false;
+    let cancelled = false;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000); // 10s timeout
+    const timer = setTimeout(() => ctrl.abort(), 5000); // 5s fetch timeout
 
-    // Defensive fallback: force loading=false after 12s no matter what
+    // Hard fallback: force loading=false after 6s no matter what
     const fallback = setTimeout(() => {
-      if (!settled) { settled = true; setLoading(false); setError(true); }
-    }, 12000);
+      if (!cancelled) { cancelled = true; setLoading(false); setError(true); }
+    }, 6000);
 
     fetch(`/api/stats/${userId}`, {
       headers: {
@@ -197,12 +198,12 @@ export function ProfileView({
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: UserStats) => { if (!settled) setStats(data); })
-      .catch(() => { if (!settled) setError(true); })
-      .finally(() => { settled = true; clearTimeout(timer); clearTimeout(fallback); setLoading(false); });
-    fetchFavoritesList().then(setFavorites).catch(() => {});
-    return () => { ctrl.abort(); clearTimeout(timer); clearTimeout(fallback); };
-  }, [userId]);
+      .then((data: UserStats) => { if (!cancelled) setStats(data); })
+      .catch(() => { if (!cancelled) setError(true); })
+      .finally(() => { cancelled = true; clearTimeout(timer); clearTimeout(fallback); setLoading(false); });
+    fetchFavoritesList().then((f) => { if (!cancelled) setFavorites(f); }).catch(() => {});
+    return () => { cancelled = true; ctrl.abort(); clearTimeout(timer); clearTimeout(fallback); };
+  }, [userId, retryCount]);
 
   // ── Avatar upload handler ────────────────────────────────────────────
 
@@ -235,6 +236,15 @@ export function ProfileView({
     input.value = "";
   };
 
+  // Retry handler
+  const retry = () => {
+    setError(false);
+    setLoading(true);
+    setStats(null);
+    // Force re-run useEffect by toggling a dummy state
+    setRetryCount((c) => c + 1);
+  };
+
   // ── Loading / error states ──────────────────────────────────────────
 
   if (loading) {
@@ -249,6 +259,18 @@ export function ProfileView({
     return (
       <div style={{ textAlign: "center", padding: 64, color: tc.hintColor, fontSize: 14 }}>
         Не удалось загрузить профиль
+        <div style={{ marginTop: 16 }}>
+          <button
+            onClick={retry}
+            style={{
+              padding: "8px 24px", borderRadius: 12, border: "none",
+              background: tc.accentGradient, color: "#fff",
+              fontSize: 14, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Повторить
+          </button>
+        </div>
       </div>
     );
   }
