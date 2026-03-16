@@ -1273,7 +1273,7 @@ async def get_playlists(user_id: int, user: dict = Depends(get_current_user)):
     if user.get("id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    from sqlalchemy import select, func, not_, or_
+    from sqlalchemy import select, func
     from bot.models.base import async_session
     from bot.models.playlist import Playlist, PlaylistTrack
 
@@ -1285,12 +1285,7 @@ async def get_playlists(user_id: int, user: dict = Depends(get_current_user)):
                 func.count(PlaylistTrack.id).label("cnt"),
             )
             .outerjoin(PlaylistTrack, PlaylistTrack.playlist_id == Playlist.id)
-            .where(
-                Playlist.user_id == user_id,
-                # Hide auto-saved chart / daily-mix playlists
-                not_(Playlist.name.like("Chart %")),
-                not_(Playlist.name.like("Daily Mix %")),
-            )
+            .where(Playlist.user_id == user_id)
             .group_by(Playlist.id)
             .order_by(Playlist.created_at.desc())
         )
