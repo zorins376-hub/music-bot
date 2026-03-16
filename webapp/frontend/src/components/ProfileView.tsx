@@ -10,6 +10,12 @@ import {
 
 // ── Types ───────────────────────────────────────────────────────────────
 
+interface StreakMilestone {
+  days: number;
+  xp: number;
+  remaining: number;
+}
+
 interface UserStats {
   total_plays: number;
   total_time: number; // seconds
@@ -22,6 +28,7 @@ interface UserStats {
   streak_days: number;
   badges: string[];
   member_since: string | null;
+  next_streak_milestone?: StreakMilestone | null;
 }
 
 interface Props {
@@ -368,15 +375,25 @@ export function ProfileView({
         </div>
       </div>
 
-      {/* Streak */}
+      {/* Streak + next milestone */}
       {stats.streak_days > 0 && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 4,
-          marginTop: 12, fontSize: 13, fontWeight: 600,
-          color: tc.isTequila ? "#ffab40" : "#ff7043",
-        }}>
-          <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} />
-          {stats.streak_days} дней подряд
+        <div style={{ marginTop: 12, textAlign: "center" }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            fontSize: 13, fontWeight: 600,
+            color: tc.isTequila ? "#ffab40" : "#ff7043",
+          }}>
+            <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} />
+            {stats.streak_days} дней подряд
+          </div>
+          {stats.next_streak_milestone && (
+            <div style={{
+              fontSize: 11, color: tc.hintColor, marginTop: 4,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            }}>
+              ещё {stats.next_streak_milestone.remaining}д до бонуса +{stats.next_streak_milestone.xp} XP
+            </div>
+          )}
         </div>
       )}
     </div>

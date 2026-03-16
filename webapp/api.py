@@ -1658,6 +1658,176 @@ async def track_of_day(user: dict = Depends(get_current_user)):
     return track_data or {}
 
 
+# ── Story Cards API ──────────────────────────────────────────────────────
+
+@app.get("/api/story-card/{video_id}")
+async def get_story_card(video_id: str, user: dict = Depends(get_current_user)):
+    """Generate a shareable story card image for a track."""
+    from bot.services.story_cards import generate_track_card
+    import httpx
+
+    # Resolve track info
+    title, artist, duration_fmt, cover_bytes = "Unknown", "Unknown", "", None
+    try:
+        from bot.models.base import async_session
+        from bot.models.track import Track
+        from sqlalchemy import select
+        async with async_session() as session:
+            q = await session.execute(select(Track).where(Track.source_id == video_id).limit(1))
+            t = q.scalar_one_or_none()
+            if t:
+                title = t.title or title
+                artist = t.artist or artist
+                dur = t.duration or 0
+                duration_fmt = f"{dur // 60}:{dur % 60:02d}"
+                if t.cover_url:
+                    try:
+                        async with httpx.AsyncClient(timeout=5) as client:
+                            resp = await client.get(t.cover_url)
+                            if resp.status_code == 200:
+                                cover_bytes = resp.content
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    png_bytes = generate_track_card(artist, title, video_id, duration_fmt, cover_bytes)
+    if not png_bytes:
+        raise HTTPException(status_code=500, detail="Story card generation failed")
+
+    from starlette.responses import Response
+    return Response(content=png_bytes, media_type="image/png",
+                    headers={"Content-Disposition": f'inline; filename="story_{video_id}.png"'})
+
+
+# ── Music Battles API ───────────────────────────────────────────────────
+
+import random as _random
+
+@app.post("/api/battle/start")
+async def start_battle(user: dict = Depends(get_current_user)):
+    """Start a music quiz battle — returns 5 rounds with audio snippets and 4 answer choices."""
+    from bot.models.base import async_session
+    from bot.models.track import Track
+    from sqlalchemy import select, func
+
+    async with async_session() as session:
+        # Get random tracks that have audio
+        q = await session.execute(
+            select(Track).where(Track.downloads > 0, Track.title.isnot(None), Track.artist.isnot(None))
+            .order_by(func.random()).limit(50)
+        )
+        all_tracks = q.scalars().all()
+
+    if len(all_tracks) < 8:
+        raise HTTPException(status_code=400, detail="Not enough tracks for a battle")
+
+    rounds = []
+    used = set()
+    for i in range(min(5, len(all_tracks) // 4)):
+        # Pick correct answer
+        correct = None
+        for t in all_tracks:
+            if t.source_id not in used:
+                correct = t
+                used.add(t.source_id)
+                break
+        if not correct:
+            break
+
+        # Pick 3 wrong answers
+        wrong = [t for t in all_tracks if t.source_id not in used and t.source_id != correct.source_id]
+        _random.shuffle(wrong)
+        wrong = wrong[:3]
+        for w in wrong:
+            used.add(w.source_id)
+
+        options = [{"title": correct.title, "artist": correct.artist, "video_id": correct.source_id}]
+        for w in wrong:
+            options.append({"title": w.title, "artist": w.artist, "video_id": w.source_id})
+        _random.shuffle(options)
+
+        correct_idx = next(i for i, o in enumerate(options) if o["video_id"] == correct.source_id)
+
+        rounds.append({
+            "round": i + 1,
+            "stream_id": correct.source_id,
+            "correct_idx": correct_idx,
+            "options": options,
+            "cover_url": correct.cover_url,
+        })
+
+    return {"rounds": rounds, "total": len(rounds)}
+
+
+@app.post("/api/battle/score")
+async def submit_battle_score(
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Submit battle score — awards XP based on correct answers."""
+    correct = body.get("correct", 0)
+    total = body.get("total", 5)
+    user_id = user["id"]
+
+    xp_earned = correct * 15  # 15 XP per correct answer
+    if correct == total:
+        xp_earned += 25  # perfect bonus
+
+    try:
+        from bot.services.leaderboard import add_xp
+        await add_xp(user_id, xp_earned)
+    except Exception:
+        pass
+
+    return {"correct": correct, "total": total, "xp_earned": xp_earned}
+
+
+# ── Friends Activity Feed API ───────────────────────────────────────────
+
+@app.get("/api/activity/feed")
+async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_user)):
+    """Get recent listening activity from all users (public feed)."""
+    from bot.models.base import async_session
+    from bot.models.track import ListeningHistory, Track
+    from bot.models.user import User
+    from sqlalchemy import select, desc
+
+    async with async_session() as session:
+        q = await session.execute(
+            select(
+                ListeningHistory.user_id,
+                ListeningHistory.created_at,
+                Track.title,
+                Track.artist,
+                Track.source_id,
+                Track.cover_url,
+                User.first_name,
+                User.username,
+            )
+            .join(Track, Track.id == ListeningHistory.track_id)
+            .join(User, User.id == ListeningHistory.user_id)
+            .where(ListeningHistory.action == "play")
+            .order_by(desc(ListeningHistory.created_at))
+            .limit(min(limit, 50))
+        )
+        rows = q.all()
+
+    feed = []
+    for row in rows:
+        feed.append({
+            "user_id": row.user_id,
+            "user_name": row.first_name or row.username or "User",
+            "track_title": row.title,
+            "track_artist": row.artist,
+            "video_id": row.source_id,
+            "cover_url": row.cover_url,
+            "played_at": row.created_at.isoformat() if row.created_at else None,
+        })
+
+    return {"feed": feed}
+
+
 # ── Charts API ───────────────────────────────────────────────────────────
 
 @app.post("/api/charts/refresh")
@@ -1799,8 +1969,20 @@ async def add_track_to_playlist(
 
     async with async_session() as session:
         pl = await session.get(Playlist, playlist_id)
-        if not pl or pl.user_id != user["id"]:
+        if not pl:
             raise HTTPException(status_code=404, detail="Playlist not found")
+        # Allow owner OR collaborator
+        is_owner = pl.user_id == user["id"]
+        if not is_owner:
+            try:
+                from bot.services.cache import cache
+                members = await cache.redis.smembers(_collab_key(playlist_id) + ":members")
+                if str(user["id"]) not in members:
+                    raise HTTPException(status_code=403, detail="Not a collaborator")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="Not authorized")
 
         db_track = (
             await session.execute(select(Track).where(Track.source_id == body.video_id))
@@ -1936,6 +2118,111 @@ async def delete_playlist(playlist_id: int, user: dict = Depends(get_current_use
             mirror_playlist_delete(playlist_id)
         except Exception:
             pass
+    return {"ok": True}
+
+
+# ── Collaborative Playlists (Redis-based, no schema change) ─────────────
+
+import secrets as _secrets
+
+def _collab_key(playlist_id: int) -> str:
+    return f"collab:pl:{playlist_id}"
+
+def _collab_invite_key(code: str) -> str:
+    return f"collab:invite:{code}"
+
+
+@app.post("/api/playlist/{playlist_id}/collab/enable")
+async def enable_collab(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Enable collaborative mode for a playlist. Returns invite code."""
+    from bot.models.base import async_session
+    from bot.models.playlist import Playlist
+    from bot.services.cache import cache
+
+    async with async_session() as session:
+        pl = await session.get(Playlist, playlist_id)
+        if not pl or pl.user_id != user["id"]:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+    # Generate invite code
+    code = _secrets.token_urlsafe(8)
+    key = _collab_key(playlist_id)
+    invite_key = _collab_invite_key(code)
+
+    # Store in Redis
+    await cache.redis.hset(key, mapping={
+        "owner": str(user["id"]),
+        "invite_code": code,
+        "enabled": "1",
+    })
+    await cache.redis.sadd(f"{key}:members", str(user["id"]))
+    await cache.redis.set(invite_key, str(playlist_id), ex=86400 * 30)  # 30 days
+
+    return {"invite_code": code, "playlist_id": playlist_id}
+
+
+@app.post("/api/playlist/collab/join/{code}")
+async def join_collab(code: str, user: dict = Depends(get_current_user)):
+    """Join a collaborative playlist via invite code."""
+    from bot.services.cache import cache
+
+    invite_key = _collab_invite_key(code)
+    pl_id_raw = await cache.redis.get(invite_key)
+    if not pl_id_raw:
+        raise HTTPException(status_code=404, detail="Invalid or expired invite code")
+
+    playlist_id = int(pl_id_raw)
+    key = _collab_key(playlist_id)
+
+    # Check if collab is enabled
+    enabled = await cache.redis.hget(key, "enabled")
+    if enabled != "1":
+        raise HTTPException(status_code=400, detail="Collaborative mode is not enabled")
+
+    # Add user to members
+    await cache.redis.sadd(f"{key}:members", str(user["id"]))
+
+    return {"playlist_id": playlist_id, "joined": True}
+
+
+@app.get("/api/playlist/{playlist_id}/collab/info")
+async def collab_info(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Get collaborative playlist info."""
+    from bot.services.cache import cache
+
+    key = _collab_key(playlist_id)
+    info = await cache.redis.hgetall(key)
+    if not info or info.get("enabled") != "1":
+        return {"enabled": False}
+
+    members = await cache.redis.smembers(f"{key}:members")
+    is_member = str(user["id"]) in members
+    is_owner = info.get("owner") == str(user["id"])
+
+    return {
+        "enabled": True,
+        "invite_code": info.get("invite_code") if is_owner else None,
+        "member_count": len(members),
+        "is_member": is_member,
+        "is_owner": is_owner,
+    }
+
+
+@app.post("/api/playlist/{playlist_id}/collab/disable")
+async def disable_collab(playlist_id: int, user: dict = Depends(get_current_user)):
+    """Disable collaborative mode (owner only)."""
+    from bot.services.cache import cache
+
+    key = _collab_key(playlist_id)
+    owner = await cache.redis.hget(key, "owner")
+    if owner != str(user["id"]):
+        raise HTTPException(status_code=403, detail="Only owner can disable")
+
+    invite_code = await cache.redis.hget(key, "invite_code")
+    if invite_code:
+        await cache.redis.delete(_collab_invite_key(invite_code))
+
+    await cache.redis.delete(key, f"{key}:members")
     return {"ok": True}
 
 
@@ -2185,13 +2472,22 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
 
             u = (await session.execute(select(User).where(User.id == user_id))).scalar()
 
+            # Streak milestones
+            streak = u.streak_days if u else 0
+            try:
+                from bot.services.streak_rewards import get_next_milestone, STREAK_MILESTONES
+                next_ms = get_next_milestone(streak)
+            except Exception:
+                next_ms = None
+
             return {
                 "total_plays": total_plays, "total_time": total_time, "total_favorites": total_favs,
                 "top_artists": top_artists, "top_genres": top_genres, "recent_tracks": recent,
                 "xp": u.xp if u else 0, "level": u.level if u else 1,
-                "streak_days": u.streak_days if u else 0,
+                "streak_days": streak,
                 "badges": (u.badges or []) if u else [],
                 "member_since": u.created_at.isoformat() if u and u.created_at else None,
+                "next_streak_milestone": next_ms,
             }
     except Exception as exc:
         logger.error("Stats endpoint failed for user %s: %s", user_id, exc)
