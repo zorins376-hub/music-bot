@@ -11,14 +11,14 @@ import { getThemeById, themeColors } from "../themes";
 
 // ── Preset playlist covers ──
 const PLAYLIST_COVERS = [
-  { id: "fire",   gradient: "linear-gradient(135deg, #ff4444, #ff8800)", icon: "\u{1F525}" },
-  { id: "chill",  gradient: "linear-gradient(135deg, #4488ff, #aa44ff)", icon: "\u{1F30A}" },
-  { id: "party",  gradient: "linear-gradient(135deg, #ff44aa, #ffcc00)", icon: "\u{1F389}" },
-  { id: "night",  gradient: "linear-gradient(135deg, #1a1a5e, #6633aa)", icon: "\u{1F319}" },
-  { id: "energy", gradient: "linear-gradient(135deg, #22cc66, #00cccc)", icon: "\u26A1" },
-  { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)", icon: "\u2764\uFE0F" },
-  { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)", icon: "\u2728" },
-  { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)", icon: "\u{1F680}" },
+  { id: "fire",   gradient: "linear-gradient(135deg, #ff4444, #ff8800)", icon: "🔥" },
+  { id: "chill",  gradient: "linear-gradient(135deg, #4488ff, #aa44ff)", icon: "🌊" },
+  { id: "party",  gradient: "linear-gradient(135deg, #ff44aa, #ffcc00)", icon: "🎉" },
+  { id: "night",  gradient: "linear-gradient(135deg, #1a1a5e, #6633aa)", icon: "🌙" },
+  { id: "energy", gradient: "linear-gradient(135deg, #22cc66, #00cccc)", icon: "⚡" },
+  { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)", icon: "❤️" },
+  { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)", icon: "✨" },
+  { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)", icon: "🚀" },
 ] as const;
 
 type CoverId = (typeof PLAYLIST_COVERS)[number]["id"];
@@ -197,7 +197,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
     if (isPlaylistDownloading(`pl-${selectedId}`)) {
       cancelPlaylistDownload(`pl-${selectedId}`);
       setDlProgress(null);
-      showToast("\u0421\u043a\u0430\u0447\u0438\u0432\u0430\u043d\u0438\u0435 \u043e\u0442\u043c\u0435\u043d\u0435\u043d\u043e", "info", 2000);
+      showToast("Скачивание отменено", "info", 2000);
       return;
     }
     haptic("medium");
@@ -215,7 +215,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
     );
     setDlProgress(null);
     setCachedCount(result.success);
-    showToast(`\u0421\u043a\u0430\u0447\u0430\u043d\u043e ${result.success} \u0438\u0437 ${tracks.length} \u0442\u0440\u0435\u043a\u043e\u0432`, result.failed > 0 ? "info" : "success", 3000);
+    showToast(`Скачано ${result.success} из ${tracks.length} треков`, result.failed > 0 ? "info" : "success", 3000);
   };
 
   const onTouchStart = (e: TouchEvent) => {
@@ -249,7 +249,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
               display: "flex", alignItems: "center", justifyContent: "center",
               borderRadius: "0 14px 14px 0",
             }}
-          >\u0423\u0434\u0430\u043b\u0438\u0442\u044c</button>
+          >Удалить</button>
         )}
         <div
           onTouchStart={(e: any) => onTouchStart(e)}
@@ -293,7 +293,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
           <button onClick={() => { setSelectedId(null); setTracks([]); setSwipedTrackId(null); setShowCoverPicker(false); }}
             style={{ background: "none", border: "none", color: tc.highlight, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 14 }}>
-            <IconArrowLeft size={16} /> \u041d\u0430\u0437\u0430\u0434
+            <IconArrowLeft size={16} /> Назад
           </button>
           <div style={{ flex: 1, fontSize: 15, fontWeight: 600, color: tc.textColor, textAlign: "center" }}>{selectedName}</div>
           <div style={{ width: 44 }} />
@@ -319,8 +319,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
                 <IconMusic size={18} color="#fff" />
               </div>
             )}
-            <div style={{ flex: 1, fontSize: 12, color: tc.hintColor }}>\u041e\u0431\u043b\u043e\u0436\u043a\u0430 \u043f\u043b\u0435\u0439\u043b\u0438\u0441\u0442\u0430</div>
-            <div style={{ fontSize: 11, color: tc.hintColor }}>{showCoverPicker ? "\u25B2" : "\u25BC"}</div>
+            <div style={{ flex: 1, fontSize: 12, color: tc.hintColor }}>Обложка плейлиста</div>
+            <div style={{ fontSize: 11, color: tc.hintColor }}>{showCoverPicker ? "▲" : "▼"}</div>
           </div>
           {showCoverPicker && (
             <div style={{ marginTop: 8, padding: "8px 4px" }}>
@@ -333,7 +333,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             <button onClick={() => { haptic("medium"); if (onPlayPlaylist && selectedId) onPlayPlaylist(selectedId); else if (onPlayAll) onPlayAll(tracks); else if (tracks[0]) onPlayTrack(tracks[0]); }}
               style={{ flex: 1, padding: "10px 0", borderRadius: 14, border: "none", background: tc.activeBg, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-              \u25B6 \u0412\u043e\u0441\u043f\u0440\u043e\u0438\u0437\u0432\u0435\u0441\u0442\u0438 \u0432\u0441\u0451
+              ▶ Воспроизвести всё
             </button>
             <button onClick={handleDownloadOffline}
               style={{
@@ -346,27 +346,27 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
               {dlProgress ? (
                 <><IconSpinner size={14} color={tc.highlight} /> {dlProgress.completed}/{dlProgress.total}</>
               ) : cachedCount >= tracks.length && tracks.length > 0 ? (
-                <><IconCheck size={14} color="#81c784" /> \u041e\u0444\u043b\u0430\u0439\u043d</>
+                <><IconCheck size={14} color="#81c784" /> Офлайн</>
               ) : (
-                <><IconDownload size={14} color={tc.highlight} /> \u0421\u043a\u0430\u0447\u0430\u0442\u044c</>
+                <><IconDownload size={14} color={tc.highlight} /> Скачать</>
               )}
             </button>
           </div>
         )}
         {dlProgress?.current && (
           <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            \u0421\u043a\u0430\u0447\u0438\u0432\u0430\u043d\u0438\u0435: {dlProgress.current}...
+            Скачивание: {dlProgress.current}...
           </div>
         )}
 
         <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>
-          {tracks.length} \u0442\u0440\u0435\u043a\u043e\u0432 \u00B7 \u0441\u0432\u0430\u0439\u043f \u0432\u043b\u0435\u0432\u043e \u2014 \u0443\u0434\u0430\u043b\u0438\u0442\u044c
+          {tracks.length} треков · свайп влево — удалить
         </div>
 
         {loading ? (
           <div style={{ textAlign: "center", padding: 32 }}><IconSpinner size={24} color={tc.hintColor} /></div>
         ) : tracks.length === 0 ? (
-          <div style={{ textAlign: "center", color: tc.hintColor, padding: 32 }}>\u041f\u043b\u0435\u0439\u043b\u0438\u0441\u0442 \u043f\u0443\u0441\u0442</div>
+          <div style={{ textAlign: "center", color: tc.hintColor, padding: 32 }}>Плейлист пуст</div>
         ) : tracks.map((t, idx) => trackRow(t, idx))}
       </div>
     );
@@ -376,30 +376,30 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: tc.textColor, letterSpacing: 0.4 }}>\u041c\u043e\u0438 \u043f\u043b\u0435\u0439\u043b\u0438\u0441\u0442\u044b</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: tc.textColor, letterSpacing: 0.4 }}>Мои плейлисты</div>
         <button onClick={() => { haptic("light"); setShowCreate(true); }}
           style={{ padding: "6px 14px", borderRadius: 14, border: "none", background: tc.activeBg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-          + \u0421\u043e\u0437\u0434\u0430\u0442\u044c
+          + Создать
         </button>
       </div>
 
       {showCreate && (
         <div style={{ marginBottom: 12, padding: 12, borderRadius: 16, background: tc.cardBg, border: tc.cardBorder }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <input type="text" placeholder="\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043f\u043b\u0435\u0439\u043b\u0438\u0441\u0442\u0430" maxLength={100} value={newName}
+            <input type="text" placeholder="Название плейлиста" maxLength={100} value={newName}
               onInput={(e: any) => setNewName(e.target.value)}
               onKeyDown={(e: any) => { if (e.key === "Enter") handleCreate(); }}
               style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px solid ${tc.accentBorderAlpha}`, background: "transparent", color: tc.textColor, fontSize: 14, outline: "none" }} />
             <button onClick={handleCreate} style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>OK</button>
             <button onClick={() => { setShowCreate(false); setNewName(""); setNewCover(null); }} style={{ padding: "8px 12px", borderRadius: 10, border: tc.cardBorder, background: "transparent", color: tc.hintColor, fontSize: 13, cursor: "pointer" }}><IconClose size={14} /></button>
           </div>
-          <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6 }}>\u041e\u0431\u043b\u043e\u0436\u043a\u0430:</div>
+          <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6 }}>Обложка:</div>
           <CoverPicker selected={newCover} onSelect={(id) => { setNewCover(id); haptic("light"); }} size={40} />
         </div>
       )}
 
       {playlists.length === 0 && !showCreate ? (
-        <div style={{ textAlign: "center", color: tc.hintColor, padding: 32 }}>\u041d\u0435\u0442 \u043f\u043b\u0435\u0439\u043b\u0438\u0441\u0442\u043e\u0432 \u2014 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u00AB+ \u0421\u043e\u0437\u0434\u0430\u0442\u044c\u00BB</div>
+        <div style={{ textAlign: "center", color: tc.hintColor, padding: 32 }}>Нет плейлистов — нажмите «+ Создать»</div>
       ) : (
         playlists.map((p) => {
           const coverId = getPlaylistCover(p.id);
@@ -407,9 +407,9 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
             <div key={p.id} style={{ marginBottom: 6 }}>
               {confirmDeleteId === p.id ? (
                 <div style={{ display: "flex", gap: 8, padding: 12, borderRadius: 14, background: "rgba(229, 57, 53, 0.15)", border: "1px solid rgba(229, 57, 53, 0.3)", alignItems: "center" }}>
-                  <span style={{ flex: 1, fontSize: 13, color: "#ef5350" }}>\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u00AB{p.name}\u00BB?</span>
-                  <button onClick={() => handleDelete(p.id)} style={{ padding: "6px 14px", borderRadius: 10, border: "none", background: "#e53935", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>\u0414\u0430</button>
-                  <button onClick={() => setConfirmDeleteId(null)} style={{ padding: "6px 14px", borderRadius: 10, border: tc.cardBorder, background: "transparent", color: tc.hintColor, fontSize: 12, cursor: "pointer" }}>\u041d\u0435\u0442</button>
+                  <span style={{ flex: 1, fontSize: 13, color: "#ef5350" }}>Удалить «{p.name}»?</span>
+                  <button onClick={() => handleDelete(p.id)} style={{ padding: "6px 14px", borderRadius: 10, border: "none", background: "#e53935", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Да</button>
+                  <button onClick={() => setConfirmDeleteId(null)} style={{ padding: "6px 14px", borderRadius: 10, border: tc.cardBorder, background: "transparent", color: tc.hintColor, fontSize: 12, cursor: "pointer" }}>Нет</button>
                 </div>
               ) : editingId === p.id ? (
                 <div style={{ display: "flex", gap: 8, padding: 12, borderRadius: 14, background: tc.cardBg, border: tc.cardBorder }}>
@@ -417,7 +417,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
                     onInput={(e: any) => setEditName(e.target.value)}
                     onKeyDown={(e: any) => { if (e.key === "Enter") handleRename(p.id); }}
                     style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px solid ${tc.accentBorderAlpha}`, background: "transparent", color: tc.textColor, fontSize: 14, outline: "none" }} />
-                  <button onClick={() => handleRename(p.id)} style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{"\u2713"}</button>
+                  <button onClick={() => handleRename(p.id)} style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{"✓"}</button>
                   <button onClick={() => setEditingId(null)} style={{ padding: "8px 10px", borderRadius: 10, border: tc.cardBorder, background: "transparent", color: tc.hintColor, fontSize: 12, cursor: "pointer" }}><IconClose size={14} /></button>
                 </div>
               ) : (
@@ -434,7 +434,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 500, color: tc.textColor }}>{p.name}</div>
-                    <div style={{ fontSize: 12, color: tc.hintColor }}>{p.track_count} \u0442\u0440\u0435\u043a\u043e\u0432</div>
+                    <div style={{ fontSize: 12, color: tc.hintColor }}>{p.track_count} треков</div>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button onClick={(e) => { e.stopPropagation(); haptic("light"); setEditingId(p.id); setEditName(p.name); }}
@@ -451,7 +451,7 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
 
       {currentTrack && playlists.length > 0 && (
         <div style={{ marginTop: 16, padding: 12, borderRadius: 14, background: tc.coverPlaceholderBg, border: `1px solid ${tc.accentBorderAlpha}`, fontSize: 12, color: tc.hintColor, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-          \u0427\u0442\u043e\u0431\u044b \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0442\u0440\u0435\u043a \u0432 \u043f\u043b\u0435\u0439\u043b\u0438\u0441\u0442 \u2014 \u043d\u0430\u0436\u043c\u0438 <IconPlus size={12} /> \u0432 \u043f\u043b\u0435\u0435\u0440\u0435
+          Чтобы добавить трек в плейлист — нажми <IconPlus size={12} /> в плеере
         </div>
       )}
     </div>
