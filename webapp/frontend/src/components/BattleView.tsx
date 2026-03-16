@@ -30,6 +30,7 @@ export function BattleView({
   const [currentRound, setCurrentRound] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [score, setScore] = useState(0);
+  const scoreRef = useRef(0);
   const [xpEarned, setXpEarned] = useState(0);
   const [timer, setTimer] = useState(15);
   const [showCorrect, setShowCorrect] = useState(false);
@@ -60,6 +61,7 @@ export function BattleView({
       setBattle(data);
       setCurrentRound(0);
       setScore(0);
+      scoreRef.current = 0;
       setSelected(null);
       setShowCorrect(false);
       setPhase("playing");
@@ -124,7 +126,8 @@ export function BattleView({
     const correct = idx === round.correct_idx;
     if (correct) {
       haptic("medium");
-      setScore((s) => s + 1);
+      scoreRef.current += 1;
+      setScore(scoreRef.current);
     } else {
       haptic("heavy");
     }
@@ -137,7 +140,7 @@ export function BattleView({
     const next = currentRound + 1;
     if (next >= battle.rounds.length) {
       // Game over
-      const finalScore = score + (wasCorrect ? 1 : 0);
+      const finalScore = scoreRef.current;
       setPhase("result");
       // Submit score
       submitBattleScore(finalScore, battle.total)
@@ -148,6 +151,21 @@ export function BattleView({
       playRound(battle.rounds[next]);
     }
   }, [battle, currentRound, score]);
+
+  // ── Menu ──────────────────────────────────────────────────────────────
+  // Inject pulse animation once
+  useEffect(() => {
+    if (document.getElementById("battle-pulse-style")) return;
+    const style = document.createElement("style");
+    style.id = "battle-pulse-style";
+    style.textContent = `
+      @keyframes battle-pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.08); opacity: 0.85; }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
 
   // ── Menu ──────────────────────────────────────────────────────────────
   if (phase === "menu") {
@@ -284,7 +302,7 @@ export function BattleView({
           background: tc.activeBg,
           display: "flex", alignItems: "center", justifyContent: "center",
           boxShadow: tc.glowShadow,
-          animation: "pulse 1.5s ease-in-out infinite",
+          animation: "battle-pulse 1.5s ease-in-out infinite",
         }}>
           <IconMusicNote size={32} color={tc.highlight} />
         </div>

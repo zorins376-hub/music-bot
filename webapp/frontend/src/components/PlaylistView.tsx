@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchPlaylists, fetchPlaylistTracks, createPlaylist, deletePlaylist,
   renamePlaylist, removeTrackFromPlaylist, getStreamUrl,
-  type Playlist, type Track,
+  enableCollab, fetchCollabInfo, disableCollab,
+  type Playlist, type Track, type CollabInfo,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck, IconLink, IconUser } from "./Icons";
 import { showToast } from "./Toast";
 import { downloadPlaylistOffline, countCachedTracks, isPlaylistDownloading, cancelPlaylistDownload } from "../offlineCache";
 import { getThemeById, themeColors } from "../themes";
@@ -108,6 +109,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
   const [cachedCount, setCachedCount] = useState(0);
   const [showCoverPicker, setShowCoverPicker] = useState(false);
   const [detailCover, setDetailCover] = useState<CoverId | null>(null);
+  const [collabInfo, setCollabInfo] = useState<CollabInfo | null>(null);
+  const [collabLoading, setCollabLoading] = useState(false);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -123,10 +126,13 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
     if (selectedId !== null) {
       setLoading(true);
       setDetailCover(getPlaylistCover(selectedId));
+      setCollabInfo(null);
       fetchPlaylistTracks(selectedId)
         .then(setTracks)
         .catch(() => {})
         .finally(() => setLoading(false));
+      // Load collab info (non-blocking)
+      fetchCollabInfo(selectedId).then(setCollabInfo).catch(() => {});
     }
   }, [selectedId]);
 
@@ -355,7 +361,113 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
         )}
         {dlProgress?.current && (
           <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            \u0421\u043a\u0430\u0447\u0438\u0432\u0430\u043d\u0438\u0435: {dlProgress.current}...
+            Скачивание: {dlProgress.current}...
+          </div>
+        )}
+
+        {/* Collab section */}
+        {selectedId && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
+            padding: "10px 12px", borderRadius: 14,
+            background: tc.cardBg, border: tc.cardBorder,
+          }}>
+            <IconUser size={16} color={collabInfo?.enabled ? tc.highlight : tc.hintColor} />
+            {collabInfo?.enabled ? (
+              <>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: tc.highlight }}>
+                    Совместный · {collabInfo.member_count} чел.
+                  </div>
+                  {collabInfo.invite_code && (
+                    <div style={{ fontSize: 10, color: tc.hintColor, marginTop: 2 }}>
+                      Код: {collabInfo.invite_code}
+                    </div>
+                  )}
+                </div>
+                {collabInfo.invite_code && (
+                  <button
+                    onClick={() => {
+                      haptic("light");
+                      const code = collabInfo?.invite_code;
+                      if (!code) return;
+                      const url = `https://t.me/TSmymusicbot_bot/app?startapp=collab_${code}`;
+                      try {
+                        window.Telegram?.WebApp?.openTelegramLink?.(
+                          `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(`Присоединяйся к плейлисту "${selectedName}"! 🎵`)}`
+                        );
+                      } catch {
+                        navigator.clipboard?.writeText(code);
+                        showToast("Код скопирован!");
+                      }
+                    }}
+                    style={{
+                      padding: "6px 12px", borderRadius: 10, border: "none",
+                      background: tc.activeBg, color: tc.highlight,
+                      fontSize: 11, fontWeight: 600, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}
+                  >
+                    <IconLink size={12} color={tc.highlight} /> Пригласить
+                  </button>
+                )}
+                {collabInfo.is_owner && (
+                  <button
+                    onClick={async () => {
+                      haptic("medium");
+                      setCollabLoading(true);
+                      try {
+                        await disableCollab(selectedId);
+                        setCollabInfo({ ...collabInfo, enabled: false });
+                        showToast("Совместный доступ отключён");
+                      } catch {}
+                      setCollabLoading(false);
+                    }}
+                    disabled={collabLoading}
+                    style={{
+                      padding: "6px 10px", borderRadius: 10, border: "none",
+                      background: "rgba(239,83,80,0.15)", color: "#ef5350",
+                      fontSize: 11, cursor: "pointer",
+                    }}
+                  >
+                    <IconClose size={12} />
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ flex: 1, fontSize: 12, color: tc.hintColor }}>
+                  Совместный доступ
+                </div>
+                <button
+                  onClick={async () => {
+                    haptic("medium");
+                    setCollabLoading(true);
+                    try {
+                      const res = await enableCollab(selectedId);
+                      setCollabInfo({
+                        enabled: true,
+                        invite_code: res.invite_code,
+                        member_count: 1,
+                        is_member: true,
+                        is_owner: true,
+                      });
+                      showToast("Совместный доступ включён!");
+                    } catch {}
+                    setCollabLoading(false);
+                  }}
+                  disabled={collabLoading}
+                  style={{
+                    padding: "6px 14px", borderRadius: 10, border: "none",
+                    background: tc.activeBg, color: tc.highlight,
+                    fontSize: 11, fontWeight: 600, cursor: "pointer",
+                    opacity: collabLoading ? 0.5 : 1,
+                  }}
+                >
+                  {collabLoading ? <IconSpinner size={12} color={tc.highlight} /> : "Включить"}
+                </button>
+              </>
+            )}
           </div>
         )}
 
