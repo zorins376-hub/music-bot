@@ -564,6 +564,48 @@ export async function disableCollab(playlistId: number): Promise<void> {
   });
 }
 
+// ── Radio Mode ───────────────────────────────────────────────────────
+
+export async function fetchRadioNext(seedVideoId: string, exclude: string[] = [], limit = 8): Promise<Track[]> {
+  const r = await fetchWithRetry(`${API_BASE}/radio/next`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ seed_video_id: seedVideoId, exclude, limit }),
+    retries: 1,
+  });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks;
+}
+
+// ── Wrapped / Music Recap ────────────────────────────────────────────
+
+export interface WrappedData {
+  total_plays: number;
+  total_time: number;
+  total_favorites: number;
+  unique_artists: number;
+  unique_tracks: number;
+  top_artists: Array<{ name: string; count: number }>;
+  top_genres: Array<{ name: string; count: number }>;
+  top_track: { video_id: string; title: string; artist: string; cover_url?: string; play_count: number } | null;
+  top_tracks: Array<Track & { play_count: number }>;
+  listening_hours: number[];
+  peak_hour: number;
+  personality: string;
+  level: number;
+  xp: number;
+  streak_days: number;
+  member_since: string | null;
+  error?: string;
+}
+
+export async function fetchWrapped(): Promise<WrappedData> {
+  const r = await fetchWithRetry(`${API_BASE}/wrapped`, { headers: getHeaders(), retries: 1, timeout: 10000 });
+  if (!r.ok) throw new Error("Failed to fetch wrapped");
+  return r.json();
+}
+
 export async function fetchFavoritesList(): Promise<Track[]> {
   const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
   if (!r.ok) return [];

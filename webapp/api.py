@@ -261,6 +261,10 @@ app.include_router(admin_router)
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
+    except asyncio.CancelledError:
+        # Client disconnected — don't log as error, just return 499
+        logger.debug("Request cancelled: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=499, content={"detail": "Client closed request"})
     except Exception as exc:
         logger.error(
             "Unhandled %s %s → %s\n%s",
@@ -386,11 +390,18 @@ async def _get_or_create_webapp_user(tg_user: dict):
                     changed = True
 
                 if changed:
-                    await session.commit()
+                    try:
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+                        raise
                 return db_user
         except IntegrityError:
             if attempt < 2:
                 continue
+            raise
+        except asyncio.CancelledError:
+            logger.debug("_get_or_create_webapp_user cancelled for user %s", user_id)
             raise
         except Exception as exc:
             if attempt < 2:
@@ -3924,6 +3935,250 @@ async def my_parties(user: dict = Depends(get_current_user)):
             )
             for party in parties
         ]
+
+
+# ── Radio Mode (infinite autoplay) ─────────────────────────────────────
+
+@app.post("/api/radio/next")
+async def radio_next(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Get next batch of radio tracks based on seed track.
+    Uses similar tracks + trending mix for variety.
+    """
+    body = await request.json()
+    seed_id = body.get("seed_video_id", "")
+    exclude = body.get("exclude", [])
+    limit = min(body.get("limit", 8), 20)
+
+    if not seed_id:
+        raise HTTPException(400, "seed_video_id required")
+
+    tracks = []
+    try:
+        # Try similar tracks first
+        from bot.services.search_engine import search as _search
+        from bot.services.downloader import resolve_youtube_url
+
+        # Get track info for search
+        from bot.models.base import async_session as _as
+        from bot.models.track import Track as TrackModel
+        from sqlalchemy import select
+
+        seed_title = ""
+        seed_artist = ""
+        async with _as() as session:
+            t = (await session.execute(
+                select(TrackModel).where(TrackModel.source_id == seed_id)
+            )).scalar_one_or_none()
+            if t:
+                seed_title = t.title or ""
+                seed_artist = t.artist or ""
+
+        # Mix strategy: similar + artist radio + random trending
+        queries = []
+        if seed_artist:
+            queries.append(f"{seed_artist} mix")
+            queries.append(f"{seed_artist} best songs")
+        if seed_title and seed_artist:
+            queries.append(f"{seed_title} {seed_artist} similar")
+
+        exclude_set = set(exclude + [seed_id])
+        seen = set()
+
+        for q in queries[:3]:
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(
+                        None, lambda qq=q: _search(qq, max_results=8)
+                    ),
+                    timeout=5.0,
+                )
+                for r in (results or []):
+                    vid = r.get("video_id") or r.get("id", "")
+                    if vid and vid not in exclude_set and vid not in seen:
+                        seen.add(vid)
+                        tracks.append({
+                            "video_id": vid,
+                            "title": r.get("title", ""),
+                            "artist": r.get("uploader", r.get("artist", "")),
+                            "duration": r.get("duration", 0),
+                            "duration_fmt": r.get("duration_fmt", "0:00"),
+                            "source": "youtube",
+                            "cover_url": r.get("cover_url"),
+                        })
+                        if len(tracks) >= limit:
+                            break
+            except Exception:
+                continue
+            if len(tracks) >= limit:
+                break
+
+    except Exception as e:
+        logger.error("Radio next failed: %s", e)
+
+    return {"tracks": tracks[:limit]}
+
+
+# ── Wrapped / Music Recap ──────────────────────────────────────────────
+
+@app.get("/api/wrapped")
+async def get_wrapped(user: dict = Depends(get_current_user)):
+    """
+    Personalized music recap — like Spotify Wrapped but available anytime.
+    Returns top artists, genres, moods, listening stats, favorite tracks, etc.
+    """
+    user_id = user.get("id", 0)
+
+    async def _build():
+        from bot.models.base import async_session as _as
+        from bot.models.track import ListeningHistory, Track as TrackModel
+        from bot.models.user import User
+        from bot.models.favorite import FavoriteTrack
+        from sqlalchemy import select, func, extract
+
+        async with _as() as session:
+            # User info
+            u = (await session.execute(select(User).where(User.id == user_id))).scalar()
+            if not u:
+                return {"error": "User not found"}
+
+            # Total plays
+            total_plays = (await session.execute(
+                select(func.count()).where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                )
+            )).scalar() or 0
+
+            # Total listening time (seconds)
+            total_time = (await session.execute(
+                select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            )).scalar() or 0
+
+            # Total favorites
+            total_favs = (await session.execute(
+                select(func.count()).where(FavoriteTrack.user_id == user_id)
+            )).scalar() or 0
+
+            # Top 10 artists
+            top_artists_q = await session.execute(
+                select(TrackModel.artist, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", TrackModel.artist.isnot(None))
+                .group_by(TrackModel.artist).order_by(func.count().desc()).limit(10)
+            )
+            top_artists = [{"name": r[0], "count": r[1]} for r in top_artists_q.all()]
+
+            # Top 5 genres
+            top_genres_q = await session.execute(
+                select(TrackModel.genre, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play", TrackModel.genre.isnot(None))
+                .group_by(TrackModel.genre).order_by(func.count().desc()).limit(5)
+            )
+            top_genres = [{"name": r[0], "count": r[1]} for r in top_genres_q.all()]
+
+            # Most played track (all time)
+            top_track_q = await session.execute(
+                select(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url)
+                .order_by(func.count().desc()).limit(1)
+            )
+            top_track_row = top_track_q.first()
+            top_track = None
+            if top_track_row:
+                top_track = {
+                    "video_id": top_track_row[0], "title": top_track_row[1],
+                    "artist": top_track_row[2], "cover_url": top_track_row[3],
+                    "play_count": top_track_row[4],
+                }
+
+            # Most played tracks (top 10)
+            top_tracks_q = await session.execute(
+                select(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, TrackModel.duration, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, TrackModel.duration)
+                .order_by(func.count().desc()).limit(10)
+            )
+            top_tracks = [{
+                "video_id": r[0], "title": r[1], "artist": r[2], "cover_url": r[3],
+                "duration": r[4] or 0, "duration_fmt": f"{(r[4] or 0)//60}:{(r[4] or 0)%60:02d}",
+                "play_count": r[5], "source": "db",
+            } for r in top_tracks_q.all()]
+
+            # Listening by hour (24 buckets)
+            hours_q = await session.execute(
+                select(
+                    extract("hour", ListeningHistory.created_at).label("hr"),
+                    func.count(),
+                )
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .group_by("hr")
+            )
+            hours_map = {int(r[0]): r[1] for r in hours_q.all()}
+            listening_hours = [hours_map.get(h, 0) for h in range(24)]
+            peak_hour = max(range(24), key=lambda h: listening_hours[h]) if total_plays > 0 else 12
+
+            # Unique artists count
+            unique_artists = (await session.execute(
+                select(func.count(func.distinct(TrackModel.artist)))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            )).scalar() or 0
+
+            # Unique tracks count
+            unique_tracks = (await session.execute(
+                select(func.count(func.distinct(TrackModel.id)))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+            )).scalar() or 0
+
+            # Personality label based on listening patterns
+            personality = "Explorer"
+            if top_artists and top_artists[0]["count"] > total_plays * 0.3:
+                personality = "Loyalist"
+            elif unique_artists > 50:
+                personality = "Explorer"
+            elif len(top_genres) >= 4:
+                personality = "Eclectic"
+            elif total_time > 36000:
+                personality = "Marathon Runner"
+            elif peak_hour >= 22 or peak_hour <= 4:
+                personality = "Night Owl"
+
+            return {
+                "total_plays": total_plays,
+                "total_time": total_time,
+                "total_favorites": total_favs,
+                "unique_artists": unique_artists,
+                "unique_tracks": unique_tracks,
+                "top_artists": top_artists,
+                "top_genres": top_genres,
+                "top_track": top_track,
+                "top_tracks": top_tracks,
+                "listening_hours": listening_hours,
+                "peak_hour": peak_hour,
+                "personality": personality,
+                "level": u.level if u else 1,
+                "xp": u.xp if u else 0,
+                "streak_days": u.streak_days if u else 0,
+                "member_since": u.created_at.isoformat() if u and u.created_at else None,
+            }
+
+    try:
+        return await asyncio.wait_for(_build(), timeout=8.0)
+    except asyncio.TimeoutError:
+        return {"error": "timeout", "total_plays": 0}
+    except Exception as e:
+        logger.error("Wrapped failed: %s", e)
+        return {"error": str(e), "total_plays": 0}
 
 
 # ── Frontend SPA serving ────────────────────────────────────────────────
