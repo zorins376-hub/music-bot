@@ -5,21 +5,33 @@ import {
   enableCollab, fetchCollabInfo, disableCollab,
   type Playlist, type Track, type CollabInfo,
 } from "../api";
-import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck, IconLink, IconUser } from "./Icons";
+import { IconArrowLeft, IconMusic, IconSpinner, IconClose, IconPlus, IconEdit, IconDownload, IconCheck, IconLink, IconUser, IconFire, IconWave, IconParty, IconMoon, IconBolt, IconHeart, IconStar, IconRocket } from "./Icons";
 import { showToast } from "./Toast";
 import { downloadPlaylistOffline, countCachedTracks, isPlaylistDownloading, cancelPlaylistDownload } from "../offlineCache";
 import { getThemeById, themeColors } from "../themes";
 
 // ── Preset playlist covers ──
+// SVG icon renderers keyed by cover id
+const COVER_ICONS: Record<string, (size: number) => any> = {
+  fire:   (s) => <IconFire size={s} color="#fff" />,
+  chill:  (s) => <IconWave size={s} color="#fff" />,
+  party:  (s) => <IconParty size={s} color="#fff" />,
+  night:  (s) => <IconMoon size={s} color="#fff" />,
+  energy: (s) => <IconBolt size={s} color="#fff" />,
+  love:   (s) => <IconHeart size={s} color="#fff" filled />,
+  gold:   (s) => <IconStar size={s} color="#fff" filled />,
+  space:  (s) => <IconRocket size={s} color="#fff" />,
+};
+
 const PLAYLIST_COVERS = [
-  { id: "fire",   gradient: "linear-gradient(135deg, #ff4444, #ff8800)", icon: "\u{1F525}" },
-  { id: "chill",  gradient: "linear-gradient(135deg, #4488ff, #aa44ff)", icon: "\u{1F30A}" },
-  { id: "party",  gradient: "linear-gradient(135deg, #ff44aa, #ffcc00)", icon: "\u{1F389}" },
-  { id: "night",  gradient: "linear-gradient(135deg, #1a1a5e, #6633aa)", icon: "\u{1F319}" },
-  { id: "energy", gradient: "linear-gradient(135deg, #22cc66, #00cccc)", icon: "\u26A1" },
-  { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)", icon: "\u2764\uFE0F" },
-  { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)", icon: "\u2728" },
-  { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)", icon: "\u{1F680}" },
+  { id: "fire",   gradient: "linear-gradient(135deg, #ff4444, #ff8800)" },
+  { id: "chill",  gradient: "linear-gradient(135deg, #4488ff, #aa44ff)" },
+  { id: "party",  gradient: "linear-gradient(135deg, #ff44aa, #ffcc00)" },
+  { id: "night",  gradient: "linear-gradient(135deg, #1a1a5e, #6633aa)" },
+  { id: "energy", gradient: "linear-gradient(135deg, #22cc66, #00cccc)" },
+  { id: "love",   gradient: "linear-gradient(135deg, #ee2244, #ff66aa)" },
+  { id: "gold",   gradient: "linear-gradient(135deg, #ccaa00, #ff8800)" },
+  { id: "space",  gradient: "linear-gradient(135deg, #4400aa, #2244cc)" },
 ] as const;
 
 type CoverId = (typeof PLAYLIST_COVERS)[number]["id"];
@@ -41,13 +53,13 @@ function setPlaylistCover(playlistId: number, coverId: CoverId) {
 function CoverPreview({ coverId, size = 42 }: { coverId: CoverId | null; size?: number }) {
   const cover = coverId ? PLAYLIST_COVERS.find((c) => c.id === coverId) : null;
   if (!cover) return null;
+  const renderIcon = COVER_ICONS[cover.id];
   return (
     <div style={{
       width: size, height: size, borderRadius: size > 40 ? 12 : 10, background: cover.gradient,
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.48, lineHeight: 1,
     }}>
-      {cover.icon}
+      {renderIcon ? renderIcon(Math.round(size * 0.48)) : <IconMusic size={Math.round(size * 0.48)} color="#fff" />}
     </div>
   );
 }
@@ -55,21 +67,24 @@ function CoverPreview({ coverId, size = 42 }: { coverId: CoverId | null; size?: 
 function CoverPicker({ selected, onSelect, size = 44 }: { selected: CoverId | null; onSelect: (id: CoverId) => void; size?: number }) {
   return (
     <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
-      {PLAYLIST_COVERS.map((c) => (
-        <div
-          key={c.id}
-          onClick={() => onSelect(c.id)}
-          style={{
-            width: size, height: size, borderRadius: 12, background: c.gradient, flexShrink: 0,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: size * 0.45, lineHeight: 1, cursor: "pointer",
-            outline: selected === c.id ? "2px solid #fff" : "2px solid transparent",
-            outlineOffset: 2, transition: "outline 0.15s ease",
-          }}
-        >
-          {c.icon}
-        </div>
-      ))}
+      {PLAYLIST_COVERS.map((c) => {
+        const renderIcon = COVER_ICONS[c.id];
+        return (
+          <div
+            key={c.id}
+            onClick={() => onSelect(c.id)}
+            style={{
+              width: size, height: size, borderRadius: 12, background: c.gradient, flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+              outline: selected === c.id ? "2px solid #fff" : "2px solid transparent",
+              outlineOffset: 2, transition: "outline 0.15s ease",
+            }}
+          >
+            {renderIcon ? renderIcon(Math.round(size * 0.45)) : <IconMusic size={Math.round(size * 0.45)} color="#fff" />}
+          </div>
+        );
+      })}
     </div>
   );
 }
