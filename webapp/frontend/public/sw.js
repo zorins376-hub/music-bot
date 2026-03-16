@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = "blackroom-v3";
+const CACHE_NAME = "blackroom-v4";
 const AUDIO_CACHE_NAME = "blackroom-audio-v1";
 
 // Static assets to precache

@@ -44,12 +44,13 @@ const PLAYLIST_COVERS = [
 
 type CoverId = (typeof PLAYLIST_COVERS)[number]["id"];
 
-function getPlaylistCover(playlistId: number): CoverId | null {
+function getPlaylistCover(playlistId: number): CoverId {
   try {
-    return localStorage.getItem(`playlist_cover_${playlistId}`) as CoverId | null;
-  } catch {
-    return null;
-  }
+    const saved = localStorage.getItem(`playlist_cover_${playlistId}`) as CoverId | null;
+    if (saved) return saved;
+  } catch {}
+  // Auto-assign a cover based on playlist id
+  return PLAYLIST_COVERS[playlistId % PLAYLIST_COVERS.length].id;
 }
 
 function setPlaylistCover(playlistId: number, coverId: CoverId) {
@@ -59,7 +60,7 @@ function setPlaylistCover(playlistId: number, coverId: CoverId) {
 }
 
 function CoverPreview({ coverId, size = 42 }: { coverId: CoverId | null; size?: number }) {
-  const cover = coverId ? PLAYLIST_COVERS.find((c) => c.id === coverId) : null;
+  const cover = coverId ? PLAYLIST_COVERS.find((c) => c.id === coverId) : PLAYLIST_COVERS[0];
   if (!cover) return null;
   const renderIcon = COVER_ICONS[cover.id];
   return (
