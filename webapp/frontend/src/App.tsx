@@ -1164,12 +1164,14 @@ export function App() {
   }, [userId]);
 
   // ── Broadcast live polling ──
+  const broadcastLiveRef = useRef(false);
   useEffect(() => {
     let active = true;
     const check = () => {
       fetchBroadcast().then((b) => {
         if (!active) return;
-        const wasLive = broadcastLive;
+        const wasLive = broadcastLiveRef.current;
+        broadcastLiveRef.current = b.is_live;
         setBroadcastLive(b.is_live);
         setBroadcastDJ(b.dj_name || "DJ");
         if (b.is_live && !wasLive) setLiveBannerDismissed(false);
@@ -1668,7 +1670,7 @@ export function App() {
           }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#ff4444" }}>ON AIR</div>
-            <div style={{ fontSize: 11, color: tc.hint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: 11, color: theme.hintColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {broadcastDJ} in broadcast — tap to listen
             </div>
           </div>
