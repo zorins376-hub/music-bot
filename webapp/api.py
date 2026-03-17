@@ -4407,8 +4407,11 @@ async def _get_broadcast_state() -> dict:
     }
 
 
+_BCAST_PIN_KEY = "broadcast:pinned_msgs"  # Redis hash: group_id -> message_id
+
+
 async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
-    """Send broadcast notification to Telegram group chat."""
+    """Send broadcast notification to Telegram group chat. Pin ON AIR, unpin on stop."""
     try:
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
@@ -4422,6 +4425,7 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
             token=settings.BOT_TOKEN,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
+        r = await _get_redis()
 
         group_ids = [
             int(gid.strip())
@@ -4448,11 +4452,40 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
 
             for gid in group_ids:
                 try:
-                    await bot.send_message(gid, text, reply_markup=kb)
+                    msg = await bot.send_message(gid, text, reply_markup=kb)
+                    # Pin the message so it stays at the top
+                    try:
+                        await bot.pin_chat_message(
+                            chat_id=gid,
+                            message_id=msg.message_id,
+                            disable_notification=False,
+                        )
+                        # Save pinned message ID for later unpin
+                        await r.hset(_BCAST_PIN_KEY, str(gid), str(msg.message_id))
+                    except Exception as pin_err:
+                        logger.warning("Failed to pin ON AIR in %s: %s", gid, pin_err)
                 except Exception as e:
                     logger.warning("Failed to notify group %s: %s", gid, e)
 
         elif action == "stopped":
+            # Unpin and delete ON AIR messages
+            for gid in group_ids:
+                try:
+                    pinned_mid = await r.hget(_BCAST_PIN_KEY, str(gid))
+                    if pinned_mid:
+                        mid = int(pinned_mid)
+                        try:
+                            await bot.unpin_chat_message(chat_id=gid, message_id=mid)
+                        except Exception:
+                            pass
+                        try:
+                            await bot.delete_message(chat_id=gid, message_id=mid)
+                        except Exception:
+                            pass
+                        await r.hdel(_BCAST_PIN_KEY, str(gid))
+                except Exception:
+                    pass
+
             text = "The broadcast has ended. See you next time!"
             for gid in group_ids:
                 try:
