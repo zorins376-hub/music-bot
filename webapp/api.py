@@ -4330,6 +4330,673 @@ async def smart_playlists(user: dict = Depends(get_current_user)):
         return {"playlists": []}
 
 
+# ── Live Radio Broadcast (DJ-controlled stream) ───────────────────────
+
+_broadcast_subscribers: list[asyncio.Queue] = []
+
+_BCAST_LIVE_KEY = "broadcast:live"
+_BCAST_STATE_KEY = "broadcast:state"
+_BCAST_QUEUE_KEY = "broadcast:queue"
+
+
+_BROADCAST_DJ_USERNAMES = {"tequilasunshine1", "kg_1988hp"}
+
+
+def _is_broadcast_dj(user: dict) -> bool:
+    """Check if user is an authorized broadcast DJ."""
+    username = (user.get("username") or "").lower()
+    return username in _BROADCAST_DJ_USERNAMES
+
+
+async def _require_broadcast_admin(user: dict):
+    if not _is_broadcast_dj(user):
+        raise HTTPException(status_code=403, detail="Only authorized DJs can control the broadcast")
+
+
+async def _notify_broadcast(event: str, data: dict | None = None):
+    """Send SSE event to all broadcast listeners."""
+    payload = json.dumps({"event": event, "data": data or {}}, ensure_ascii=False)
+    dead: list[asyncio.Queue] = []
+    for q in _broadcast_subscribers:
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        try:
+            _broadcast_subscribers.remove(q)
+        except ValueError:
+            pass
+
+
+async def _get_broadcast_state() -> dict:
+    """Read broadcast state from Redis."""
+    r = await _get_redis()
+    is_live = await r.get(_BCAST_LIVE_KEY)
+    if not is_live:
+        return {
+            "is_live": False, "dj_id": None, "dj_name": None,
+            "current_idx": 0, "seek_pos": 0, "action": "idle",
+            "started_at": None, "updated_at": None, "channel": None,
+            "listener_count": len(_broadcast_subscribers), "tracks": [],
+        }
+
+    state = await r.hgetall(_BCAST_STATE_KEY)
+    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+    tracks = []
+    for i, raw in enumerate(queue_raw):
+        try:
+            t = json.loads(raw)
+            t["position"] = i
+            tracks.append(t)
+        except Exception:
+            pass
+
+    return {
+        "is_live": True,
+        "dj_id": int(state.get("dj_id", 0)) if state.get("dj_id") else None,
+        "dj_name": state.get("dj_name"),
+        "current_idx": int(state.get("current_idx", 0)),
+        "seek_pos": float(state.get("seek_pos", 0)),
+        "action": state.get("action", "idle"),
+        "started_at": state.get("started_at"),
+        "updated_at": state.get("updated_at"),
+        "channel": state.get("channel"),
+        "listener_count": len(_broadcast_subscribers),
+        "tracks": tracks,
+    }
+
+
+async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
+    """Send broadcast notification to Telegram group chat."""
+    try:
+        from aiogram import Bot
+        from aiogram.client.default import DefaultBotProperties
+        from aiogram.enums import ParseMode
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+        if not settings.BLACKROOM_GROUP_ID or not settings.BOT_TOKEN:
+            return
+
+        bot = Bot(
+            token=settings.BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+
+        group_ids = [
+            int(gid.strip())
+            for gid in str(settings.BLACKROOM_GROUP_ID).split(",")
+            if gid.strip()
+        ]
+
+        if action == "started":
+            text = (
+                f"<b>ON AIR</b>\n\n"
+                f"DJ <b>{dj_name}</b> started a live broadcast!\n"
+                f"Open the app to listen together"
+            )
+            rows = []
+            if settings.TMA_URL:
+                broadcast_url = f"{settings.TMA_URL.rstrip('/')}?startapp=broadcast"
+                rows.append([
+                    InlineKeyboardButton(
+                        text="Listen Live",
+                        web_app=WebAppInfo(url=broadcast_url),
+                    ),
+                ])
+            kb = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+            for gid in group_ids:
+                try:
+                    await bot.send_message(gid, text, reply_markup=kb)
+                except Exception as e:
+                    logger.warning("Failed to notify group %s: %s", gid, e)
+
+        elif action == "stopped":
+            text = "The broadcast has ended. See you next time!"
+            for gid in group_ids:
+                try:
+                    await bot.send_message(gid, text)
+                except Exception as e:
+                    logger.warning("Failed to notify group %s: %s", gid, e)
+
+        await bot.session.close()
+    except Exception as e:
+        logger.error("Broadcast chat notification failed: %s", e)
+
+
+async def _broadcast_sync_voice_chat(r, action: str, channel: str = "tequila"):
+    """Sync broadcast queue to voice chat Redis queue for the streamer."""
+    try:
+        vc_queue_key = "radio:queue:broadcast"
+
+        if action == "started":
+            # Copy current broadcast queue to voice chat queue
+            queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+            if queue_raw:
+                await r.delete(vc_queue_key)
+                for raw in queue_raw:
+                    await r.rpush(vc_queue_key, raw)
+                logger.info("Synced %d tracks to voice chat queue", len(queue_raw))
+
+        elif action == "stopped":
+            await r.delete(vc_queue_key)
+            await r.delete("radio:current:broadcast")
+
+        elif action == "next":
+            # Push the next track to voice chat queue
+            state = await r.hgetall(_BCAST_STATE_KEY)
+            current_idx = int(state.get("current_idx", 0))
+            track_raw = await r.lindex(_BCAST_QUEUE_KEY, current_idx)
+            if track_raw:
+                await r.rpush(vc_queue_key, track_raw)
+    except Exception as e:
+        logger.error("Voice chat sync failed: %s", e)
+
+
+@app.get("/api/broadcast")
+async def get_broadcast(user: dict = Depends(get_current_user)):
+    """Get current broadcast state + queue."""
+    state = await _get_broadcast_state()
+    state["is_dj"] = _is_broadcast_dj(user)
+    return state
+
+
+@app.post("/api/broadcast/start")
+async def start_broadcast(request: Request, user: dict = Depends(get_current_user)):
+    """Start a live broadcast. Admin only."""
+    await _require_broadcast_admin(user)
+    r = await _get_redis()
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    channel = body.get("channel", "tequila")
+    limit = min(int(body.get("limit", 30)), 100)
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    await r.set(_BCAST_LIVE_KEY, "1")
+    await r.hset(_BCAST_STATE_KEY, mapping={
+        "dj_id": str(user["id"]),
+        "dj_name": user.get("first_name", "DJ"),
+        "action": "idle",
+        "current_idx": "0",
+        "seek_pos": "0",
+        "started_at": now,
+        "updated_at": now,
+        "channel": channel,
+    })
+    # Clear old queue
+    await r.delete(_BCAST_QUEUE_KEY)
+
+    # Load tracks from channel
+    try:
+        await _load_channel_to_broadcast(r, channel, limit)
+    except Exception as e:
+        logger.error("Failed to load channel tracks for broadcast: %s", e)
+
+    await _notify_broadcast("started", {
+        "dj_id": user["id"], "dj_name": user.get("first_name", "DJ"),
+    })
+
+    # Notify Telegram group chat + sync voice chat
+    dj_name = user.get("first_name", "DJ")
+    asyncio.create_task(_broadcast_notify_chat("started", dj_name))
+    asyncio.create_task(_broadcast_sync_voice_chat(r, "started", channel))
+
+    return await _get_broadcast_state()
+
+
+async def _load_channel_to_broadcast(r, channel: str, limit: int, exclude: list[str] | None = None):
+    """Load tracks from DB channel into broadcast queue."""
+    from bot.models.base import async_session as _as
+    from bot.models.track import Track as TrackModel
+    from sqlalchemy import select, func
+
+    exclude_set = set(exclude or [])
+
+    async with _as() as session:
+        q = select(
+            TrackModel.source_id, TrackModel.title, TrackModel.artist,
+            TrackModel.duration, TrackModel.cover_url, TrackModel.file_id,
+        ).where(
+            TrackModel.channel == channel,
+            TrackModel.file_id.isnot(None),
+        ).order_by(func.random()).limit(limit)
+
+        result = await session.execute(q)
+        for row in result.all():
+            vid = row[0]
+            if vid in exclude_set:
+                continue
+            track_data = json.dumps({
+                "video_id": vid,
+                "title": row[1] or "Unknown",
+                "artist": row[2] or "Unknown",
+                "duration": row[3] or 0,
+                "duration_fmt": f"{(row[3] or 0) // 60}:{(row[3] or 0) % 60:02d}",
+                "source": "channel",
+                "cover_url": row[4],
+                "file_id": row[5],
+                "channel": channel,
+            }, ensure_ascii=False)
+            await r.rpush(_BCAST_QUEUE_KEY, track_data)
+
+
+@app.get("/api/broadcast/channels")
+async def broadcast_channels(user: dict = Depends(get_current_user)):
+    """List available channel labels with track counts."""
+    await _require_broadcast_admin(user)
+    from bot.models.base import async_session as _as
+    from bot.models.track import Track as TrackModel
+    from sqlalchemy import select, func
+
+    async with _as() as session:
+        result = await session.execute(
+            select(TrackModel.channel, func.count())
+            .where(TrackModel.channel.isnot(None), TrackModel.file_id.isnot(None))
+            .group_by(TrackModel.channel)
+            .order_by(func.count().desc())
+        )
+        channels = [{"label": r[0], "track_count": r[1]} for r in result.all()]
+    return {"channels": channels}
+
+
+@app.post("/api/broadcast/import-channel")
+async def broadcast_import_channel(request: Request, user: dict = Depends(get_current_user)):
+    """
+    Import audio tracks from a Telegram channel into DB.
+    DJ enters @channel_username, backend scans it via Bot API.
+    """
+    await _require_broadcast_admin(user)
+    body = await request.json()
+    channel_ref = body.get("channel_ref", "").strip()
+    label = body.get("label", "").strip().lower() or channel_ref.lstrip("@").lower()
+
+    if not channel_ref:
+        raise HTTPException(400, "channel_ref required (e.g. @my_music_channel)")
+
+    # Import in background so the request doesn't timeout
+    asyncio.create_task(_import_channel_tracks(user, channel_ref, label))
+    return {"status": "importing", "channel": channel_ref, "label": label}
+
+
+async def _import_channel_tracks(user: dict, channel_ref: str, label: str):
+    """Background task: scan a Telegram channel and import audio to DB."""
+    try:
+        from aiogram import Bot
+        from aiogram.client.default import DefaultBotProperties
+        from aiogram.enums import ParseMode
+        from bot.db import upsert_track
+
+        bot = Bot(
+            token=settings.BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+
+        try:
+            chat = await bot.get_chat(channel_ref)
+        except Exception as e:
+            logger.error("Cannot access channel %s: %s", channel_ref, e)
+            await bot.session.close()
+            return
+
+        chat_id = chat.id
+        admin_id = int(user["id"])
+        saved, msg_id, consecutive_fails = 0, 0, 0
+
+        while consecutive_fails < 30:
+            msg_id += 1
+            try:
+                fwd = await bot.forward_message(
+                    chat_id=admin_id,
+                    from_chat_id=chat_id,
+                    message_id=msg_id,
+                    disable_notification=True,
+                )
+                consecutive_fails = 0
+
+                if fwd.audio:
+                    audio = fwd.audio
+                    source_id = f"tg_{chat_id}_{msg_id}"
+                    title = audio.title or (audio.file_name or "Unknown")
+                    artist = audio.performer or ""
+
+                    await upsert_track(
+                        source_id=source_id,
+                        title=title,
+                        artist=artist,
+                        duration=audio.duration,
+                        file_id=audio.file_id,
+                        source="channel",
+                        channel=label,
+                    )
+                    saved += 1
+
+                # Delete forwarded message to keep chat clean
+                try:
+                    await bot.delete_message(admin_id, fwd.message_id)
+                except Exception:
+                    pass
+
+                await asyncio.sleep(0.1)
+            except Exception:
+                consecutive_fails += 1
+                await asyncio.sleep(0.05)
+
+        logger.info("Imported %d tracks from %s -> %s", saved, channel_ref, label)
+
+        # Notify DJ that import is done
+        try:
+            await bot.send_message(
+                admin_id,
+                f"Import done! {saved} tracks from {channel_ref} -> {label}",
+            )
+        except Exception:
+            pass
+
+        await bot.session.close()
+    except Exception as e:
+        logger.error("Channel import failed: %s", e)
+
+
+@app.post("/api/broadcast/stop")
+async def stop_broadcast(user: dict = Depends(get_current_user)):
+    """Stop the broadcast. Admin only."""
+    await _require_broadcast_admin(user)
+    r = await _get_redis()
+    await r.delete(_BCAST_LIVE_KEY, _BCAST_STATE_KEY, _BCAST_QUEUE_KEY)
+    await _notify_broadcast("stopped", {})
+
+    # Notify chat + stop voice chat
+    asyncio.create_task(_broadcast_notify_chat("stopped"))
+    asyncio.create_task(_broadcast_sync_voice_chat(r, "stopped"))
+
+    return {"ok": True}
+
+
+@app.post("/api/broadcast/load-channel")
+async def broadcast_load_channel(request: Request, user: dict = Depends(get_current_user)):
+    """Load tracks from a Telegram channel into broadcast queue. Admin only."""
+    await _require_broadcast_admin(user)
+    body = await request.json()
+    channel = body.get("channel", "tequila")
+    limit = min(int(body.get("limit", 30)), 100)
+
+    r = await _get_redis()
+    is_live = await r.get(_BCAST_LIVE_KEY)
+    if not is_live:
+        raise HTTPException(400, "Broadcast not active")
+
+    # Get existing queue video_ids to avoid duplicates
+    existing = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+    exclude = []
+    for raw in existing:
+        try:
+            exclude.append(json.loads(raw).get("video_id", ""))
+        except Exception:
+            pass
+
+    await _load_channel_to_broadcast(r, channel, limit, exclude)
+    await _notify_broadcast("queue_updated", {
+        "track_count": await r.llen(_BCAST_QUEUE_KEY),
+    })
+    return await _get_broadcast_state()
+
+
+@app.post("/api/broadcast/tracks")
+async def broadcast_add_track(request: Request, user: dict = Depends(get_current_user)):
+    """Add a single track to broadcast queue. Admin only."""
+    await _require_broadcast_admin(user)
+    body = await request.json()
+    r = await _get_redis()
+
+    is_live = await r.get(_BCAST_LIVE_KEY)
+    if not is_live:
+        raise HTTPException(400, "Broadcast not active")
+
+    track_data = json.dumps({
+        "video_id": body.get("video_id", ""),
+        "title": body.get("title", ""),
+        "artist": body.get("artist", ""),
+        "duration": body.get("duration", 0),
+        "duration_fmt": body.get("duration_fmt", "0:00"),
+        "source": body.get("source", "youtube"),
+        "cover_url": body.get("cover_url"),
+    }, ensure_ascii=False)
+    await r.rpush(_BCAST_QUEUE_KEY, track_data)
+
+    await _notify_broadcast("queue_updated", {
+        "track_count": await r.llen(_BCAST_QUEUE_KEY),
+    })
+    return await _get_broadcast_state()
+
+
+@app.delete("/api/broadcast/tracks/{video_id}")
+async def broadcast_remove_track(video_id: str, user: dict = Depends(get_current_user)):
+    """Remove a track from broadcast queue. Admin only."""
+    await _require_broadcast_admin(user)
+    r = await _get_redis()
+
+    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+    for raw in queue_raw:
+        try:
+            t = json.loads(raw)
+            if t.get("video_id") == video_id:
+                await r.lrem(_BCAST_QUEUE_KEY, 1, raw)
+                break
+        except Exception:
+            pass
+
+    await _notify_broadcast("queue_updated", {
+        "track_count": await r.llen(_BCAST_QUEUE_KEY),
+    })
+    return {"ok": True}
+
+
+@app.post("/api/broadcast/reorder")
+async def broadcast_reorder(request: Request, user: dict = Depends(get_current_user)):
+    """Reorder tracks in broadcast queue. Admin only."""
+    await _require_broadcast_admin(user)
+    body = await request.json()
+    from_pos = int(body.get("from_position", 0))
+    to_pos = int(body.get("to_position", 0))
+
+    r = await _get_redis()
+    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+    if from_pos < 0 or from_pos >= len(queue_raw) or to_pos < 0 or to_pos >= len(queue_raw):
+        raise HTTPException(400, "Invalid positions")
+
+    items = list(queue_raw)
+    item = items.pop(from_pos)
+    items.insert(to_pos, item)
+
+    pipe = r.pipeline()
+    pipe.delete(_BCAST_QUEUE_KEY)
+    for it in items:
+        pipe.rpush(_BCAST_QUEUE_KEY, it)
+    await pipe.execute()
+
+    await _notify_broadcast("queue_updated", {
+        "track_count": len(items),
+    })
+    return await _get_broadcast_state()
+
+
+@app.post("/api/broadcast/skip")
+async def broadcast_skip(user: dict = Depends(get_current_user)):
+    """Skip to next track. Admin only."""
+    await _require_broadcast_admin(user)
+    r = await _get_redis()
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
+    queue_len = await r.llen(_BCAST_QUEUE_KEY)
+    new_idx = min(current_idx + 1, max(queue_len - 1, 0))
+
+    await r.hset(_BCAST_STATE_KEY, mapping={
+        "current_idx": str(new_idx),
+        "seek_pos": "0",
+        "action": "play",
+        "updated_at": now,
+    })
+
+    # Get new track info
+    track_raw = await r.lindex(_BCAST_QUEUE_KEY, new_idx)
+    track = json.loads(track_raw) if track_raw else {}
+
+    await _notify_broadcast("next", {
+        "position": new_idx,
+        "track": track,
+    })
+    return await _get_broadcast_state()
+
+
+@app.post("/api/broadcast/playback")
+async def broadcast_playback(request: Request, user: dict = Depends(get_current_user)):
+    """Sync playback state (play/pause/seek). Admin only."""
+    await _require_broadcast_admin(user)
+    body = await request.json()
+    action = body.get("action", "play")
+    seek_pos = float(body.get("seek_pos", 0))
+
+    r = await _get_redis()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    mapping = {"action": action, "updated_at": now}
+    if seek_pos > 0:
+        mapping["seek_pos"] = str(seek_pos)
+    if "current_idx" in body:
+        mapping["current_idx"] = str(int(body["current_idx"]))
+
+    await r.hset(_BCAST_STATE_KEY, mapping=mapping)
+
+    await _notify_broadcast("playback_sync", {
+        "action": action,
+        "seek_pos": seek_pos,
+        "current_idx": int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0),
+    })
+    return await _get_broadcast_state()
+
+
+@app.post("/api/broadcast/advance")
+async def broadcast_advance(user: dict = Depends(get_current_user)):
+    """Auto-advance to next track (called by DJ client when track ends). Admin only."""
+    await _require_broadcast_admin(user)
+    r = await _get_redis()
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
+    queue_len = await r.llen(_BCAST_QUEUE_KEY)
+    new_idx = current_idx + 1
+
+    # Auto-refill if running low
+    if queue_len - new_idx < 5:
+        channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
+        existing = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+        exclude = []
+        for raw in existing:
+            try:
+                exclude.append(json.loads(raw).get("video_id", ""))
+            except Exception:
+                pass
+        try:
+            await _load_channel_to_broadcast(r, channel, 20, exclude)
+        except Exception as e:
+            logger.error("Broadcast auto-refill failed: %s", e)
+        queue_len = await r.llen(_BCAST_QUEUE_KEY)
+
+    # Wrap around if at end
+    if new_idx >= queue_len:
+        new_idx = 0
+
+    await r.hset(_BCAST_STATE_KEY, mapping={
+        "current_idx": str(new_idx),
+        "seek_pos": "0",
+        "action": "play",
+        "updated_at": now,
+    })
+
+    track_raw = await r.lindex(_BCAST_QUEUE_KEY, new_idx)
+    track = json.loads(track_raw) if track_raw else {}
+
+    await _notify_broadcast("next", {
+        "position": new_idx,
+        "track": track,
+    })
+
+    # Sync next track to voice chat
+    asyncio.create_task(_broadcast_sync_voice_chat(r, "next"))
+
+    return await _get_broadcast_state()
+
+
+@app.get("/api/broadcast/events")
+async def broadcast_events(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """SSE stream for real-time broadcast updates."""
+    init_data = x_telegram_init_data or token
+    if not init_data:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    user = verify_init_data(init_data)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid initData")
+    await _get_or_create_webapp_user(user)
+
+    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
+    _broadcast_subscribers.append(queue)
+
+    # Notify listener count update
+    await _notify_broadcast("listener_count", {
+        "count": len(_broadcast_subscribers),
+    })
+
+    async def event_generator():
+        try:
+            # Send initial state snapshot
+            state = await _get_broadcast_state()
+            yield f"data: {json.dumps({'event': 'connected', 'data': state}, ensure_ascii=False)}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            try:
+                _broadcast_subscribers.remove(queue)
+            except ValueError:
+                pass
+            await _notify_broadcast("listener_count", {
+                "count": len(_broadcast_subscribers),
+            })
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ── Frontend SPA serving ────────────────────────────────────────────────
 
 _FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
