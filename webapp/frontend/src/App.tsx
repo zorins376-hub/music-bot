@@ -2369,7 +2369,7 @@ export function App() {
       <ActionSheet
         track={actionSheetTrack}
         visible={actionSheetVisible}
-        onClose={() => setActionSheetVisible(false)}
+        onClose={() => { setActionSheetVisible(false); setActionSheetTrack(null); }}
         accentColor={accentColor}
         themeId={theme.id}
         onAction={(actionId, t) => {

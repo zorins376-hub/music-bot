@@ -53,6 +53,18 @@ def _select_bitrate(pref: str | None, premium: bool) -> int:
     return settings.DEFAULT_BITRATE
 
 
+# Strong references to background tasks to prevent GC before completion
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_task(coro) -> asyncio.Task:
+    """Create a background task with GC protection."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 def _schedule_background_download(video_id: str, bitrate: int) -> None:
     """Fire-and-forget mp3 download so next play hits cache."""
     async def _run():
@@ -61,7 +73,7 @@ def _schedule_background_download(video_id: str, bitrate: int) -> None:
         except Exception:
             logger.warning("Background download failed for %s", video_id)
 
-    asyncio.create_task(_run())
+    _fire_task(_run())
 
 # ── Bounded LRU dict (evicts oldest when maxsize exceeded) ────────────────
 class _BoundedDict(dict):
@@ -187,7 +199,7 @@ async def lifespan(app: FastAPI):
 
     # Chart cache prewarm (same as bot, ensures webapp has fresh charts)
     from bot.handlers.charts import _prewarm_charts_once
-    asyncio.create_task(_prewarm_charts_once())
+    _fire_task(_prewarm_charts_once())
 
     # Background track indexer — harvests metadata from charts & APIs into DB
     from bot.services.track_indexer import start_indexer_scheduler
@@ -231,8 +243,8 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.debug("stale download cleanup error", exc_info=True)
 
-    cleanup_task = asyncio.create_task(_cleanup_url_cache())
-    dl_cleanup_task = asyncio.create_task(_cleanup_stale_downloads())
+    cleanup_task = _fire_task(_cleanup_url_cache())
+    dl_cleanup_task = _fire_task(_cleanup_stale_downloads())
     yield
     cleanup_task.cancel()
     dl_cleanup_task.cancel()
@@ -1376,7 +1388,7 @@ async def search_tracks(
     # Fire-and-forget: prefetch stream URLs for first 3 YouTube results
     yt_ids = [t.video_id for t in tracks if _is_likely_youtube_id(t.video_id)][:3]
     for vid in yt_ids:
-        asyncio.create_task(_prefetch_stream_url(vid))
+        _fire_task(_prefetch_stream_url(vid))
 
     return SearchResult(tracks=tracks, total=len(tracks))
 
@@ -4425,75 +4437,73 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
             token=settings.BOT_TOKEN,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
-        r = await _get_redis()
+        try:
+            r = await _get_redis()
 
-        group_ids = [
-            int(gid.strip())
-            for gid in str(settings.BLACKROOM_GROUP_ID).split(",")
-            if gid.strip()
-        ]
+            group_ids = [
+                int(gid.strip())
+                for gid in str(settings.BLACKROOM_GROUP_ID).split(",")
+                if gid.strip()
+            ]
 
-        if action == "started":
-            text = (
-                f"<b>ON AIR</b>\n\n"
-                f"DJ <b>{dj_name}</b> started a live broadcast!\n"
-                f"Open the app to listen together"
-            )
-            rows = []
-            if settings.TMA_URL:
-                broadcast_url = f"{settings.TMA_URL.rstrip('/')}?startapp=broadcast"
-                rows.append([
-                    InlineKeyboardButton(
-                        text="Listen Live",
-                        web_app=WebAppInfo(url=broadcast_url),
-                    ),
-                ])
-            kb = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+            if action == "started":
+                text = (
+                    f"<b>ON AIR</b>\n\n"
+                    f"DJ <b>{dj_name}</b> started a live broadcast!\n"
+                    f"Open the app to listen together"
+                )
+                rows = []
+                if settings.TMA_URL:
+                    broadcast_url = f"{settings.TMA_URL.rstrip('/')}?startapp=broadcast"
+                    rows.append([
+                        InlineKeyboardButton(
+                            text="Listen Live",
+                            web_app=WebAppInfo(url=broadcast_url),
+                        ),
+                    ])
+                kb = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
-            for gid in group_ids:
-                try:
-                    msg = await bot.send_message(gid, text, reply_markup=kb)
-                    # Pin the message so it stays at the top
+                for gid in group_ids:
                     try:
-                        await bot.pin_chat_message(
-                            chat_id=gid,
-                            message_id=msg.message_id,
-                            disable_notification=False,
-                        )
-                        # Save pinned message ID for later unpin
-                        await r.hset(_BCAST_PIN_KEY, str(gid), str(msg.message_id))
-                    except Exception as pin_err:
-                        logger.warning("Failed to pin ON AIR in %s: %s", gid, pin_err)
-                except Exception as e:
-                    logger.warning("Failed to notify group %s: %s", gid, e)
-
-        elif action == "stopped":
-            # Unpin and delete ON AIR messages
-            for gid in group_ids:
-                try:
-                    pinned_mid = await r.hget(_BCAST_PIN_KEY, str(gid))
-                    if pinned_mid:
-                        mid = int(pinned_mid)
+                        msg = await bot.send_message(gid, text, reply_markup=kb)
                         try:
-                            await bot.unpin_chat_message(chat_id=gid, message_id=mid)
-                        except Exception:
-                            pass
-                        try:
-                            await bot.delete_message(chat_id=gid, message_id=mid)
-                        except Exception:
-                            pass
-                        await r.hdel(_BCAST_PIN_KEY, str(gid))
-                except Exception:
-                    pass
+                            await bot.pin_chat_message(
+                                chat_id=gid,
+                                message_id=msg.message_id,
+                                disable_notification=False,
+                            )
+                            await r.hset(_BCAST_PIN_KEY, str(gid), str(msg.message_id))
+                        except Exception as pin_err:
+                            logger.warning("Failed to pin ON AIR in %s: %s", gid, pin_err)
+                    except Exception as e:
+                        logger.warning("Failed to notify group %s: %s", gid, e)
 
-            text = "The broadcast has ended. See you next time!"
-            for gid in group_ids:
-                try:
-                    await bot.send_message(gid, text)
-                except Exception as e:
-                    logger.warning("Failed to notify group %s: %s", gid, e)
+            elif action == "stopped":
+                for gid in group_ids:
+                    try:
+                        pinned_mid = await r.hget(_BCAST_PIN_KEY, str(gid))
+                        if pinned_mid:
+                            mid = int(pinned_mid)
+                            try:
+                                await bot.unpin_chat_message(chat_id=gid, message_id=mid)
+                            except Exception:
+                                pass
+                            try:
+                                await bot.delete_message(chat_id=gid, message_id=mid)
+                            except Exception:
+                                pass
+                            await r.hdel(_BCAST_PIN_KEY, str(gid))
+                    except Exception:
+                        pass
 
-        await bot.session.close()
+                text = "The broadcast has ended. See you next time!"
+                for gid in group_ids:
+                    try:
+                        await bot.send_message(gid, text)
+                    except Exception as e:
+                        logger.warning("Failed to notify group %s: %s", gid, e)
+        finally:
+            await bot.session.close()
     except Exception as e:
         logger.error("Broadcast chat notification failed: %s", e)
 
@@ -4579,8 +4589,8 @@ async def start_broadcast(request: Request, user: dict = Depends(get_current_use
 
     # Notify Telegram group chat + sync voice chat
     dj_name = user.get("first_name", "DJ")
-    asyncio.create_task(_broadcast_notify_chat("started", dj_name))
-    asyncio.create_task(_broadcast_sync_voice_chat(r, "started", channel))
+    _fire_task(_broadcast_notify_chat("started", dj_name))
+    _fire_task(_broadcast_sync_voice_chat(r, "started", channel))
 
     return await _get_broadcast_state()
 
@@ -4653,14 +4663,20 @@ async def broadcast_import_channel(request: Request, user: dict = Depends(get_cu
 
     if not channel_ref:
         raise HTTPException(400, "channel_ref required (e.g. @my_music_channel)")
+    if len(channel_ref) > 128:
+        raise HTTPException(400, "channel_ref too long")
+    import re as _re
+    if not _re.match(r'^@?[a-zA-Z0-9_]+$', channel_ref):
+        raise HTTPException(400, "Invalid channel_ref format")
 
     # Import in background so the request doesn't timeout
-    asyncio.create_task(_import_channel_tracks(user, channel_ref, label))
+    _fire_task(_import_channel_tracks(user, channel_ref, label))
     return {"status": "importing", "channel": channel_ref, "label": label}
 
 
 async def _import_channel_tracks(user: dict, channel_ref: str, label: str):
     """Background task: scan a Telegram channel and import audio to DB."""
+    import time as _time
     try:
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
@@ -4671,69 +4687,67 @@ async def _import_channel_tracks(user: dict, channel_ref: str, label: str):
             token=settings.BOT_TOKEN,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
-
+        admin_id = int(user["id"])
         try:
             chat = await bot.get_chat(channel_ref)
-        except Exception as e:
-            logger.error("Cannot access channel %s: %s", channel_ref, e)
-            await bot.session.close()
-            return
+            chat_id = chat.id
+            saved, msg_id, consecutive_fails = 0, 0, 0
+            start_time = _time.monotonic()
+            max_scan = 5000  # Max messages to scan
+            timeout_sec = 300  # 5 min limit
 
-        chat_id = chat.id
-        admin_id = int(user["id"])
-        saved, msg_id, consecutive_fails = 0, 0, 0
-
-        while consecutive_fails < 30:
-            msg_id += 1
-            try:
-                fwd = await bot.forward_message(
-                    chat_id=admin_id,
-                    from_chat_id=chat_id,
-                    message_id=msg_id,
-                    disable_notification=True,
-                )
-                consecutive_fails = 0
-
-                if fwd.audio:
-                    audio = fwd.audio
-                    source_id = f"tg_{chat_id}_{msg_id}"
-                    title = audio.title or (audio.file_name or "Unknown")
-                    artist = audio.performer or ""
-
-                    await upsert_track(
-                        source_id=source_id,
-                        title=title,
-                        artist=artist,
-                        duration=audio.duration,
-                        file_id=audio.file_id,
-                        source="channel",
-                        channel=label,
-                    )
-                    saved += 1
-
-                # Delete forwarded message to keep chat clean
+            while consecutive_fails < 30 and msg_id < max_scan:
+                if _time.monotonic() - start_time > timeout_sec:
+                    logger.warning("Channel import timeout for %s after %d msgs", channel_ref, msg_id)
+                    break
+                msg_id += 1
                 try:
-                    await bot.delete_message(admin_id, fwd.message_id)
+                    fwd = await bot.forward_message(
+                        chat_id=admin_id,
+                        from_chat_id=chat_id,
+                        message_id=msg_id,
+                        disable_notification=True,
+                    )
+                    consecutive_fails = 0
+
+                    if fwd.audio:
+                        audio = fwd.audio
+                        source_id = f"tg_{chat_id}_{msg_id}"
+                        title = audio.title or (audio.file_name or "Unknown")
+                        artist = audio.performer or ""
+
+                        await upsert_track(
+                            source_id=source_id,
+                            title=title,
+                            artist=artist,
+                            duration=audio.duration,
+                            file_id=audio.file_id,
+                            source="channel",
+                            channel=label,
+                        )
+                        saved += 1
+
+                    try:
+                        await bot.delete_message(admin_id, fwd.message_id)
+                    except Exception:
+                        pass
+
+                    await asyncio.sleep(0.1)
                 except Exception:
-                    pass
+                    consecutive_fails += 1
+                    await asyncio.sleep(0.05)
 
-                await asyncio.sleep(0.1)
+            logger.info("Imported %d tracks from %s -> %s", saved, channel_ref, label)
+
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"Import done! {saved} tracks from {channel_ref} -> {label}",
+                )
             except Exception:
-                consecutive_fails += 1
-                await asyncio.sleep(0.05)
-
-        logger.info("Imported %d tracks from %s -> %s", saved, channel_ref, label)
-
-        # Notify DJ that import is done
-        try:
-            await bot.send_message(
-                admin_id,
-                f"Import done! {saved} tracks from {channel_ref} -> {label}",
-            )
-        except Exception:
-            pass
-
-        await bot.session.close()
+                pass
+        finally:
+            await bot.session.close()
     except Exception as e:
         logger.error("Channel import failed: %s", e)
 
@@ -4747,8 +4761,8 @@ async def stop_broadcast(user: dict = Depends(get_current_user)):
     await _notify_broadcast("stopped", {})
 
     # Notify chat + stop voice chat
-    asyncio.create_task(_broadcast_notify_chat("stopped"))
-    asyncio.create_task(_broadcast_sync_voice_chat(r, "stopped"))
+    _fire_task(_broadcast_notify_chat("stopped"))
+    _fire_task(_broadcast_sync_voice_chat(r, "stopped"))
 
     return {"ok": True}
 
@@ -4969,7 +4983,7 @@ async def broadcast_advance(user: dict = Depends(get_current_user)):
     })
 
     # Sync next track to voice chat
-    asyncio.create_task(_broadcast_sync_voice_chat(r, "next"))
+    _fire_task(_broadcast_sync_voice_chat(r, "next"))
 
     return await _get_broadcast_state()
 
