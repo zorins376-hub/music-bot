@@ -140,8 +140,13 @@ export function ProfileView({
   const [showAllFavs, setShowAllFavs] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [challenges, setChallenges] = useState<ChallengesData | null>(null);
+  const statsRef = useRef<UserStats | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    statsRef.current = stats;
+  }, [stats]);
 
   // Load avatar from localStorage
   useEffect(() => {
@@ -172,7 +177,7 @@ export function ProfileView({
     const hardTimeout = setTimeout(() => {
       if (!cancelled) {
         setLoading(false);
-        if (!stats) setError(true);
+        if (!statsRef.current) setError(true);
       }
     }, 6000);
 
@@ -198,6 +203,7 @@ export function ProfileView({
         if (!cancelled) setError(true);
       })
       .finally(() => {
+        clearTimeout(hardTimeout);
         clearTimeout(fetchTimer);
         if (!cancelled) setLoading(false);
       });
@@ -302,12 +308,17 @@ export function ProfileView({
     );
   }
 
-  const maxArtistCount = stats.top_artists.length > 0
-    ? Math.max(...stats.top_artists.map((a) => a.count))
+  const topArtists = Array.isArray(stats.top_artists) ? stats.top_artists : [];
+  const topGenres = Array.isArray(stats.top_genres) ? stats.top_genres : [];
+  const badges = Array.isArray(stats.badges) ? stats.badges : [];
+  const recentTracks = Array.isArray(stats.recent_tracks) ? stats.recent_tracks : [];
+
+  const maxArtistCount = topArtists.length > 0
+    ? Math.max(...topArtists.map((a) => a.count))
     : 1;
 
-  const xpForNext = stats.level * 100;
-  const xpProgress = xpForNext > 0 ? Math.min(stats.xp / xpForNext, 1) : 0;
+  const xpForNext = Math.max((stats.level || 1) * 100, 100);
+  const xpProgress = xpForNext > 0 ? Math.min((stats.xp || 0) / xpForNext, 1) : 0;
 
   const displayName = firstName || username || "User";
   const avatarLetter = displayName.charAt(0).toUpperCase();
@@ -532,7 +543,7 @@ export function ProfileView({
       </div>
 
       {/* ── Top Artists ────────────────────────────────────────────── */}
-      {stats.top_artists.length > 0 && (
+      {topArtists.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -540,7 +551,7 @@ export function ProfileView({
           }}>
             Топ исполнители
           </div>
-          {stats.top_artists.map((artist, idx) => (
+          {topArtists.map((artist, idx) => (
             <div key={artist.name} style={{
               display: "flex", alignItems: "center", gap: 10,
               padding: "8px 12px", borderRadius: 12, marginBottom: 6,
@@ -582,7 +593,7 @@ export function ProfileView({
       )}
 
       {/* ── Top Genres ─────────────────────────────────────────────── */}
-      {stats.top_genres.length > 0 && (
+      {topGenres.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -591,7 +602,7 @@ export function ProfileView({
             Жанры
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {stats.top_genres.map((genre) => (
+            {topGenres.map((genre) => (
               <div key={genre.name} style={{
                 padding: "5px 12px", borderRadius: 12,
                 background: tc.cardBg, border: tc.cardBorder,
@@ -614,7 +625,7 @@ export function ProfileView({
       )}
 
       {/* ── Achievements ───────────────────────────────────────────── */}
-      {stats.badges.length > 0 && (
+      {badges.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -625,7 +636,7 @@ export function ProfileView({
           <div style={{
             display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8,
           }}>
-            {stats.badges.map((badgeId) => {
+            {badges.map((badgeId) => {
               const def = BADGE_DEFS[badgeId];
               if (!def) return null;
               const BadgeIcon = BADGE_ICONS[badgeId] || IconCrown;
@@ -783,7 +794,7 @@ export function ProfileView({
       )}
 
       {/* ── Recent History ─────────────────────────────────────────── */}
-      {stats.recent_tracks.length > 0 && (
+      {recentTracks.length > 0 && (
         <div>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -791,7 +802,7 @@ export function ProfileView({
           }}>
             История
           </div>
-          {stats.recent_tracks.slice(0, 20).map((t, idx) => (
+          {recentTracks.slice(0, 20).map((t, idx) => (
             <div
               key={`${t.video_id}-${idx}`}
               onClick={() => { haptic("light"); onPlayTrack(t); }}

@@ -32,6 +32,7 @@ export function LiveRadioView({
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [starting, setStarting] = useState(false);
   const [channel, setChannel] = useState("tequila");
   const [expandedQueue, setExpandedQueue] = useState(false);
@@ -44,8 +45,15 @@ export function LiveRadioView({
 
   // Fetch initial state
   const loadState = useCallback(async () => {
+    let timeoutId: number | undefined;
     try {
-      const data = await fetchBroadcast();
+      setError(false);
+      const data = await Promise.race([
+        fetchBroadcast(),
+        new Promise<never>((_, reject) => {
+          timeoutId = window.setTimeout(() => reject(new Error("broadcast timeout")), 7000);
+        }),
+      ]);
       setBroadcast(data);
       // Load available channels if DJ
       if (data.is_dj) {
@@ -53,7 +61,9 @@ export function LiveRadioView({
       }
     } catch {
       setBroadcast(null);
+      setError(true);
     } finally {
+      if (timeoutId) clearTimeout(timeoutId);
       setLoading(false);
     }
   }, []);
@@ -228,6 +238,35 @@ export function LiveRadioView({
     );
   }
 
+  if (error) {
+    return (
+      <div style={{ textAlign: "center", padding: 48 }}>
+        <IconBroadcast size={36} color={tc.hintColor} />
+        <div style={{ fontSize: 15, fontWeight: 600, color: tc.textColor, marginTop: 12 }}>
+          Не удалось загрузить эфир
+        </div>
+        <div style={{ fontSize: 12, color: tc.hintColor, marginTop: 8, marginBottom: 16 }}>
+          Если сеть или Telegram initData запаздывают, экран больше не будет висеть бесконечно.
+        </div>
+        <button
+          onClick={() => { setLoading(true); loadState(); }}
+          style={{
+            padding: "10px 18px",
+            borderRadius: 12,
+            border: "none",
+            background: tc.highlight,
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Повторить
+        </button>
+      </div>
+    );
+  }
+
   const isDJ = broadcast?.is_dj ?? false;
   const isLive = broadcast?.is_live ?? false;
   const currentIdx = broadcast?.current_idx ?? 0;
@@ -254,13 +293,13 @@ export function LiveRadioView({
           display: "inline-flex", alignItems: "center", gap: 10,
           padding: "8px 20px", borderRadius: 24,
           background: isLive ? "rgba(255, 50, 50, 0.15)" : tc.cardBg,
-          border: `1px solid ${isLive ? "rgba(255, 50, 50, 0.3)" : tc.border}`,
+          border: isLive ? "1px solid rgba(255, 50, 50, 0.3)" : tc.cardBorder,
           animation: isLive ? "bcast-glow 2s ease infinite" : undefined,
         }}>
-          <IconBroadcast size={20} color={isLive ? "#ff3232" : tc.hint} />
+          <IconBroadcast size={20} color={isLive ? "#ff3232" : tc.hintColor} />
           <span style={{
             fontSize: 16, fontWeight: 700,
-            color: isLive ? "#ff3232" : tc.text,
+            color: isLive ? "#ff3232" : tc.textColor,
           }}>
             {isLive ? "ON AIR" : "Offline"}
           </span>
@@ -274,7 +313,7 @@ export function LiveRadioView({
 
         {isLive && broadcast && (
           <div style={{
-            marginTop: 8, fontSize: 12, color: tc.hint,
+            marginTop: 8, fontSize: 12, color: tc.hintColor,
             display: "flex", justifyContent: "center", gap: 16,
           }}>
             <span>DJ: {broadcast.dj_name || "Unknown"}</span>
@@ -287,7 +326,7 @@ export function LiveRadioView({
       {isLive && currentTrackData && (
         <div style={{
           background: tc.cardBg, borderRadius: 20, padding: 20,
-          border: `1px solid ${tc.border}`,
+          border: tc.cardBorder,
           marginBottom: 16, animation: "bcast-slideIn 0.5s ease",
           textAlign: "center",
         }}>
@@ -295,7 +334,7 @@ export function LiveRadioView({
           <div style={{
             width: 180, height: 180, borderRadius: 16, margin: "0 auto 16px",
             overflow: "hidden", background: "rgba(255,255,255,0.05)",
-            border: `2px solid ${tc.border}`,
+            border: `2px solid ${tc.accentBorderAlpha}`,
           }}>
             {currentTrackData.cover_url ? (
               <img src={currentTrackData.cover_url} alt="" style={{
@@ -306,20 +345,20 @@ export function LiveRadioView({
                 width: "100%", height: "100%", display: "flex",
                 alignItems: "center", justifyContent: "center",
               }}>
-                <IconMusic size={64} color={tc.hint} />
+                <IconMusic size={64} color={tc.hintColor} />
               </div>
             )}
           </div>
 
           {/* Track Info */}
           <div style={{
-            fontSize: 18, fontWeight: 700, color: tc.text,
+            fontSize: 18, fontWeight: 700, color: tc.textColor,
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>
             {currentTrackData.title}
           </div>
           <div style={{
-            fontSize: 14, color: tc.hint, marginTop: 4,
+            fontSize: 14, color: tc.hintColor, marginTop: 4,
           }}>
             {currentTrackData.artist}
           </div>
@@ -339,7 +378,7 @@ export function LiveRadioView({
           </div>
 
           {/* Duration */}
-          <div style={{ fontSize: 12, color: tc.hint, marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: tc.hintColor, marginTop: 8 }}>
             {currentTrackData.duration_fmt}
           </div>
         </div>
@@ -349,10 +388,10 @@ export function LiveRadioView({
       {isDJ && (
         <div style={{
           background: tc.cardBg, borderRadius: 16, padding: 16,
-          border: `1px solid ${tc.border}`, marginBottom: 16,
+          border: tc.cardBorder, marginBottom: 16,
           animation: "bcast-slideIn 0.6s ease",
         }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: tc.text, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: tc.textColor, marginBottom: 12 }}>
             DJ Panel
           </div>
 
@@ -360,7 +399,7 @@ export function LiveRadioView({
             <>
               {/* Channel Selector */}
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, color: tc.hint, marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6 }}>
                   Source channel
                 </div>
                 <div style={{
@@ -373,7 +412,7 @@ export function LiveRadioView({
                       style={{
                         padding: "8px 14px", borderRadius: 10, border: "none",
                         background: channel === ch.label ? tc.highlight : "rgba(255,255,255,0.06)",
-                        color: channel === ch.label ? "#fff" : tc.hint,
+                        color: channel === ch.label ? "#fff" : tc.hintColor,
                         fontSize: 12, fontWeight: 600, cursor: "pointer",
                         transition: "all 0.2s",
                       }}
@@ -390,7 +429,7 @@ export function LiveRadioView({
                   onClick={() => setShowImport(!showImport)}
                   style={{
                     padding: "6px 12px", borderRadius: 8, border: "none",
-                    background: "rgba(255,255,255,0.06)", color: tc.hint,
+                    background: "rgba(255,255,255,0.06)", color: tc.hintColor,
                     fontSize: 11, cursor: "pointer",
                   }}
                 >
@@ -405,8 +444,8 @@ export function LiveRadioView({
                       placeholder="@channel_name"
                       style={{
                         flex: 1, padding: "8px 12px", borderRadius: 10,
-                        border: `1px solid ${tc.border}`, background: "rgba(255,255,255,0.04)",
-                        color: tc.text, fontSize: 13, outline: "none",
+                        border: tc.cardBorder, background: "rgba(255,255,255,0.04)",
+                        color: tc.textColor, fontSize: 13, outline: "none",
                       }}
                     />
                     <button
@@ -449,7 +488,7 @@ export function LiveRadioView({
                   onClick={handleSkip}
                   style={{
                     flex: 1, padding: "10px 0", borderRadius: 12, border: "none",
-                    background: "rgba(255,255,255,0.08)", color: tc.text,
+                    background: "rgba(255,255,255,0.08)", color: tc.textColor,
                     fontSize: 13, fontWeight: 600, cursor: "pointer",
                   }}
                 >
@@ -459,7 +498,7 @@ export function LiveRadioView({
                   onClick={handleLoadMore}
                   style={{
                     flex: 1, padding: "10px 0", borderRadius: 12, border: "none",
-                    background: "rgba(255,255,255,0.08)", color: tc.text,
+                    background: "rgba(255,255,255,0.08)", color: tc.textColor,
                     fontSize: 13, fontWeight: 600, cursor: "pointer",
                   }}
                 >
@@ -486,7 +525,7 @@ export function LiveRadioView({
                     style={{
                       padding: "6px 10px", borderRadius: 8, border: "none",
                       background: channel === ch.label ? "rgba(255,255,255,0.12)" : "transparent",
-                      color: channel === ch.label ? tc.text : tc.hint,
+                      color: channel === ch.label ? tc.textColor : tc.hintColor,
                       fontSize: 11, fontWeight: 500, cursor: "pointer",
                     }}
                   >
@@ -505,14 +544,14 @@ export function LiveRadioView({
           textAlign: "center", padding: 40,
           animation: "bcast-slideIn 0.5s ease",
         }}>
-          <IconBroadcast size={48} color={tc.hint} />
+          <IconBroadcast size={48} color={tc.hintColor} />
           <div style={{
-            fontSize: 16, fontWeight: 600, color: tc.text, marginTop: 16,
+            fontSize: 16, fontWeight: 600, color: tc.textColor, marginTop: 16,
           }}>
             No broadcast right now
           </div>
           <div style={{
-            fontSize: 13, color: tc.hint, marginTop: 8,
+            fontSize: 13, color: tc.hintColor, marginTop: 8,
           }}>
             Come back when the DJ goes live
           </div>
@@ -523,7 +562,7 @@ export function LiveRadioView({
       {isLive && tracks.length > 0 && (
         <div style={{
           background: tc.cardBg, borderRadius: 16, padding: 16,
-          border: `1px solid ${tc.border}`,
+          border: tc.cardBorder,
           animation: "bcast-slideIn 0.7s ease",
         }}>
           <div
@@ -533,11 +572,11 @@ export function LiveRadioView({
               cursor: "pointer", userSelect: "none",
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600, color: tc.text }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: tc.textColor }}>
               Queue ({tracks.length} tracks)
             </span>
             <span style={{
-              fontSize: 11, color: tc.hint,
+              fontSize: 11, color: tc.hintColor,
               transform: expandedQueue ? "rotate(180deg)" : "rotate(0deg)",
               transition: "transform 0.2s",
             }}>
@@ -565,7 +604,7 @@ export function LiveRadioView({
                     <div style={{
                       width: 28, textAlign: "center", flexShrink: 0,
                       fontSize: 11, fontWeight: 600,
-                      color: isCurrent ? tc.highlight : tc.hint,
+                      color: isCurrent ? tc.highlight : tc.hintColor,
                     }}>
                       {isCurrent ? (
                         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: 14 }}>
@@ -587,25 +626,25 @@ export function LiveRadioView({
                       {t.cover_url ? (
                         <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                       ) : (
-                        <IconMusic size={16} color={tc.hint} />
+                        <IconMusic size={16} color={tc.hintColor} />
                       )}
                     </div>
 
                     {/* Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
-                        fontSize: 13, fontWeight: isCurrent ? 600 : 400, color: tc.text,
+                        fontSize: 13, fontWeight: isCurrent ? 600 : 400, color: tc.textColor,
                         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                       }}>
                         {t.title}
                       </div>
-                      <div style={{ fontSize: 11, color: tc.hint }}>
+                      <div style={{ fontSize: 11, color: tc.hintColor }}>
                         {t.artist}
                       </div>
                     </div>
 
                     {/* Duration */}
-                    <div style={{ fontSize: 11, color: tc.hint, marginLeft: 8, flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, color: tc.hintColor, marginLeft: 8, flexShrink: 0 }}>
                       {t.duration_fmt}
                     </div>
 
