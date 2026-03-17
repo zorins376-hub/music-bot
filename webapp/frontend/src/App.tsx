@@ -1322,6 +1322,15 @@ export function App() {
     }
   }, []);
 
+  const handlePlayAndOpenPlayer = useCallback((track: Track) => {
+    action("play", track.video_id, undefined, track);
+    setView("player");
+  }, [action]);
+
+  const handleBroadcastPlayTrack = useCallback((track: Track) => {
+    action("play", track.video_id, undefined, track);
+  }, [action]);
+
   // 3D Spatial Panner
   const handlePanChange = useCallback((value: number) => {
     setPanValue(value);
@@ -2300,15 +2309,15 @@ export function App() {
 
       {view === "battle" && <BattleView userId={userId} accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "sleep" && <SleepSoundsView accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "broadcast" && <LiveRadioView userId={userId} currentTrack={currentTrack} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "broadcast" && <LiveRadioView userId={userId} onPlayTrack={handleBroadcastPlayTrack} accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "lyrics" && lyricsTrackId && (
         <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} />

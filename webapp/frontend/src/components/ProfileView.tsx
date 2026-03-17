@@ -1,3 +1,4 @@
+import { memo } from "preact/compat";
 import { useState, useEffect, useRef } from "preact/hooks";
 import type { Track } from "../api";
 import { fetchFavoritesList, fetchChallenges, type ChallengesData } from "../api";
@@ -121,7 +122,7 @@ function ensurePremiumStyle() {
 
 // ── Component ───────────────────────────────────────────────────────────
 
-export function ProfileView({
+export const ProfileView = memo(function ProfileView({
   userId,
   username,
   firstName,
@@ -864,4 +865,4 @@ export function ProfileView({
       )}
     </div>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { memo } from "preact/compat";
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchBroadcast, startBroadcast, stopBroadcast, loadBroadcastChannel,
@@ -21,7 +22,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function LiveRadioView({
+export const LiveRadioView = memo(function LiveRadioView({
   userId,
   onPlayTrack,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
@@ -669,4 +670,4 @@ export function LiveRadioView({
       )}
     </div>
   );
-}
+});
