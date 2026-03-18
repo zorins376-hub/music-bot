@@ -623,11 +623,18 @@ export async function fetchSmartPlaylists(): Promise<SmartPlaylist[]> {
   return data.playlists;
 }
 
-export async function fetchFavoritesList(): Promise<Track[]> {
-  const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
+export async function fetchFavoritesList(limit?: number): Promise<Track[]> {
+  const params = new URLSearchParams();
+  if (typeof limit === "number") {
+    params.set("limit", String(limit));
+  }
+  const url = params.size > 0
+    ? `${API_BASE}/favorites/list?${params.toString()}`
+    : `${API_BASE}/favorites/list`;
+  const r = await fetch(url, { headers: getHeaders() });
   if (!r.ok) return [];
   const data = await r.json();
-  return data.tracks;
+  return Array.isArray(data.tracks) ? data.tracks : [];
 }
 
 // ── Party Playlists ─────────────────────────────────────────────────────

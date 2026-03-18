@@ -32,6 +32,16 @@ interface UserStats {
   next_streak_milestone?: StreakMilestone | null;
 }
 
+interface ProfileChallenge {
+  id: string;
+  title?: Record<string, string> | null;
+  icon?: string | null;
+  target: number;
+  progress: number;
+  completed: boolean;
+  xp_reward: number;
+}
+
 interface Props {
   userId: number;
   username?: string;
@@ -209,10 +219,6 @@ export const ProfileView = memo(function ProfileView({
         if (!cancelled) setLoading(false);
       });
 
-    // These are non-blocking — if they fail, profile still shows
-    fetchFavoritesList().then((f) => { if (!cancelled) setFavorites(f); }).catch(() => {});
-    fetchChallenges(userId).then((c) => { if (!cancelled) setChallenges(c); }).catch(() => {});
-
     return () => {
       cancelled = true;
       ctrl.abort();
@@ -220,6 +226,42 @@ export const ProfileView = memo(function ProfileView({
       clearTimeout(hardTimeout);
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !stats) return;
+
+    let cancelled = false;
+    const delayedLoad = window.setTimeout(() => {
+      fetchFavoritesList(12)
+        .then((items) => {
+          if (!cancelled) setFavorites(Array.isArray(items) ? items : []);
+        })
+        .catch(() => {});
+
+      fetchChallenges(userId)
+        .then((data) => {
+          if (cancelled) return;
+          const normalizedChallenges = Array.isArray(data?.challenges)
+            ? data.challenges.filter(Boolean)
+            : [];
+          setChallenges({
+            challenges: normalizedChallenges,
+            week: data?.week || "",
+            week_end: data?.week_end || "",
+          });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setChallenges({ challenges: [], week: "", week_end: "" });
+          }
+        });
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(delayedLoad);
+    };
+  }, [userId, stats]);
 
   // ── Avatar upload handler ────────────────────────────────────────────
 
@@ -273,8 +315,21 @@ export const ProfileView = memo(function ProfileView({
       .then((data: UserStats) => setStats(data))
       .catch(() => setError(true))
       .finally(() => { clearTimeout(fetchTimer); setLoading(false); });
-    fetchFavoritesList().then(setFavorites).catch(() => {});
-    fetchChallenges(userId).then(setChallenges).catch(() => {});
+    fetchFavoritesList(12)
+      .then((items) => setFavorites(Array.isArray(items) ? items : []))
+      .catch(() => {});
+    fetchChallenges(userId)
+      .then((data) => {
+        const normalizedChallenges = Array.isArray(data?.challenges)
+          ? data.challenges.filter(Boolean)
+          : [];
+        setChallenges({
+          challenges: normalizedChallenges,
+          week: data?.week || "",
+          week_end: data?.week_end || "",
+        });
+      })
+      .catch(() => setChallenges({ challenges: [], week: "", week_end: "" }));
   };
 
   if (loading) {
@@ -313,6 +368,23 @@ export const ProfileView = memo(function ProfileView({
   const topGenres = Array.isArray(stats.top_genres) ? stats.top_genres : [];
   const badges = Array.isArray(stats.badges) ? stats.badges : [];
   const recentTracks = Array.isArray(stats.recent_tracks) ? stats.recent_tracks : [];
+  const challengeItems: ProfileChallenge[] = Array.isArray(challenges?.challenges)
+    ? challenges.challenges
+        .filter(Boolean)
+        .map((challenge, index) => {
+          const normalized = challenge as ProfileChallenge;
+          const fallbackTitle = normalized.title?.ru || normalized.title?.en || "challenge";
+          return {
+            id: String(normalized.id || `${fallbackTitle}-${index}`),
+            title: normalized.title || null,
+            icon: normalized.icon || "",
+            target: Number(normalized.target || 0),
+            progress: Number(normalized.progress || 0),
+            completed: Boolean(normalized.completed),
+            xp_reward: Number(normalized.xp_reward || 0),
+          };
+        })
+    : [];
 
   const maxArtistCount = topArtists.length > 0
     ? Math.max(...topArtists.map((a) => a.count))
@@ -671,7 +743,7 @@ export const ProfileView = memo(function ProfileView({
       )}
 
       {/* ── Weekly Challenges ──────────────────────────────────── */}
-      {challenges && challenges.challenges.length > 0 && (
+      {challengeItems.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{
             fontSize: 15, fontWeight: 600, color: tc.textColor,
@@ -680,8 +752,9 @@ export const ProfileView = memo(function ProfileView({
           }}>
             <IconFire size={16} color={tc.isTequila ? "#ffab40" : "#ff7043"} /> Челленджи
           </div>
-          {challenges.challenges.map((ch) => {
+          {challengeItems.map((ch) => {
             const pct = ch.target > 0 ? Math.min(ch.progress / ch.target, 1) : 0;
+            const title = ch.title?.ru || ch.title?.en || "Челлендж";
             return (
               <div
                 key={ch.id}
@@ -696,13 +769,13 @@ export const ProfileView = memo(function ProfileView({
                 }}
               >
                 <div style={{ fontSize: 20, flexShrink: 0, filter: ch.completed ? "none" : "grayscale(0.3)" }}>
-                  {ch.icon}
+                  {ch.icon || "🔥"}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontSize: 12, fontWeight: 600, color: tc.textColor, marginBottom: 4,
                   }}>
-                    {ch.title.ru || ch.title.en}
+                    {title}
                   </div>
                   <div style={{
                     width: "100%", height: 4, borderRadius: 2,

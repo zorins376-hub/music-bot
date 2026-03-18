@@ -2382,7 +2382,10 @@ async def toggle_favorite(video_id: str, user: dict = Depends(get_current_user))
 
 
 @app.get("/api/favorites/list")
-async def list_favorites(user: dict = Depends(get_current_user)):
+async def list_favorites(
+    user: dict = Depends(get_current_user),
+    limit: int = Query(default=100, ge=1, le=100),
+):
     """List all favorite tracks for current user (Redis set → DB lookup)."""
     user_id = user["id"]
     r = await _get_redis()
@@ -2391,7 +2394,7 @@ async def list_favorites(user: dict = Depends(get_current_user)):
         return {"tracks": []}
 
     # Decode bytes→str if needed
-    ids = [v.decode() if isinstance(v, bytes) else v for v in video_ids]
+    ids = [v.decode() if isinstance(v, bytes) else v for v in video_ids][:limit]
 
     # Lookup metadata from tracks DB
     try:
@@ -2401,7 +2404,7 @@ async def list_favorites(user: dict = Depends(get_current_user)):
 
         async with async_session() as session:
             q = await session.execute(
-                select(Track).where(Track.source_id.in_(ids)).limit(100)
+                select(Track).where(Track.source_id.in_(ids)).limit(limit)
             )
             tracks = q.scalars().all()
             tracks_map = {t.source_id: t for t in tracks}
