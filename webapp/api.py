@@ -4390,6 +4390,42 @@ async def _notify_broadcast(event: str, data: dict | None = None):
             pass
 
 
+def _clamp_broadcast_index(index: int, queue_len: int) -> int:
+    if queue_len <= 0:
+        return 0
+    return min(max(index, 0), queue_len - 1)
+
+
+def _reorder_broadcast_index(current_idx: int, from_pos: int, to_pos: int) -> int:
+    if from_pos == to_pos:
+        return current_idx
+    if current_idx == from_pos:
+        return to_pos
+    if from_pos < current_idx <= to_pos:
+        return current_idx - 1
+    if to_pos <= current_idx < from_pos:
+        return current_idx + 1
+    return current_idx
+
+
+async def _normalize_broadcast_state(r) -> tuple[int, int]:
+    queue_len = await r.llen(_BCAST_QUEUE_KEY)
+    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
+    normalized_idx = _clamp_broadcast_index(current_idx, queue_len)
+
+    mapping: dict[str, str] = {}
+    if normalized_idx != current_idx:
+        mapping["current_idx"] = str(normalized_idx)
+    if queue_len <= 0:
+        mapping["seek_pos"] = "0"
+        mapping["action"] = "idle"
+
+    if mapping:
+        await r.hset(_BCAST_STATE_KEY, mapping=mapping)
+
+    return normalized_idx, queue_len
+
+
 async def _get_broadcast_state() -> dict:
     """Read broadcast state from Redis."""
     r = await _get_redis()
@@ -4402,6 +4438,7 @@ async def _get_broadcast_state() -> dict:
             "listener_count": len(_broadcast_subscribers), "tracks": [],
         }
 
+    current_idx, _queue_len = await _normalize_broadcast_state(r)
     state = await r.hgetall(_BCAST_STATE_KEY)
     queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
     tracks = []
@@ -4417,9 +4454,9 @@ async def _get_broadcast_state() -> dict:
         "is_live": True,
         "dj_id": int(state.get("dj_id", 0)) if state.get("dj_id") else None,
         "dj_name": state.get("dj_name"),
-        "current_idx": int(state.get("current_idx", 0)),
+        "current_idx": current_idx,
         "seek_pos": float(state.get("seek_pos", 0)),
-        "action": state.get("action", "idle"),
+        "action": state.get("action", "idle") if tracks else "idle",
         "started_at": state.get("started_at"),
         "updated_at": state.get("updated_at"),
         "channel": state.get("channel"),
@@ -4517,33 +4554,80 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
         logger.error("Broadcast chat notification failed: %s", e)
 
 
+def _broadcast_voice_chat_keys(channel: str | None) -> tuple[str, str]:
+    channel_name = (channel or "tequila").strip() or "tequila"
+    return f"radio:queue:{channel_name}", f"radio:current:{channel_name}"
+
+
+async def _broadcast_append_voice_chat_queue(r, channel: str | None, tracks_raw: list[str]) -> None:
+    if not tracks_raw:
+        return
+
+    vc_queue_key, _ = _broadcast_voice_chat_keys(channel)
+    for raw in tracks_raw:
+        await r.rpush(vc_queue_key, raw)
+
+
+async def _broadcast_rebuild_voice_chat_queue(
+    r,
+    channel: str | None,
+    *,
+    include_current: bool = False,
+) -> None:
+    vc_queue_key, _ = _broadcast_voice_chat_keys(channel)
+    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+    if not queue_raw:
+        await r.delete(vc_queue_key)
+        return
+
+    current_idx = _clamp_broadcast_index(
+        int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0),
+        len(queue_raw),
+    )
+    start_idx = current_idx if include_current else current_idx + 1
+    pending_tracks = queue_raw[start_idx:] if start_idx < len(queue_raw) else []
+
+    await r.delete(vc_queue_key)
+    if pending_tracks:
+        for raw in pending_tracks:
+            await r.rpush(vc_queue_key, raw)
+
+
 async def _broadcast_sync_voice_chat(r, action: str, channel: str = "tequila"):
     """Sync broadcast queue to voice chat Redis queue for the streamer."""
     try:
-        vc_queue_key = "radio:queue:broadcast"
+        state = await r.hgetall(_BCAST_STATE_KEY)
+        active_channel = state.get("channel") or channel
+        vc_queue_key, vc_current_key = _broadcast_voice_chat_keys(active_channel)
 
         if action == "started":
             # Copy current broadcast queue to voice chat queue
             queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+            await r.delete(vc_queue_key)
             if queue_raw:
-                await r.delete(vc_queue_key)
                 for raw in queue_raw:
                     await r.rpush(vc_queue_key, raw)
-                logger.info("Synced %d tracks to voice chat queue", len(queue_raw))
+                logger.info("Synced %d broadcast tracks to %s", len(queue_raw), vc_queue_key)
+            else:
+                await r.delete(vc_current_key)
 
         elif action == "stopped":
             await r.delete(vc_queue_key)
-            await r.delete("radio:current:broadcast")
-
-        elif action == "next":
-            # Push the next track to voice chat queue
-            state = await r.hgetall(_BCAST_STATE_KEY)
-            current_idx = int(state.get("current_idx", 0))
-            track_raw = await r.lindex(_BCAST_QUEUE_KEY, current_idx)
-            if track_raw:
-                await r.rpush(vc_queue_key, track_raw)
+            await r.delete(vc_current_key)
     except Exception as e:
         logger.error("Voice chat sync failed: %s", e)
+
+
+async def _broadcast_publish_voice_chat_command(r, command: str) -> None:
+    try:
+        await r.publish("radio:cmd", command)
+    except Exception as e:
+        logger.error("Voice chat command publish failed: %s", e)
+
+
+async def _broadcast_wake_voice_chat_if_idle(r, added_tracks: list[str], *, queue_len_before: int) -> None:
+    if queue_len_before <= 0 and added_tracks:
+        await _broadcast_publish_voice_chat_command(r, "skip")
 
 
 @app.get("/api/broadcast")
@@ -4600,17 +4684,19 @@ async def start_broadcast(request: Request, user: dict = Depends(get_current_use
     dj_name = user.get("first_name", "DJ")
     _fire_task(_broadcast_notify_chat("started", dj_name))
     _fire_task(_broadcast_sync_voice_chat(r, "started", channel))
+    _fire_task(_broadcast_publish_voice_chat_command(r, "skip"))
 
     return await _get_broadcast_state()
 
 
-async def _load_channel_to_broadcast(r, channel: str, limit: int, exclude: list[str] | None = None):
+async def _load_channel_to_broadcast(r, channel: str, limit: int, exclude: list[str] | None = None) -> list[str]:
     """Load tracks from DB channel into broadcast queue."""
     from bot.models.base import async_session as _as
     from bot.models.track import Track as TrackModel
     from sqlalchemy import select, func
 
     exclude_set = set(exclude or [])
+    added_tracks: list[str] = []
 
     async with _as() as session:
         q = select(
@@ -4638,6 +4724,9 @@ async def _load_channel_to_broadcast(r, channel: str, limit: int, exclude: list[
                 "channel": channel,
             }, ensure_ascii=False)
             await r.rpush(_BCAST_QUEUE_KEY, track_data)
+            added_tracks.append(track_data)
+
+    return added_tracks
 
 
 @app.get("/api/broadcast/channels")
@@ -4766,12 +4855,14 @@ async def stop_broadcast(user: dict = Depends(get_current_user)):
     """Stop the broadcast. Admin only."""
     await _require_broadcast_admin(user)
     r = await _get_redis()
+    channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
     await r.delete(_BCAST_LIVE_KEY, _BCAST_STATE_KEY, _BCAST_QUEUE_KEY)
     await _notify_broadcast("stopped", {})
 
     # Notify chat + stop voice chat
     _fire_task(_broadcast_notify_chat("stopped"))
-    _fire_task(_broadcast_sync_voice_chat(r, "stopped"))
+    _fire_task(_broadcast_sync_voice_chat(r, "stopped", channel))
+    _fire_task(_broadcast_publish_voice_chat_command(r, "stop"))
 
     return {"ok": True}
 
@@ -4791,6 +4882,7 @@ async def broadcast_load_channel(request: Request, user: dict = Depends(get_curr
 
     # Get existing queue video_ids to avoid duplicates
     existing = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
+    queue_len_before = len(existing)
     exclude = []
     for raw in existing:
         try:
@@ -4798,7 +4890,9 @@ async def broadcast_load_channel(request: Request, user: dict = Depends(get_curr
         except Exception:
             pass
 
-    await _load_channel_to_broadcast(r, channel, limit, exclude)
+    added_tracks = await _load_channel_to_broadcast(r, channel, limit, exclude)
+    _fire_task(_broadcast_append_voice_chat_queue(r, await r.hget(_BCAST_STATE_KEY, "channel") or channel, added_tracks))
+    _fire_task(_broadcast_wake_voice_chat_if_idle(r, added_tracks, queue_len_before=queue_len_before))
     await _notify_broadcast("queue_updated", {
         "track_count": await r.llen(_BCAST_QUEUE_KEY),
     })
@@ -4816,6 +4910,9 @@ async def broadcast_add_track(request: Request, user: dict = Depends(get_current
     if not is_live:
         raise HTTPException(400, "Broadcast not active")
 
+    active_channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
+    queue_len_before = await r.llen(_BCAST_QUEUE_KEY)
+
     track_data = json.dumps({
         "video_id": body.get("video_id", ""),
         "title": body.get("title", ""),
@@ -4824,8 +4921,11 @@ async def broadcast_add_track(request: Request, user: dict = Depends(get_current
         "duration_fmt": body.get("duration_fmt", "0:00"),
         "source": body.get("source", "youtube"),
         "cover_url": body.get("cover_url"),
+        "channel": body.get("channel") or active_channel,
     }, ensure_ascii=False)
     await r.rpush(_BCAST_QUEUE_KEY, track_data)
+    _fire_task(_broadcast_append_voice_chat_queue(r, active_channel, [track_data]))
+    _fire_task(_broadcast_wake_voice_chat_if_idle(r, [track_data], queue_len_before=queue_len_before))
 
     await _notify_broadcast("queue_updated", {
         "track_count": await r.llen(_BCAST_QUEUE_KEY),
@@ -4839,20 +4939,50 @@ async def broadcast_remove_track(video_id: str, user: dict = Depends(get_current
     await _require_broadcast_admin(user)
     r = await _get_redis()
 
+    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
     queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-    for raw in queue_raw:
+    removed_index: int | None = None
+    for index, raw in enumerate(queue_raw):
         try:
             t = json.loads(raw)
             if t.get("video_id") == video_id:
+                removed_index = index
                 await r.lrem(_BCAST_QUEUE_KEY, 1, raw)
                 break
         except Exception:
             pass
 
+    queue_len = await r.llen(_BCAST_QUEUE_KEY)
+    next_idx = current_idx
+    mapping: dict[str, str] = {}
+    if removed_index is not None:
+        if queue_len <= 0:
+            mapping = {"current_idx": "0", "seek_pos": "0", "action": "idle"}
+            next_idx = 0
+        else:
+            if removed_index < current_idx:
+                next_idx = current_idx - 1
+            else:
+                next_idx = _clamp_broadcast_index(current_idx, queue_len)
+            mapping["current_idx"] = str(_clamp_broadcast_index(next_idx, queue_len))
+            if removed_index == current_idx:
+                mapping["seek_pos"] = "0"
+        if mapping:
+            await r.hset(_BCAST_STATE_KEY, mapping=mapping)
+        active_channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
+        _fire_task(_broadcast_rebuild_voice_chat_queue(
+            r,
+            active_channel,
+            include_current=removed_index == current_idx,
+        ))
+        if removed_index == current_idx:
+            _fire_task(_broadcast_publish_voice_chat_command(r, "skip" if queue_len > 0 else "stop"))
+
     await _notify_broadcast("queue_updated", {
-        "track_count": await r.llen(_BCAST_QUEUE_KEY),
+        "track_count": queue_len,
+        "current_idx": _clamp_broadcast_index(next_idx, queue_len),
     })
-    return {"ok": True}
+    return await _get_broadcast_state()
 
 
 @app.post("/api/broadcast/reorder")
@@ -4868,18 +4998,29 @@ async def broadcast_reorder(request: Request, user: dict = Depends(get_current_u
     if from_pos < 0 or from_pos >= len(queue_raw) or to_pos < 0 or to_pos >= len(queue_raw):
         raise HTTPException(400, "Invalid positions")
 
+    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
+
     items = list(queue_raw)
     item = items.pop(from_pos)
     items.insert(to_pos, item)
+    next_idx = _clamp_broadcast_index(
+        _reorder_broadcast_index(current_idx, from_pos, to_pos),
+        len(items),
+    )
 
     pipe = r.pipeline()
     pipe.delete(_BCAST_QUEUE_KEY)
     for it in items:
         pipe.rpush(_BCAST_QUEUE_KEY, it)
+    pipe.hset(_BCAST_STATE_KEY, mapping={"current_idx": str(next_idx)})
     await pipe.execute()
+
+    active_channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
+    _fire_task(_broadcast_rebuild_voice_chat_queue(r, active_channel))
 
     await _notify_broadcast("queue_updated", {
         "track_count": len(items),
+        "current_idx": next_idx,
     })
     return await _get_broadcast_state()
 
@@ -4895,6 +5036,10 @@ async def broadcast_skip(user: dict = Depends(get_current_user)):
 
     current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
     queue_len = await r.llen(_BCAST_QUEUE_KEY)
+    if queue_len <= 0:
+        await r.hset(_BCAST_STATE_KEY, mapping={"current_idx": "0", "seek_pos": "0", "action": "idle", "updated_at": now})
+        return await _get_broadcast_state()
+
     new_idx = min(current_idx + 1, max(queue_len - 1, 0))
 
     await r.hset(_BCAST_STATE_KEY, mapping={
@@ -4912,6 +5057,12 @@ async def broadcast_skip(user: dict = Depends(get_current_user)):
         "position": new_idx,
         "track": track,
     })
+    _fire_task(_broadcast_rebuild_voice_chat_queue(
+        r,
+        await r.hget(_BCAST_STATE_KEY, "channel") or "tequila",
+        include_current=True,
+    ))
+    _fire_task(_broadcast_publish_voice_chat_command(r, "skip"))
     return await _get_broadcast_state()
 
 
@@ -4926,6 +5077,7 @@ async def broadcast_playback(request: Request, user: dict = Depends(get_current_
     r = await _get_redis()
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
+    previous_current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
 
     mapping = {"action": action, "updated_at": now}
     if seek_pos > 0:
@@ -4934,12 +5086,25 @@ async def broadcast_playback(request: Request, user: dict = Depends(get_current_
         mapping["current_idx"] = str(int(body["current_idx"]))
 
     await r.hset(_BCAST_STATE_KEY, mapping=mapping)
+    current_idx, queue_len = await _normalize_broadcast_state(r)
+    effective_action = action if queue_len > 0 else "idle"
+    effective_seek_pos = seek_pos if queue_len > 0 else 0
 
     await _notify_broadcast("playback_sync", {
-        "action": action,
-        "seek_pos": seek_pos,
-        "current_idx": int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0),
+        "action": effective_action,
+        "seek_pos": effective_seek_pos,
+        "current_idx": current_idx,
     })
+    _fire_task(_broadcast_rebuild_voice_chat_queue(
+        r,
+        await r.hget(_BCAST_STATE_KEY, "channel") or "tequila",
+        include_current="current_idx" in body,
+    ))
+    target_idx = int(body["current_idx"]) if "current_idx" in body else previous_current_idx
+    if queue_len > 0 and target_idx != previous_current_idx:
+        _fire_task(_broadcast_publish_voice_chat_command(r, "skip"))
+    elif action in {"pause", "stop"}:
+        _fire_task(_broadcast_publish_voice_chat_command(r, action))
     return await _get_broadcast_state()
 
 
@@ -4954,6 +5119,10 @@ async def broadcast_advance(user: dict = Depends(get_current_user)):
 
     current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
     queue_len = await r.llen(_BCAST_QUEUE_KEY)
+    if queue_len <= 0:
+        await r.hset(_BCAST_STATE_KEY, mapping={"current_idx": "0", "seek_pos": "0", "action": "idle", "updated_at": now})
+        return await _get_broadcast_state()
+
     new_idx = current_idx + 1
 
     # Auto-refill if running low
@@ -4967,7 +5136,8 @@ async def broadcast_advance(user: dict = Depends(get_current_user)):
             except Exception:
                 pass
         try:
-            await _load_channel_to_broadcast(r, channel, 20, exclude)
+            added_tracks = await _load_channel_to_broadcast(r, channel, 20, exclude)
+            _fire_task(_broadcast_append_voice_chat_queue(r, channel, added_tracks))
         except Exception as e:
             logger.error("Broadcast auto-refill failed: %s", e)
         queue_len = await r.llen(_BCAST_QUEUE_KEY)
@@ -4990,9 +5160,6 @@ async def broadcast_advance(user: dict = Depends(get_current_user)):
         "position": new_idx,
         "track": track,
     })
-
-    # Sync next track to voice chat
-    _fire_task(_broadcast_sync_voice_chat(r, "next"))
 
     return await _get_broadcast_state()
 

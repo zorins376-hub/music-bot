@@ -3,6 +3,7 @@
 
 const CACHE_NAME = "blackroom-v5";
 const AUDIO_CACHE_NAME = "blackroom-audio-v1";
+const APP_SHELL_URL = "/index.html";
 
 // Static assets to precache
 const PRECACHE_URLS = [
@@ -44,7 +45,7 @@ self.addEventListener("fetch", (event) => {
 
   // HTML navigation: always prefer network so users get fresh app shell.
   if (request.mode === "navigate" || url.pathname === "/" || url.pathname === "/index.html") {
-    event.respondWith(networkFirst(request));
+    event.respondWith(networkFirst(request, { fallbackToAppShell: true }));
     return;
   }
 
@@ -85,11 +86,27 @@ async function cacheFirst(request) {
 }
 
 // Network-first strategy for API
-async function networkFirst(request) {
+async function networkFirst(request, options = {}) {
   try {
     const response = await fetch(request);
+    if (response.ok && options.fallbackToAppShell && request.method === "GET") {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(APP_SHELL_URL, response.clone());
+    }
     return response;
   } catch {
+    if (options.fallbackToAppShell) {
+      const appShell = await caches.match(APP_SHELL_URL) || await caches.match("/");
+      if (appShell) {
+        return appShell;
+      }
+
+      return new Response("Offline", {
+        status: 503,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+
     const cached = await caches.match(request);
     if (cached) {
       return cached;

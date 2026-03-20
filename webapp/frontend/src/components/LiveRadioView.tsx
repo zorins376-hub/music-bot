@@ -2,12 +2,12 @@ import { memo } from "preact/compat";
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import {
   fetchBroadcast, startBroadcast, stopBroadcast, loadBroadcastChannel,
-  skipBroadcast, syncBroadcastPlayback, advanceBroadcast, removeBroadcastTrack,
-  reorderBroadcast, broadcastEventsUrl, fetchBroadcastChannels, importBroadcastChannel,
+  skipBroadcast, syncBroadcastPlayback, removeBroadcastTrack,
+  broadcastEventsUrl, fetchBroadcastChannels, importBroadcastChannel,
   type Broadcast, type BroadcastTrack, type Track, type ChannelInfo,
 } from "../api";
 import { getThemeById, themeColors } from "../themes";
-import { IconBroadcast, IconPlaySmall, IconSpinner, IconMusic, IconTrash, IconDragHandle } from "./Icons";
+import { IconBroadcast, IconSpinner, IconMusic, IconTrash } from "./Icons";
 
 interface Props {
   userId: number;
@@ -21,6 +21,18 @@ interface Props {
 const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
+
+function toPlayerTrack(track: BroadcastTrack): Track {
+  return {
+    video_id: track.video_id,
+    title: track.title || "",
+    artist: track.artist || "",
+    duration: track.duration || 0,
+    duration_fmt: track.duration_fmt || "0:00",
+    source: track.source || "channel",
+    cover_url: track.cover_url,
+  };
+}
 
 export const LiveRadioView = memo(function LiveRadioView({
   userId,
@@ -43,6 +55,7 @@ export const LiveRadioView = memo(function LiveRadioView({
   const [showImport, setShowImport] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const reconnectTimer = useRef<number | null>(null);
+  const refreshTimer = useRef<number | null>(null);
 
   // Fetch initial state
   const loadState = useCallback(async () => {
@@ -64,10 +77,21 @@ export const LiveRadioView = memo(function LiveRadioView({
       setBroadcast(null);
       setError(true);
     } finally {
-      if (timeoutId) clearTimeout(timeoutId);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
       setLoading(false);
     }
   }, []);
+
+  const scheduleRefresh = useCallback((delay = 300) => {
+    if (refreshTimer.current) {
+      clearTimeout(refreshTimer.current);
+    }
+
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      void loadState();
+    }, delay);
+  }, [loadState]);
 
   // Import channel handler
   const handleImport = async () => {
@@ -103,36 +127,65 @@ export const LiveRadioView = memo(function LiveRadioView({
           return;
         }
         if (msg.event === "stopped") {
-          setBroadcast(prev => prev ? { ...prev, is_live: false, tracks: [] } : null);
+          setBroadcast(prev => prev ? {
+            ...prev,
+            is_live: false,
+            current_idx: 0,
+            seek_pos: 0,
+            action: "idle",
+            tracks: [],
+          } : null);
           return;
         }
         if (msg.event === "started") {
-          loadState();
+          scheduleRefresh(0);
           return;
         }
-        // For next, playback_sync, queue_updated — refetch full state
-        if (["next", "playback_sync", "queue_updated", "listener_count"].includes(msg.event)) {
-          if (msg.event === "next" && msg.data?.track) {
-            // Auto-play next track for listeners
-            const t = msg.data.track;
-            if (t.video_id) {
-              onPlayTrack({
-                video_id: t.video_id,
-                title: t.title || "",
-                artist: t.artist || "",
-                duration: t.duration || 0,
-                duration_fmt: t.duration_fmt || "0:00",
-                source: t.source || "channel",
-                cover_url: t.cover_url,
-              });
+        if (msg.event === "listener_count" && msg.data?.count !== undefined) {
+          setBroadcast(prev => prev ? { ...prev, listener_count: msg.data.count } : null);
+          return;
+        }
+        if (msg.event === "next" && msg.data?.track) {
+          const nextTrack = msg.data.track as BroadcastTrack;
+          const nextPosition = typeof msg.data?.position === "number" ? msg.data.position : undefined;
+
+          if (nextTrack.video_id) {
+            onPlayTrack(toPlayerTrack(nextTrack));
+          }
+
+          setBroadcast(prev => {
+            if (!prev) return prev;
+
+            const currentIdx = nextPosition ?? prev.current_idx;
+            const nextTracks = [...prev.tracks];
+            if (currentIdx >= 0) {
+              nextTracks[currentIdx] = { ...nextTrack, position: currentIdx };
             }
-          }
-          // Lightweight update for listener_count
-          if (msg.event === "listener_count" && msg.data?.count !== undefined) {
-            setBroadcast(prev => prev ? { ...prev, listener_count: msg.data.count } : null);
-            return;
-          }
-          loadState();
+
+            return {
+              ...prev,
+              is_live: true,
+              current_idx: currentIdx,
+              seek_pos: 0,
+              action: "play",
+              tracks: nextTracks,
+            };
+          });
+          scheduleRefresh(500);
+          return;
+        }
+        if (msg.event === "playback_sync") {
+          setBroadcast(prev => prev ? {
+            ...prev,
+            action: typeof msg.data?.action === "string" ? msg.data.action : prev.action,
+            seek_pos: typeof msg.data?.seek_pos === "number" ? msg.data.seek_pos : prev.seek_pos,
+            current_idx: typeof msg.data?.current_idx === "number" ? msg.data.current_idx : prev.current_idx,
+          } : null);
+          scheduleRefresh(400);
+          return;
+        }
+        if (msg.event === "queue_updated") {
+          scheduleRefresh(200);
         }
       } catch {}
     };
@@ -140,9 +193,12 @@ export const LiveRadioView = memo(function LiveRadioView({
     es.onerror = () => {
       es.close();
       esRef.current = null;
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+      }
       reconnectTimer.current = window.setTimeout(connectSSE, 3000);
     };
-  }, [loadState, onPlayTrack]);
+  }, [onPlayTrack, scheduleRefresh]);
 
   useEffect(() => {
     loadState();
@@ -150,6 +206,7 @@ export const LiveRadioView = memo(function LiveRadioView({
     return () => {
       esRef.current?.close();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
   }, [loadState, connectSSE]);
 
@@ -212,17 +269,40 @@ export const LiveRadioView = memo(function LiveRadioView({
     haptic("medium");
     try {
       await removeBroadcastTrack(videoId);
-      loadState();
+      setBroadcast(prev => {
+        if (!prev) return prev;
+
+        const removedIndex = prev.tracks.findIndex((track) => track.video_id === videoId);
+        if (removedIndex === -1) {
+          return prev;
+        }
+
+        const nextTracks = prev.tracks
+          .filter((track) => track.video_id !== videoId)
+          .map((track, index) => ({ ...track, position: index }));
+        const nextCurrentIdx = removedIndex < prev.current_idx
+          ? Math.max(prev.current_idx - 1, 0)
+          : Math.min(prev.current_idx, Math.max(nextTracks.length - 1, 0));
+
+        return {
+          ...prev,
+          current_idx: nextCurrentIdx,
+          tracks: nextTracks,
+        };
+      });
+      scheduleRefresh(150);
     } catch {}
   };
 
   const handleTrackClick = (track: BroadcastTrack) => {
+    const isCurrentTrack = track.position === (broadcast?.current_idx ?? 0);
+    if (!isDJ && !isCurrentTrack) {
+      return;
+    }
+
     haptic("light");
-    onPlayTrack({
-      video_id: track.video_id, title: track.title, artist: track.artist,
-      duration: track.duration, duration_fmt: track.duration_fmt,
-      source: track.source, cover_url: track.cover_url,
-    });
+    onPlayTrack(toPlayerTrack(track));
+
     // If admin, sync playback position
     if (isDJ && broadcast) {
       syncBroadcastPlayback("play", 0, track.position).then(setBroadcast).catch(() => {});
@@ -589,13 +669,18 @@ export const LiveRadioView = memo(function LiveRadioView({
             <div style={{ marginTop: 12, maxHeight: 400, overflowY: "auto" }}>
               {tracks.map((t, i) => {
                 const isCurrent = i === currentIdx;
+                const canSelectTrack = isDJ || isCurrent;
                 return (
                   <div
                     key={`${t.video_id}-${i}`}
-                    onClick={() => handleTrackClick(t)}
+                    onClick={() => {
+                      if (canSelectTrack) {
+                        handleTrackClick(t);
+                      }
+                    }}
                     style={{
                       display: "flex", alignItems: "center", padding: "8px 10px",
-                      borderRadius: 10, marginBottom: 4, cursor: "pointer",
+                      borderRadius: 10, marginBottom: 4, cursor: canSelectTrack ? "pointer" : "default",
                       background: isCurrent ? `${tc.highlight}22` : "transparent",
                       border: isCurrent ? `1px solid ${tc.highlight}44` : "1px solid transparent",
                       transition: "background 0.15s",

@@ -29,18 +29,31 @@ _TRIGGER_KEYWORDS = re.compile(
 def _should_recognize(message: Message) -> bool:
     """Check if recognition should run. Always True for private chats.
     For groups, requires trigger keywords in caption or reply."""
-    if message.chat.type == "private":
+    chat_type = getattr(getattr(message, "chat", None), "type", None)
+    if chat_type == "private":
         return True
+    if not isinstance(chat_type, str):
+        # Be permissive for malformed/mocked messages instead of crashing.
+        return True
+
+    def _collect_text(value: object) -> str:
+        return value if isinstance(value, str) else ""
+
     # Group/supergroup: check for trigger keywords
     text_to_check = ""
-    if message.caption:
-        text_to_check += message.caption + " "
+    caption = _collect_text(getattr(message, "caption", None))
+    if caption:
+        text_to_check += caption + " "
+
     if message.reply_to_message:
         reply = message.reply_to_message
-        if reply.text:
-            text_to_check += reply.text + " "
-        if reply.caption:
-            text_to_check += reply.caption + " "
+        reply_text = _collect_text(getattr(reply, "text", None))
+        reply_caption = _collect_text(getattr(reply, "caption", None))
+        if reply_text:
+            text_to_check += reply_text + " "
+        if reply_caption:
+            text_to_check += reply_caption + " "
+
     return bool(_TRIGGER_KEYWORDS.search(text_to_check))
 
 

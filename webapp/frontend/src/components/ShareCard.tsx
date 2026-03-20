@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "preact/hooks";
+import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { extractDominantColor, rgbToCSS } from "../colorExtractor";
 import { IconClose, IconUpload } from "./Icons";
 
@@ -21,17 +21,23 @@ interface ShareCardProps {
 export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "blackroom" }: ShareCardProps) {
   const isTequila = themeId === "tequila";
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [cardUrl, setCardUrl] = useState<string | null>(null);
   const [dominantColor, setDominantColor] = useState(accentColor);
 
   const generateCard = useCallback(async () => {
     if (!canvasRef.current) return;
+    const generationId = ++generationRef.current;
     setIsGenerating(true);
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      setIsGenerating(false);
+      return;
+    }
 
     // Set canvas size (Instagram Story ratio 9:16)
     canvas.width = 1080;
@@ -42,12 +48,15 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
     if (track.cover_url) {
       try {
         const color = await extractDominantColor(track.cover_url);
+        if (generationId !== generationRef.current) {
+          return;
+        }
         bgColor = rgbToCSS(color);
-        setDominantColor(bgColor);
       } catch {
         // Use default
       }
     }
+    setDominantColor(bgColor);
 
     // Background gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -75,6 +84,9 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
           img.onerror = () => reject();
           img.src = track.cover_url!;
         });
+        if (generationId !== generationRef.current) {
+          return;
+        }
 
         // Draw large cover with rounded corners
         const coverSize = 700;
@@ -158,13 +170,38 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
 
     // Convert to blob URL
     canvas.toBlob((blob) => {
+      if (generationId !== generationRef.current) {
+        return;
+      }
+
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+
       if (blob) {
         const url = URL.createObjectURL(blob);
+        objectUrlRef.current = url;
         setCardUrl(url);
+      } else {
+        setCardUrl(null);
       }
       setIsGenerating(false);
     }, "image/png");
   }, [track, accentColor, isTequila]);
+
+  useEffect(() => {
+    setCardUrl(null);
+    void generateCard();
+
+    return () => {
+      generationRef.current += 1;
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, [generateCard]);
 
   const handleShare = useCallback(async () => {
     if (!cardUrl) return;
@@ -204,11 +241,6 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
     a.click();
   }, [cardUrl, track.title, isTequila]);
 
-  // Generate on mount
-  if (!cardUrl && !isGenerating) {
-    generateCard();
-  }
-
   return (
     <div
       style={{
@@ -229,6 +261,9 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
       {/* Close button */}
       <button
         onClick={onClose}
+        type="button"
+        aria-label="Close share card"
+        title="Close"
         style={{
           position: "absolute",
           top: 20,
@@ -317,6 +352,10 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
 
 // Helper: word wrap text
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  if (!text.trim()) {
+    return ["Untitled Track"];
+  }
+
   const words = text.split(" ");
   const lines: string[] = [];
   let currentLine = words[0];
