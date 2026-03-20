@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = "blackroom-v4";
+const CACHE_NAME = "blackroom-v5";
 const AUDIO_CACHE_NAME = "blackroom-audio-v1";
 
 // Static assets to precache
@@ -42,6 +42,12 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // HTML navigation: always prefer network so users get fresh app shell.
+  if (request.mode === "navigate" || url.pathname === "/" || url.pathname === "/index.html") {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
   // Audio streams: Cache-first with network fallback
   if (url.pathname.includes("/api/stream/") || url.pathname.includes("/audio/")) {
     event.respondWith(handleAudioRequest(request));
@@ -50,12 +56,6 @@ self.addEventListener("fetch", (event) => {
 
   // API requests: Network-first
   if (url.pathname.startsWith("/api/")) {
-    event.respondWith(networkFirst(request));
-    return;
-  }
-
-  // Navigation / HTML: Network-first (always get fresh index.html)
-  if (request.mode === "navigate" || url.pathname === "/" || url.pathname.endsWith(".html")) {
     event.respondWith(networkFirst(request));
     return;
   }

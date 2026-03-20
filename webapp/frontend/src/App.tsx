@@ -8,7 +8,7 @@ import { SearchBar } from "./components/SearchBar";
 import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
-import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconStar, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
+import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconStar, IconBroadcast, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
 import { ForYouView } from "./components/ForYouView";
 import { ProfileView } from "./components/ProfileView";
 import { LeaderboardView } from "./components/LeaderboardView";
@@ -16,14 +16,15 @@ import { BattleView } from "./components/BattleView";
 import { ActivityFeedView } from "./components/ActivityFeedView";
 import { WrappedView } from "./components/WrappedView";
 import { SleepSoundsView } from "./components/SleepSoundsView";
+import { LiveRadioView } from "./components/LiveRadioView";
 import { ActionSheet } from "./components/ActionSheet";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
 
-type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep";
+type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep" | "broadcast";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -237,6 +238,10 @@ export function App() {
   const radioSeedRef = useRef<string | null>(null);
   const radioLoadingRef = useRef(false);
   const radioPlayedRef = useRef<string[]>([]);
+  // ── Broadcast live indicator ──
+  const [broadcastLive, setBroadcastLive] = useState(false);
+  const [broadcastDJ, setBroadcastDJ] = useState("");
+  const [liveBannerDismissed, setLiveBannerDismissed] = useState(false);
   // ── Action Sheet ──
   const [actionSheetTrack, setActionSheetTrack] = useState<Track | null>(null);
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
@@ -1153,7 +1158,29 @@ export function App() {
         setView("party");
       }
     }
+    if (startParam === "broadcast") {
+      setView("broadcast");
+    }
   }, [userId]);
+
+  // ── Broadcast live polling ──
+  const broadcastLiveRef = useRef(false);
+  useEffect(() => {
+    let active = true;
+    const check = () => {
+      fetchBroadcast().then((b) => {
+        if (!active) return;
+        const wasLive = broadcastLiveRef.current;
+        broadcastLiveRef.current = b.is_live;
+        setBroadcastLive(b.is_live);
+        setBroadcastDJ(b.dj_name || "DJ");
+        if (b.is_live && !wasLive) setLiveBannerDismissed(false);
+      }).catch(() => {});
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => { active = false; clearInterval(iv); };
+  }, []);
 
   // ── Network status monitor ──
   useEffect(() => {
@@ -1294,6 +1321,15 @@ export function App() {
       console.error("Quality update failed", e);
     }
   }, []);
+
+  const handlePlayAndOpenPlayer = useCallback((track: Track) => {
+    action("play", track.video_id, undefined, track);
+    setView("player");
+  }, [action]);
+
+  const handleBroadcastPlayTrack = useCallback((track: Track) => {
+    action("play", track.video_id, undefined, track);
+  }, [action]);
 
   // 3D Spatial Panner
   const handlePanChange = useCallback((value: number) => {
@@ -1621,6 +1657,44 @@ export function App() {
         />
       )}
       <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
+
+      {/* ON AIR Banner */}
+      {broadcastLive && view !== "broadcast" && !liveBannerDismissed && (
+        <div
+          onClick={() => { setView("broadcast"); setLiveBannerDismissed(true); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "10px 14px", borderRadius: 14, marginBottom: 8,
+            background: "linear-gradient(135deg, rgba(255,50,50,0.15), rgba(255,100,50,0.1))",
+            border: "1px solid rgba(255,50,50,0.25)",
+            cursor: "pointer", animation: "live-banner-in 0.4s ease",
+            position: "relative",
+          }}
+        >
+          <span style={{
+            width: 10, height: 10, borderRadius: "50%",
+            background: "#ff3232", flexShrink: 0,
+            animation: "live-dot-pulse 1.5s ease-in-out infinite",
+            boxShadow: "0 0 8px rgba(255,50,50,0.6)",
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#ff4444" }}>ON AIR</div>
+            <div style={{ fontSize: 11, color: theme.hintColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {broadcastDJ} in broadcast — tap to listen
+            </div>
+          </div>
+          <IconBroadcast size={18} color="#ff4444" />
+          <span
+            onClick={(e) => { e.stopPropagation(); setLiveBannerDismissed(true); }}
+            style={{
+              position: "absolute", top: 4, right: 6,
+              fontSize: 14, color: tc.hint, cursor: "pointer",
+              padding: "2px 4px", lineHeight: 1,
+            }}
+          >x</span>
+        </div>
+      )}
+
       {/* Nav */}
       <div style={{
         position: "relative",
@@ -1677,7 +1751,7 @@ export function App() {
           maxWidth: "100%",
           margin: "0 auto",
         }}>
-          {(["player", "foryou", "playlists", "party", "charts", "leaderboard", "battle", "feed", "wrapped", "sleep", "search", "profile"] as View[]).map((v) => {
+          {(["player", "foryou", "playlists", "party", "broadcast", "charts", "leaderboard", "battle", "feed", "wrapped", "sleep", "search", "profile"] as View[]).map((v) => {
             const isActive = view === v;
             const isParty = v === "party";
             return (
@@ -1724,7 +1798,7 @@ export function App() {
                   transform: isActive ? "translateY(-1px) scale(1.02)" : "translateY(0) scale(1)",
                 }}
               >
-                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "leaderboard" ? (<><IconCrown size={13} color="currentColor" /> Рейтинг</>) : v === "battle" ? (<><IconFire size={13} color="currentColor" /> Батл</>) : v === "feed" ? (<><IconHeadphones size={13} color="currentColor" /> Лента</>) : v === "wrapped" ? (<><IconStar size={13} color="currentColor" filled /> Рекап</>) : v === "sleep" ? (<><IconMoon size={13} color="currentColor" /> Sleep</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
+                {v === "player" ? (<><IconMusicNote size={13} color="currentColor" /> Плеер</>) : v === "foryou" ? (<><IconDiscover size={13} color="currentColor" /> Для тебя</>) : v === "playlists" ? (<><IconMusic size={13} color="currentColor" /> Плейлисты</>) : v === "party" ? (<><IconParty size={13} color="currentColor" /> Party</>) : v === "charts" ? (<><IconChart size={13} color="currentColor" /> Чарты</>) : v === "leaderboard" ? (<><IconCrown size={13} color="currentColor" /> Рейтинг</>) : v === "battle" ? (<><IconFire size={13} color="currentColor" /> Батл</>) : v === "feed" ? (<><IconHeadphones size={13} color="currentColor" /> Лента</>) : v === "wrapped" ? (<><IconStar size={13} color="currentColor" filled /> Рекап</>) : v === "broadcast" ? (<><IconBroadcast size={13} color="currentColor" /> Эфир{broadcastLive && !isActive && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ff3232", animation: "live-dot-pulse 1.5s ease-in-out infinite", boxShadow: "0 0 6px rgba(255,50,50,0.5)", marginLeft: 2 }} />}</>) : v === "sleep" ? (<><IconMoon size={13} color="currentColor" /> Sleep</>) : v === "profile" ? (<><IconUser size={13} color="currentColor" /> Профиль</>) : (<><IconSearch size={13} color="currentColor" /> Поиск</>)}
               </button>
             );
           })}
@@ -2235,13 +2309,15 @@ export function App() {
 
       {view === "battle" && <BattleView userId={userId} accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "sleep" && <SleepSoundsView accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "broadcast" && <LiveRadioView userId={userId} onPlayTrack={handleBroadcastPlayTrack} accentColor={accentColor} themeId={theme.id} />}
+
+      {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "lyrics" && lyricsTrackId && (
         <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} />
@@ -2302,7 +2378,7 @@ export function App() {
       <ActionSheet
         track={actionSheetTrack}
         visible={actionSheetVisible}
-        onClose={() => setActionSheetVisible(false)}
+        onClose={() => { setActionSheetVisible(false); setActionSheetTrack(null); }}
         accentColor={accentColor}
         themeId={theme.id}
         onAction={(actionId, t) => {
@@ -2363,6 +2439,17 @@ export function App() {
           onExpand={() => setView("player")}
         />
       )}
+
+      <style>{`
+        @keyframes live-dot-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.8); }
+        }
+        @keyframes live-banner-in {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -623,11 +623,18 @@ export async function fetchSmartPlaylists(): Promise<SmartPlaylist[]> {
   return data.playlists;
 }
 
-export async function fetchFavoritesList(): Promise<Track[]> {
-  const r = await fetch(`${API_BASE}/favorites/list`, { headers: getHeaders() });
+export async function fetchFavoritesList(limit?: number): Promise<Track[]> {
+  const params = new URLSearchParams();
+  if (typeof limit === "number") {
+    params.set("limit", String(limit));
+  }
+  const url = params.size > 0
+    ? `${API_BASE}/favorites/list?${params.toString()}`
+    : `${API_BASE}/favorites/list`;
+  const r = await fetch(url, { headers: getHeaders() });
   if (!r.ok) return [];
   const data = await r.json();
-  return data.tracks;
+  return Array.isArray(data.tracks) ? data.tracks : [];
 }
 
 // ── Party Playlists ─────────────────────────────────────────────────────
@@ -877,4 +884,137 @@ export async function fetchMyParties(): Promise<Party[]> {
 export function partyEventsUrl(code: string): string {
   const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
   return `${API_BASE}/party/${encodeURIComponent(code)}/events?token=${initData}`;
+}
+
+// ── Live Broadcast (DJ Radio) ────────────────────────────────────────
+
+export interface BroadcastTrack {
+  video_id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  duration_fmt: string;
+  source: string;
+  cover_url?: string;
+  position: number;
+}
+
+export interface Broadcast {
+  is_live: boolean;
+  is_dj: boolean;
+  dj_id: number | null;
+  dj_name: string | null;
+  current_idx: number;
+  seek_pos: number;
+  action: string;
+  started_at: string | null;
+  updated_at: string | null;
+  channel: string | null;
+  listener_count: number;
+  tracks: BroadcastTrack[];
+}
+
+export async function fetchBroadcast(): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast`, { headers: getHeaders(), retries: 1 });
+  if (!r.ok) throw new Error("Failed to fetch broadcast");
+  return r.json();
+}
+
+export async function startBroadcast(channel = "tequila", limit = 30): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/start`, {
+    method: "POST", headers: getHeaders(),
+    body: JSON.stringify({ channel, limit }),
+  });
+  if (!r.ok) throw new Error("Failed to start broadcast");
+  return r.json();
+}
+
+export async function stopBroadcast(): Promise<void> {
+  await fetchWithRetry(`${API_BASE}/broadcast/stop`, { method: "POST", headers: getHeaders() });
+}
+
+export async function loadBroadcastChannel(channel: string, limit = 30): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/load-channel`, {
+    method: "POST", headers: getHeaders(),
+    body: JSON.stringify({ channel, limit }),
+  });
+  if (!r.ok) throw new Error("Failed to load channel");
+  return r.json();
+}
+
+export async function addBroadcastTrack(track: Track): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/tracks`, {
+    method: "POST", headers: getHeaders(),
+    body: JSON.stringify(track),
+  });
+  if (!r.ok) throw new Error("Failed to add track");
+  return r.json();
+}
+
+export async function removeBroadcastTrack(videoId: string): Promise<void> {
+  await fetchWithRetry(`${API_BASE}/broadcast/tracks/${encodeURIComponent(videoId)}`, {
+    method: "DELETE", headers: getHeaders(),
+  });
+}
+
+export async function reorderBroadcast(fromPos: number, toPos: number): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/reorder`, {
+    method: "POST", headers: getHeaders(),
+    body: JSON.stringify({ from_position: fromPos, to_position: toPos }),
+  });
+  if (!r.ok) throw new Error("Failed to reorder");
+  return r.json();
+}
+
+export async function skipBroadcast(): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/skip`, {
+    method: "POST", headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to skip");
+  return r.json();
+}
+
+export async function syncBroadcastPlayback(action: string, seekPos = 0, currentIdx?: number): Promise<Broadcast> {
+  const body: Record<string, unknown> = { action, seek_pos: seekPos };
+  if (currentIdx !== undefined) body.current_idx = currentIdx;
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/playback`, {
+    method: "POST", headers: getHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error("Failed to sync playback");
+  return r.json();
+}
+
+export async function advanceBroadcast(): Promise<Broadcast> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/advance`, {
+    method: "POST", headers: getHeaders(),
+  });
+  if (!r.ok) throw new Error("Failed to advance");
+  return r.json();
+}
+
+export interface ChannelInfo {
+  label: string;
+  track_count: number;
+}
+
+export async function fetchBroadcastChannels(): Promise<ChannelInfo[]> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/channels`, { headers: getHeaders() });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.channels;
+}
+
+export async function importBroadcastChannel(channelRef: string, label?: string): Promise<{ status: string; label: string }> {
+  const r = await fetchWithRetry(`${API_BASE}/broadcast/import-channel`, {
+    method: "POST", headers: getHeaders(),
+    body: JSON.stringify({ channel_ref: channelRef, label: label || "" }),
+  });
+  if (!r.ok) throw new Error("Failed to import channel");
+  return r.json();
+}
+
+export function broadcastEventsUrl(): string {
+  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  return `${API_BASE}/broadcast/events?token=${initData}`;
 }
