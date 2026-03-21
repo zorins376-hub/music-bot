@@ -55,7 +55,8 @@ class Settings(BaseSettings):
         if not self.BOT_TOKEN or not self.BOT_TOKEN.strip():
             raise ValueError("BOT_TOKEN is required and cannot be empty")
         if not self.ADMIN_IDS and not self.ADMIN_USERNAMES:
-            raise ValueError("At least one admin must be configured via ADMIN_IDS or ADMIN_USERNAMES")
+            import warnings
+            warnings.warn("No ADMIN_IDS or ADMIN_USERNAMES configured; admin commands will be unavailable until loaded from Redis")
         return self
 
     @field_validator("WEBAPP_CORS_ORIGINS", mode="before")
