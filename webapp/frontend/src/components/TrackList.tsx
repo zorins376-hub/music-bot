@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { Track } from "../api";
 import { sendAction } from "../api";
 import { IconDragHandle, IconMusic, IconTarget, IconSwipeLeft, IconTrash } from "./Icons";
@@ -22,7 +23,7 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   } catch {}
 };
 
-export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, onClearQueue, accentColor = "var(--tg-theme-button-color, #7c4dff)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", themeId = "blackroom" }: Props) {
+export const TrackList = memo(function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, onClearQueue, accentColor = "var(--tg-theme-button-color, #7c4dff)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", themeId = "blackroom" }: Props) {
   const isTequila = themeId === "tequila";
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -377,4 +378,4 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
       `}</style>
     </div>
   );
-}
+});

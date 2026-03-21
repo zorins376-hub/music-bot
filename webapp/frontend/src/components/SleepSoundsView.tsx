@@ -6,6 +6,7 @@
  * Sounds: Rain, Ocean, Thunder, Fire, Wind, Forest, White Noise, Pink Noise, Brown Noise, Cafe
  */
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { memo } from "preact/compat";
 import { getThemeById, themeColors } from "../themes";
 import { IconMoon, IconClose, IconSpinner } from "./Icons";
 
@@ -449,7 +450,7 @@ const PRESETS = [
   { name: "Beach",        sounds: { ocean: 0.6, wind: 0.2 } },
 ];
 
-export function SleepSoundsView({ accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
+export const SleepSoundsView = memo(function SleepSoundsView({ accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
   const theme = getThemeById(themeId);
   const tc = themeColors(theme, accentColor);
 
@@ -753,4 +754,4 @@ export function SleepSoundsView({ accentColor = "var(--tg-theme-button-color, #7
       })}
     </div>
   );
-}
+});

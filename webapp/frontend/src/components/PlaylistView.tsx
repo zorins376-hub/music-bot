@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { JSX } from "preact";
 import {
   fetchPlaylists, fetchPlaylistTracks, createPlaylist, deletePlaylist,
@@ -113,7 +114,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", currentTrack }: Props) {
+export const PlaylistView = memo(function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", currentTrack }: Props) {
   const theme = getThemeById(themeId);
   const tc = themeColors(theme, accentColor);
 
@@ -594,4 +595,4 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
       )}
     </div>
   );
-}
+});

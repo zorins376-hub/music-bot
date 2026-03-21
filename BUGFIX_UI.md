@@ -1,80 +1,167 @@
 # ТЗ: Исправление UI — кнопки не нажимаются, карусель и ползунки глючат
 
-> **Дата:** 2026-03-21
-> **Симптомы:** При открытии приложения кнопки не реагируют на нажатия. Ползунки и карусель навигации прокручиваются рывками / неестественно.
+> **Дата:** 2026-03-22
+> **Симптомы:** При открытии приложения кнопки работают, но через несколько секунд перестают нажиматься. Карусель и ползунки ведут себя странно.
 
 ---
 
-## Корневая причина №1 (CRITICAL): Boot-loader блокирует весь экран 5+ секунд
+## ГЛАВНАЯ ПРИЧИНА: Фоновые overlay-ы без pointer-events: none перехватывают тачи
 
 ### Где
-- `webapp/frontend/src/main.tsx:111-119`
-- `webapp/frontend/index.html:124-138`
+`webapp/frontend/src/App.tsx` — строки 1691-1738
 
-### Что происходит
+### Что происходит — пошагово
+
 ```
-Таймлайн после открытия приложения:
+ТАЙМЛАЙН:
 
-0ms      — App рендерится, boot-loader покрывает ВЕСЬ экран (position:fixed; inset:0; z-index:999999)
-0-4000ms — setTimeout 4 секунды (!) — boot-loader БЛОКИРУЕТ ВСЕ НАЖАТИЯ
-4000ms   — добавляется класс "is-exiting" (начинается анимация)
-4920ms   — добавляется класс "is-hidden" (pointer-events:none)
-5020ms   — bootLoader.remove() — элемент удаляется из DOM
+0ms     — Приложение рендерится. state.current_track = null.
+          Фоновых overlay-ов НЕТ → кнопки работают ✅
+
+~2-3с   — fetchPlayerState() загружает последний трек
+          → setState({ current_track: {...} })
+
+~3-4с   — extractTopColors() извлекает цвета из обложки
+          → setMeshColors([...])
+
+~4с     — Рендерится ОДИН ИЗ ЭТИХ div-ов:
 ```
 
-**Итого: первые ~5 секунд после открытия ни одна кнопка не работает**, потому что невидимый div с `z-index: 999999` лежит поверх всего интерфейса.
+**Mesh gradient background (строки 1705-1722):**
+```tsx
+{state.current_track?.cover_url && !theme.bgImage && meshColors.length >= 3 && (
+  <div style={{
+    position: "fixed",    // ← покрывает ВСЮ область экрана
+    top: 0, left: 0,
+    right: 0, bottom: 0,
+    background: `radial-gradient(...)`,
+    zIndex: -1,
+    // ❌ НЕТ pointerEvents: "none" !!!
+  }} />
+)}
+```
+
+**ИЛИ blurred cover fallback (строки 1724-1738):**
+```tsx
+{state.current_track?.cover_url && !theme.bgImage && meshColors.length < 3 && (
+  <div style={{
+    position: "fixed",    // ← покрывает ВСЮ область экрана
+    top: 0, left: 0,
+    right: 0, bottom: 0,
+    backgroundImage: `url(${state.current_track.cover_url})`,
+    filter: "blur(60px) brightness(0.4)",
+    zIndex: -1,
+    // ❌ НЕТ pointerEvents: "none" !!!
+  }} />
+)}
+```
+
+**И theme bgOverlay (строки 1691-1702):**
+```tsx
+{theme.bgOverlay && (
+  <div style={{
+    position: "fixed",
+    top: 0, left: 0,
+    right: 0, bottom: 0,
+    background: theme.bgOverlay,
+    zIndex: -1,
+    // ❌ НЕТ pointerEvents: "none" !!!
+  }} />
+)}
+```
+
+### Почему zIndex: -1 не спасает
+
+В теории `zIndex: -1` рисует элемент позади контента. Но в **WebView Telegram** (особенно на Android) hit-testing тачей работает не по z-index, а по DOM-позиции и `position: fixed`. Фиксированный элемент с `inset: 0` **перехватывает все touch-события** на всём viewport, даже если визуально он позади.
+
+Для сравнения — декоративные blur-элементы Tequila-темы (строки 1632-1661) **правильно** имеют `pointerEvents: "none"`:
+```tsx
+// ✅ Эти работают правильно:
+<div style={{
+  position: "fixed",
+  zIndex: -1,
+  pointerEvents: "none",  // ← ЕСТЬ — тачи проходят сквозь
+}} />
+```
 
 ### Что исправить
-1. **Убрать `setTimeout(…, 4000)`** — 4 секунды ожидания перед началом анимации выхода — это слишком много
-2. **Либо** сразу поставить `pointer-events: none` на boot-loader после рендера App, не дожидаясь анимации
-3. **Либо** привязать скрытие к событию "приложение готово" (первый рендер компонента), а не к фиксированному таймеру
-4. Рекомендуемый подход:
+
+Добавить `pointerEvents: "none"` на **3 элемента**:
+
+**Фикс 1 — theme.bgOverlay (строка ~1693):**
 ```tsx
-// main.tsx — сразу после render()
-if (bootLoader) {
-  bootLoader.style.pointerEvents = "none"; // ← мгновенно разблокировать клики
-  bootLoader.classList.add("is-exiting");
-  setTimeout(() => bootLoader.remove(), 1000);
-}
+  style={{
+    position: "fixed",
+    top: 0, left: 0, right: 0, bottom: 0,
+    background: theme.bgOverlay,
+    zIndex: -1,
++   pointerEvents: "none",       // ← ДОБАВИТЬ
+  }}
+```
+
+**Фикс 2 — mesh gradient (строка ~1707):**
+```tsx
+  style={{
+    position: "fixed",
+    top: 0, left: 0, right: 0, bottom: 0,
+    background: `radial-gradient(...)`,
+    animation: "meshRotate 20s ease-in-out infinite",
+    zIndex: -1,
++   pointerEvents: "none",       // ← ДОБАВИТЬ
+  }}
+```
+
+**Фикс 3 — blurred cover fallback (строка ~1726):**
+```tsx
+  style={{
+    position: "fixed",
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundImage: `url(...)`,
+    filter: "blur(60px) brightness(0.4)",
+    transform: "scale(1.2)",
+    zIndex: -1,
++   pointerEvents: "none",       // ← ДОБАВИТЬ
+  }}
+```
+
+**Также проверить theme.bgImage div (строка ~1676):**
+```tsx
+  style={{
+    position: "fixed",
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundImage: `url(${theme.bgImage})`,
+    backgroundSize: "cover",
+    zIndex: -2,
++   pointerEvents: "none",       // ← ДОБАВИТЬ на всякий случай
+  }}
 ```
 
 ---
 
-## Корневая причина №2 (CRITICAL): e.preventDefault() в onTouchEnd убивает onClick на кнопках навигации
+## ДОПОЛНИТЕЛЬНАЯ ПРИЧИНА: preventDefault() в onTouchEnd на кнопках навигации
 
 ### Где
-- `webapp/frontend/src/App.tsx:1836-1841` (кнопки табов)
-- `webapp/frontend/src/App.tsx:1889` (кнопка смены темы)
+`webapp/frontend/src/App.tsx` — строки 1836-1841, 1889
 
 ### Что происходит
 ```tsx
 <button
   onTouchEnd={(e) => {
     if (!navTouchMovedRef.current) {
-      e.preventDefault();   // ← УБИВАЕТ последующий onClick
+      e.preventDefault();   // ← убивает последующий onClick
       activateView(v);
     }
   }}
-  onClick={() => activateView(v)}  // ← НИКОГДА НЕ СРАБАТЫВАЕТ на тач-устройствах
+  onClick={() => activateView(v)}  // ← не сработает после preventDefault
 >
 ```
 
-На мобильных устройствах (а TMA = всегда мобильное):
-1. Пользователь тапает кнопку
-2. Браузер генерирует `touchend` → вызывается `preventDefault()`
-3. Браузер **не генерирует** `click` (т.к. preventDefault отменил его)
-4. Если `navTouchMovedRef.current === true` (система решила что был свайп) → **ни touchEnd, ни click не вызовет activateView** → кнопка мертва
+На мобильных: `touchend` → `preventDefault()` → браузер **не генерирует** `click`. Если `navTouchMovedRef.current === true` (система решила что был свайп), то ни `touchEnd`, ни `click` не вызовут `activateView`. Кнопка мертва.
 
 ### Что исправить
-**Убрать `e.preventDefault()` из onTouchEnd** и оставить только `onClick`:
-```tsx
-<button
-  onClick={() => activateView(v)}
-  // onTouchEnd — НЕ НУЖЕН для простого тапа
->
-```
 
-Если нужно отличать свайп от тапа — делать это через `onClick` + проверку `navTouchMovedRef`:
+Убрать `e.preventDefault()` из `onTouchEnd`, оставить только `onClick`:
+
 ```tsx
 <button
   onClick={() => {
@@ -89,147 +176,61 @@ if (bootLoader) {
 
 ---
 
-## Корневая причина №3 (HIGH): Карусель навигации — конфликт touch-action и scroll-snap
+## ДОПОЛНИТЕЛЬНАЯ ПРИЧИНА: Конфликт touch handlers на карусели
 
 ### Где
-- `webapp/frontend/src/App.tsx:1796-1827`
+`webapp/frontend/src/App.tsx` — строки 1796, 1826, 1879
 
 ### Что происходит
 На `<nav>` карусели одновременно:
-1. `touchAction: "pan-x"` — разрешает только горизонтальный скролл
-2. `scrollSnapType: "x proximity"` — snap-точки на каждом табе
-3. `onTouchStart/Move/End` — кастомные обработчики тача
-4. `WebkitOverflowScrolling: "touch"` — инерционный скролл
+- `touchAction: "pan-x"` — на контейнере
+- `touchAction: "manipulation"` — на каждой кнопке
+- `onTouchStart/Move/End` — кастомные хэндлеры
+- `scrollSnapType: "x proximity"` — нативный snap
 
-**Конфликт:** кастомные touch-хэндлеры мешают нативному `scroll-snap`. При свайпе:
-- Нативный скролл двигает карусель
-- `handleNavTouchMove` ставит `navTouchMovedRef = true`
-- `handleNavTouchEnd` сбрасывает ref через `setTimeout(0)` — но к этому моменту snap-анимация ещё не закончилась
-- Результат: карусель "дёргается", snap срабатывает непредсказуемо
+Эти 4 вещи конфликтуют → карусель дёргается, snap срабатывает непредсказуемо.
 
 ### Что исправить
-**Вариант А (простой):** Убрать кастомные touch-хэндлеры с `<nav>`, оставить только нативный скролл + `scroll-snap`:
-```tsx
-<nav ref={navCarouselRef} className="luxury-carousel" style={{
-  // ... все стили остаются
-  // touchAction: "pan-x" — оставить
-  // scroll-snap — оставить
-}}>
-  {/* кнопки с обычным onClick */}
-</nav>
-```
-
-**Вариант Б (если нужно различать свайп/тап):** Отслеживать только deltaX > порог, без preventDefault, без блокировки нативного скролла.
+1. Убрать `touchAction: "manipulation"` с кнопок (строка 1879)
+2. Убрать кастомные `onTouchStart/Move/End` с `<nav>` — нативный скролл + snap работает сам
+3. Если нужно отличать свайп от тапа — делать через `onClick` + проверку дельты
 
 ---
 
-## Корневая причина №4 (HIGH): Глобальный preventDefault на touchmove при drag-reorder треков
+## ДОПОЛНИТЕЛЬНАЯ ПРИЧИНА: Глобальный preventDefault на document при drag треков
 
 ### Где
-- `webapp/frontend/src/components/TrackList.tsx:99-149`
+`webapp/frontend/src/components/TrackList.tsx` — строки 99-149
 
 ### Что происходит
+При зажатии трека для перетаскивания:
 ```tsx
-useEffect(() => {
-  if (dragIndex === null) return;
-
-  const onMove = (e: TouchEvent) => {
-    e.preventDefault();  // ← БЛОКИРУЕТ ВЕСЬ СКРОЛЛ НА СТРАНИЦЕ
-    // ...
-  };
-
-  document.addEventListener("touchmove", onMove, { passive: false });
-  // ...
-}, [dragIndex, ...]);
+document.addEventListener("touchmove", (e) => {
+  e.preventDefault();  // ← блокирует ВЕСЬ скролл на ВСЕЙ странице
+}, { passive: false });
 ```
 
-Когда `dragIndex !== null` (пользователь зажал трек для перетаскивания):
-- `preventDefault()` вешается на `document` — **блокируется скролл везде**: и в списке треков, и в карусели, и в плеере
-- Если состояние `dragIndex` по какой-то причине не сбросится (ошибка, race condition) — **скролл ломается навсегда** до перезагрузки
+Если drag-состояние зависнет — скролл ломается навсегда.
 
 ### Что исправить
-1. Ограничить `preventDefault` только контейнером TrackList, а не `document`:
+Ограничить preventDefault контейнером TrackList:
 ```tsx
 const onMove = (e: TouchEvent) => {
-  // Проверить что цель тача внутри контейнера
   if (!containerRef.current?.contains(e.target as Node)) return;
   e.preventDefault();
   // ...
 };
 ```
-2. Добавить safety-таймаут: если drag длится > 10 секунд — автосброс:
-```tsx
-const safetyTimeout = setTimeout(() => {
-  setDragIndex(null);
-  setDragY(0);
-}, 10000);
-return () => clearTimeout(safetyTimeout);
-```
 
 ---
 
-## Корневая причина №5 (MEDIUM): Кнопка удаления трека — двойной обработчик
+## Сводка — порядок фикса
 
-### Где
-- `webapp/frontend/src/components/TrackList.tsx:255-258`
+| # | Что | Файл | Строки | Эффект | Время |
+|---|-----|------|--------|--------|-------|
+| **1** | Добавить `pointerEvents: "none"` на 4 фоновых overlay | App.tsx | 1676, 1693, 1707, 1726 | **Кнопки перестанут блокироваться** | 2 мин |
+| **2** | Убрать `e.preventDefault()` из onTouchEnd кнопок | App.tsx | 1838, 1889 | Табы будут надёжно работать | 2 мин |
+| **3** | Убрать кастомные touch handlers с карусели | App.tsx | 1796, 1879 | Карусель перестанет дёргаться | 5 мин |
+| **4** | Ограничить drag preventDefault контейнером | TrackList.tsx | 102-103 | Скролл не будет ломаться при drag | 3 мин |
 
-### Что происходит
-```tsx
-<div
-  onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(...); }}
-  onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(...); }}
->
-```
-
-На тач-устройствах `handleRemove` вызывается **дважды**: один раз из `onTouchEnd`, второй из `onClick` (если preventDefault в touchEnd не сработал из-за timing). Или наоборот — ни разу, если preventDefault заблокировал оба.
-
-### Что исправить
-Оставить только `onClick`, убрать `onTouchEnd`:
-```tsx
-<div onClick={(e) => { e.stopPropagation(); handleRemove(...); }}>
-```
-`pointer-events: none/auto` (строка 272) уже защищает от случайных нажатий.
-
----
-
-## Корневая причина №6 (MEDIUM): touchAction: "manipulation" на кнопках конфликтует с pan-x на контейнере
-
-### Где
-- `webapp/frontend/src/App.tsx:1879` (кнопки) vs строка 1826 (контейнер)
-
-### Что происходит
-- Контейнер `<nav>`: `touchAction: "pan-x"` — разрешает только горизонтальный пан
-- Кнопки `<button>`: `touchAction: "manipulation"` — разрешает pan + zoom, убирает 300ms задержку
-
-**Конфликт:** когда палец на кнопке, браузер видит `manipulation` (pan в обе стороны разрешён), но родитель говорит `pan-x` only. Разные браузеры разрешают это по-разному → непредсказуемое поведение.
-
-### Что исправить
-Убрать `touchAction` с кнопок — достаточно `touchAction: "pan-x"` на контейнере:
-```tsx
-// На кнопках:
-// touchAction: "manipulation"  ← УБРАТЬ
-```
-
----
-
-## Сводная таблица
-
-| # | Проблема | Файл | Строки | Симптом | Приоритет |
-|---|----------|------|--------|---------|-----------|
-| 1 | Boot-loader блокирует 5 секунд | main.tsx | 111-119 | Кнопки не нажимаются при открытии | CRITICAL |
-| 2 | preventDefault в onTouchEnd на табах | App.tsx | 1836-1841, 1889 | Табы не переключаются | CRITICAL |
-| 3 | Конфликт touch handlers + scroll-snap | App.tsx | 1796-1827 | Карусель дёргается | HIGH |
-| 4 | Глобальный preventDefault на document | TrackList.tsx | 99-149 | Скролл ломается при drag | HIGH |
-| 5 | Двойной обработчик на кнопке удаления | TrackList.tsx | 255-258 | Удаление дважды или ни разу | MEDIUM |
-| 6 | touchAction конфликт | App.tsx | 1826 vs 1879 | Непредсказуемый скролл | MEDIUM |
-
-## Порядок фикса
-
-1. **#1** — Boot-loader → мгновенный результат, все кнопки заработают
-2. **#2** — preventDefault в табах → навигация заработает
-3. **#3** — Убрать кастомные touch handlers с карусели → плавный скролл
-4. **#6** — touchAction конфликт → чинится вместе с #3
-5. **#4** — Ограничить drag preventDefault контейнером
-6. **#5** — Упростить кнопку удаления
-
-После фиксов #1 и #2 приложение уже должно стать значительно отзывчивее.
+**Фикс #1 — это 90% проблемы.** 4 строки кода, 2 минуты работы. После него кнопки сразу заработают.

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import {
   fetchParty, addPartyTrack, removePartyTrack, skipPartyTrack, closeParty,
   clearPartyChat, createParty, deletePartyChatMessage, fetchLyrics, fetchMyParties, fetchPartyRecap, playNextPartyTrack, reactToPartyTrack, reorderPartyTrack, runPartyAutoDj, savePartyAsPlaylist, searchTracks, sendPartyChat, syncPartyPlayback, updatePartyMemberRole,
@@ -21,7 +22,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", initialCode, readOnlyMode = false }: Props) {
+export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", initialCode, readOnlyMode = false }: Props) {
   const warm = themeId === "tequila";
   const [party, setParty] = useState<Party | null>(null);
   const [myParties, setMyParties] = useState<Party[]>([]);
@@ -1508,4 +1509,4 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       </div>
     </div>
   );
-}
+});

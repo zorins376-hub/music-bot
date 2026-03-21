@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { JSX } from "preact";
 import { fetchWrapped, type WrappedData, type Track } from "../api";
 import { getThemeById, themeColors, type ThemeColors } from "../themes";
@@ -39,7 +40,7 @@ function formatTimeRu(seconds: number): string {
   return `${h} ${h === 1 ? "hour" : "hours"}`;
 }
 
-export function WrappedView({
+export const WrappedView = memo(function WrappedView({
   userId,
   onPlayTrack,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
@@ -647,7 +648,7 @@ export function WrappedView({
       )}
     </div>
   );
-}
+});
 
 // ── Helper components ──
 

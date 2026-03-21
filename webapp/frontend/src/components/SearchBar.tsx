@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "preact/hooks";
+import { memo } from "preact/compat";
 import { searchTracks, isOnline, type Track } from "../api";
 import { SkeletonTrack } from "./Skeleton";
 import { IconSpinner, IconSearch } from "./Icons";
@@ -14,7 +15,7 @@ interface Props {
   themeId?: string;
 }
 
-export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
+export const SearchBar = memo(function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
   const isTequila = themeId === "tequila";
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
@@ -153,4 +154,4 @@ export function SearchBar({ onSelect, accentColor = "var(--tg-theme-button-color
       `}</style>
     </div>
   );
-}
+});

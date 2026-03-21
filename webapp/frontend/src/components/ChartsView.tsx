@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+import { memo } from "preact/compat";
 import {
   fetchChartSources, fetchChart, fetchPlaylists, addTrackToPlaylist,
   createPlaylist, searchTracks,
@@ -19,7 +20,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
+export const ChartsView = memo(function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
   const theme = getThemeById(themeId);
   const tc = themeColors(theme, accentColor);
 
@@ -397,4 +398,4 @@ export function ChartsView({ userId, onPlayTrack, accentColor = "var(--tg-theme-
       )}
     </div>
   );
-}
+});

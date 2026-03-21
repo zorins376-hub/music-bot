@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
+import { memo } from "preact/compat";
 import { fetchActivityFeed, type ActivityItem, type Track } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
@@ -27,7 +28,7 @@ function timeAgo(dateStr: string): string {
   return `${days}д`;
 }
 
-export function ActivityFeedView({
+export const ActivityFeedView = memo(function ActivityFeedView({
   userId,
   onPlayTrack,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
@@ -243,4 +244,4 @@ export function ActivityFeedView({
       </div>
     </div>
   );
-}
+});

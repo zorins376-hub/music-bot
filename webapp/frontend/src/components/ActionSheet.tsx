@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { JSX } from "preact";
 import type { Track } from "../api";
 import { getThemeById, themeColors } from "../themes";
@@ -29,7 +30,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function ActionSheet({
+export const ActionSheet = memo(function ActionSheet({
   track,
   visible,
   onClose,
@@ -217,7 +218,7 @@ export function ActionSheet({
       </div>
     </div>
   );
-}
+});
 
 /**
  * Hook to add long-press detection for action sheet.

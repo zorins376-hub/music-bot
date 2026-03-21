@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import { fetchLyrics } from "../api";
 import { SkeletonLyrics } from "./Skeleton";
 import { IconArrowLeft, IconSad, IconMic } from "./Icons";
@@ -46,7 +47,7 @@ function parseLines(raw: string): LyricLine[] {
   return result;
 }
 
-export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
+export const LyricsView = memo(function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
   const isTequila = themeId === "tequila";
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -216,4 +217,4 @@ export function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-t
       )}
     </div>
   );
-}
+});

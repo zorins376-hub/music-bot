@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { PlayerState } from "../api";
 import { toggleFavorite, checkFavorite } from "../api";
 import { IconMusic } from "./Icons";
@@ -17,7 +18,7 @@ const haptic = (type: "light" | "medium" | "heavy" = "light") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(type); } catch {}
 };
 
-export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed = 0, audioDuration = 0, onAction, onExpand }: Props) {
+export const MiniPlayer = memo(function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed = 0, audioDuration = 0, onAction, onExpand }: Props) {
   const track = state.current_track;
   if (!track) return null;
   const isTequila = themeId === "tequila";
@@ -215,4 +216,4 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed 
       </button>
     </div>
   );
-}
+});

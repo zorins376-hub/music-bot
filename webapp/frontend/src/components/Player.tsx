@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, searchTracks, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
@@ -69,7 +70,7 @@ interface Props {
   onPlayAll?: (tracks: Track[]) => void;
 }
 
-export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
+export const Player = memo(function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
   const isTequila = themeId === "tequila";
   const vinylSpin = coverMode === "vinyl";
   const cdMode = coverMode === "cd";
@@ -2276,4 +2277,4 @@ export function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 
       )}
     </div>
   );
-}
+});

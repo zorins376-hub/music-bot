@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import { startBattle, submitBattleScore, getStreamUrl, type BattleData, type BattleRound } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
@@ -17,7 +18,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function BattleView({
+export const BattleView = memo(function BattleView({
   userId,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
@@ -381,4 +382,4 @@ export function BattleView({
       </div>
     </div>
   );
-}
+});

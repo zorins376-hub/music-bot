@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import type { JSX } from "preact";
 import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, type Track, type SmartPlaylist } from "../api";
 import { getThemeById, themeColors } from "../themes";
@@ -105,7 +106,7 @@ function HorizontalCards({
   );
 }
 
-export function ForYouView({
+export const ForYouView = memo(function ForYouView({
   userId,
   currentTrack,
   onPlayTrack,
@@ -194,45 +195,36 @@ export function ForYouView({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(false);
 
-  // --- Fetch Track of Day + Smart Playlists ---
+  // --- Fetch Track of Day + Smart Playlists + Wave + Trending + Similar (batched) ---
   useEffect(() => {
-    fetchTrackOfDay().then(setTodTrack).catch(() => {});
-    fetchSmartPlaylists().then(setSmartPlaylists).catch(() => {});
-  }, []);
-
-  // --- Fetch wave ---
-  useEffect(() => {
+    let cancelled = false;
     setWaveLoading(true);
-    setWaveError(false);
-    fetchWave(userId, 10)
-      .then(setWaveTracks)
-      .catch(() => { setWaveTracks([]); setWaveError(true); })
-      .finally(() => setWaveLoading(false));
-  }, [userId]);
-
-  // --- Fetch trending ---
-  useEffect(() => {
     setTrendingLoading(true);
-    setTrendingError(false);
-    fetchTrending(24, 15)
-      .then(setTrendingTracks)
-      .catch(() => { setTrendingTracks([]); setTrendingError(true); })
-      .finally(() => setTrendingLoading(false));
-  }, []);
+    if (currentTrack?.video_id) setSimilarLoading(true);
 
-  // --- Fetch similar ---
-  useEffect(() => {
-    if (!currentTrack?.video_id) {
-      setSimilarTracks([]);
-      return;
-    }
-    setSimilarLoading(true);
-    setSimilarError(false);
-    fetchSimilar(currentTrack.video_id, 8)
-      .then(setSimilarTracks)
-      .catch(() => { setSimilarTracks([]); setSimilarError(true); })
-      .finally(() => setSimilarLoading(false));
-  }, [currentTrack?.video_id]);
+    Promise.allSettled([
+      fetchWave(userId, 10),
+      fetchTrending(24, 15),
+      fetchTrackOfDay(),
+      fetchSmartPlaylists(),
+      currentTrack?.video_id ? fetchSimilar(currentTrack.video_id, 8) : Promise.resolve([] as Track[]),
+    ]).then(([wave, trending, tod, smart, similar]) => {
+      if (cancelled) return;
+      setWaveTracks(wave.status === "fulfilled" ? wave.value : []);
+      setWaveError(wave.status === "rejected");
+      setWaveLoading(false);
+      setTrendingTracks(trending.status === "fulfilled" ? trending.value : []);
+      setTrendingError(trending.status === "rejected");
+      setTrendingLoading(false);
+      if (tod.status === "fulfilled") setTodTrack(tod.value);
+      if (smart.status === "fulfilled") setSmartPlaylists(smart.value);
+      setSimilarTracks(similar.status === "fulfilled" ? similar.value : []);
+      setSimilarError(similar.status === "rejected" && !!currentTrack?.video_id);
+      setSimilarLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [userId, currentTrack?.video_id]);
 
   // --- AI Playlist ---
   const handleGenerateAi = useCallback(async () => {
@@ -739,4 +731,4 @@ export function ForYouView({
       )}
     </div>
   );
-}
+});

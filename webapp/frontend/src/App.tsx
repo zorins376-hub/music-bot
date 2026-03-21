@@ -24,7 +24,7 @@ const WrappedView = lazy(() => import("./components/WrappedView").then(m => ({ d
 const SleepSoundsView = lazy(() => import("./components/SleepSoundsView").then(m => ({ default: m.SleepSoundsView })));
 const LiveRadioView = lazy(() => import("./components/LiveRadioView").then(m => ({ default: m.LiveRadioView })));
 import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
-import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
+import { extractDominantColor, extractColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, applyThemeCSSVars, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
@@ -1182,12 +1182,10 @@ export function App() {
   useEffect(() => {
     const coverUrl = state.current_track?.cover_url;
     if (coverUrl) {
-      extractDominantColor(coverUrl).then((color) => {
-        setAccentColor(rgbToCSS(color));
-        setAccentColorAlpha(rgbaToCSS(color, 0.4));
-      });
-      extractTopColors(coverUrl).then((colors) => {
-        setMeshColors(colors.map((c) => rgbaToCSS(c, 0.35)));
+      extractColors(coverUrl).then(({ dominant, top3 }) => {
+        setAccentColor(rgbToCSS(dominant));
+        setAccentColorAlpha(rgbaToCSS(dominant, 0.4));
+        setMeshColors(top3.map((c) => rgbaToCSS(c, 0.35)));
       });
     } else {
       setAccentColor(theme.accent);
@@ -1241,15 +1239,22 @@ export function App() {
 
   // ── Broadcast live polling ──
   const broadcastLiveRef = useRef(false);
+  const broadcastDJRef = useRef("DJ");
   useEffect(() => {
     let active = true;
     const check = () => {
       fetchBroadcast().then((b) => {
         if (!active) return;
         const wasLive = broadcastLiveRef.current;
-        broadcastLiveRef.current = b.is_live;
-        setBroadcastLive(b.is_live);
-        setBroadcastDJ(b.dj_name || "DJ");
+        const newDJ = b.dj_name || "DJ";
+        if (b.is_live !== wasLive) {
+          broadcastLiveRef.current = b.is_live;
+          setBroadcastLive(b.is_live);
+        }
+        if (newDJ !== broadcastDJRef.current) {
+          broadcastDJRef.current = newDJ;
+          setBroadcastDJ(newDJ);
+        }
         if (b.is_live && !wasLive) setLiveBannerDismissed(false);
       }).catch(() => {});
     };

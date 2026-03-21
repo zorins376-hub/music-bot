@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "preact/hooks";
+import { memo } from "preact/compat";
 import { extractDominantColor, rgbToCSS } from "../colorExtractor";
 import { IconClose, IconUpload } from "./Icons";
 
@@ -18,7 +19,7 @@ interface ShareCardProps {
  * ShareCard — generates a viral share card for Instagram Stories / social media.
  * Uses canvas to create an image with track info + QR code.
  */
-export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "blackroom" }: ShareCardProps) {
+export const ShareCard = memo(function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "blackroom" }: ShareCardProps) {
   const isTequila = themeId === "tequila";
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -348,7 +349,7 @@ export function ShareCard({ track, onClose, accentColor = "#7c4dff", themeId = "
       </p>
     </div>
   );
-}
+});
 
 // Helper: word wrap text
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {

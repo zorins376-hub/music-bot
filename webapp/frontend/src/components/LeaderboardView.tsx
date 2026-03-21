@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+import { memo } from "preact/compat";
 import { fetchLeaderboard, fetchChallenges, type LeaderboardData, type ChallengesData } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
@@ -18,7 +19,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export function LeaderboardView({
+export const LeaderboardView = memo(function LeaderboardView({
   userId,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
@@ -278,4 +279,4 @@ export function LeaderboardView({
       )}
     </div>
   );
-}
+});
