@@ -68,8 +68,8 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 _SESSION_SECRET = (os.environ.get("ADMIN_SESSION_SECRET") or "").strip()
 
 if not ADMIN_USERNAME or not ADMIN_PASSWORD or not _SESSION_SECRET:
-    raise RuntimeError(
-        "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET must be set"
+    logger.warning(
+        "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET must all be set; admin panel disabled"
     )
 
 _SESSION_TTL = 86400 * 7  # 7 days
