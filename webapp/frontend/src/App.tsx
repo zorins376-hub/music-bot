@@ -351,7 +351,9 @@ export function App() {
       outGain.gain.cancelScheduledValues(ctx.currentTime);
       outGain.gain.setValueAtTime(0.0001, ctx.currentTime);
     }
-    await audio.play().catch(() => {});
+    await audio.play().catch((e) => {
+      console.warn("softPlay failed:", e?.message || e);
+    });
     if (ctx && outGain) {
       const t = ctx.currentTime;
       outGain.gain.setTargetAtTime(1, t, 0.06); // 60ms τ ≈ 240ms to 98% — no pop
@@ -1033,7 +1035,9 @@ export function App() {
           // Timeout fallback: don't block forever on slow networks
           setTimeout(resolve, 8000);
         });
-        await audio.play().catch(() => {});
+        await audio.play().catch((e) => {
+          console.warn("loadAudio play() rejected:", e?.message || e);
+        });
       }
 
       // Smooth fade in — single gain node, no competing ramps
@@ -1068,6 +1072,8 @@ export function App() {
         }
         if (nextIds.length) prefetchTracks(nextIds);
       }
+
+      setBuffering(false);
     };
     
     loadAudio().then(async () => {
@@ -1078,6 +1084,7 @@ export function App() {
       }
     }).catch((e) => {
       console.error("Audio playback error:", e);
+      setBuffering(false);
     });
 
     if ("mediaSession" in navigator) {
@@ -1341,10 +1348,15 @@ export function App() {
           if (audioRef.current && audioRef.current.paused) {
             if (trackId && trackId !== currentTrackIdRef.current) {
               // Different track: just unlock audio context/element using the user gesture
-              audioRef.current.play().then(() => audioRef.current?.pause()).catch(() => {});
+              audioRef.current.play().then(() => audioRef.current?.pause()).catch((e) => {
+                console.warn("Audio unlock play failed:", e?.message || e);
+              });
             } else {
               // Same track: call softPlay immediately to satisfy gesture and unpause instantly
-              softPlay(audioRef.current).catch(() => {});
+              softPlay(audioRef.current).catch((e) => {
+                console.warn("softPlay failed:", e?.message || e);
+                setBuffering(false);
+              });
             }
           }
           // Ingest play event for AI learning
