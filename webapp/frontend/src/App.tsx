@@ -1685,6 +1685,7 @@ export function App() {
             backgroundSize: "cover",
             backgroundPosition: "center",
             zIndex: -2,
+            pointerEvents: "none",
           }}
         />
       )}
@@ -1698,6 +1699,7 @@ export function App() {
             bottom: 0,
             background: theme.bgOverlay,
             zIndex: -1,
+            pointerEvents: "none",
           }}
         />
       )}
@@ -1718,6 +1720,7 @@ export function App() {
             `,
             animation: "meshRotate 20s ease-in-out infinite",
             zIndex: -1,
+            pointerEvents: "none",
           }}
         />
       )}
@@ -1735,6 +1738,7 @@ export function App() {
             filter: "blur(60px) brightness(0.4)",
             transform: "scale(1.2)",
             zIndex: -1,
+            pointerEvents: "none",
           }}
         />
       )}
