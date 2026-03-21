@@ -22,13 +22,11 @@ logger = logging.getLogger(__name__)
 
 _SUPA_URL: str = (
     getattr(settings, "SUPABASE_URL", None)
-    or "https://uhvbdwjchxcnoiodfnvw.supabase.co"
+    or ""
 )
 _SUPA_KEY: str = (
     getattr(settings, "SUPABASE_SERVICE_KEY", None)
-    or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVodmJkd2pjaHhjbm9pb2RmbnZ3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTg1MDAwOSwiZXhwIjoyMDg3NDI2MDA5fQ"
-    ".tLm2O84rRZHgcoPQgbgb8zVC3zRCBzy54xS0qCF_6Gw"
+    or ""
 )
 
 _HEADERS = {
@@ -39,7 +37,7 @@ _HEADERS = {
 }
 
 _session: aiohttp.ClientSession | None = None
-_enabled: bool = bool(_SUPA_URL and _SUPA_KEY)
+_enabled: bool = bool(_SUPA_URL.strip() and _SUPA_KEY.strip())
 
 
 # ── Session management ────────────────────────────────────────────────────────

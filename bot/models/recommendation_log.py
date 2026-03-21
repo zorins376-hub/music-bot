@@ -16,8 +16,8 @@ class RecommendationLog(Base):
     __tablename__ = "recommendation_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracks.id"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"))
     algo: Mapped[str] = mapped_column(String(20))  # "ml" | "sql" | "popular"
     position: Mapped[int] = mapped_column(Integer)  # position in list (0-indexed)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)

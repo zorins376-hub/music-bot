@@ -157,7 +157,7 @@ class Cache:
                 f"fid:{source_id}:{bitrate}", settings.CACHE_FILE_ID_TTL, file_id
             )
         except Exception:
-            pass
+            logger.debug("set_file_id failed source=%s", source_id, exc_info=True)
 
     # ── Search sessions ─────────────────────────────────────────────────────
 
@@ -169,7 +169,7 @@ class Cache:
                 json.dumps(results, ensure_ascii=False),
             )
         except Exception:
-            pass
+            logger.debug("store_search failed session=%s", session_id, exc_info=True)
 
     async def get_search(self, session_id: str) -> list[dict] | None:
         start = time.perf_counter()
@@ -223,7 +223,7 @@ class Cache:
             key = f"qcache:{source}:{query.lower().strip()}"
             await self.redis.setex(key, 120, json.dumps(results, ensure_ascii=False))
         except Exception:
-            pass
+            logger.debug("set_query_cache failed query=%s", query, exc_info=True)
 
     # ── Rate limiting ────────────────────────────────────────────────────────
 

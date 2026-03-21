@@ -1,0 +1,15 @@
+{
+  "current_track": {
+    "video_id": "test123",
+    "title": "Test Track",
+    "artist": "Test Artist",
+    "duration": 180,
+    "duration_fmt": "3:00",
+    "cover_url": null
+  },
+  "is_playing": false,
+  "queue": [],
+  "shuffle": false,
+  "repeat_mode": "off",
+  "elapsed": 0
+}

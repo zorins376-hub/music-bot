@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import type { JSX } from "preact";
 import { fetchWrapped, type WrappedData, type Track } from "../api";
-import { getThemeById, themeColors } from "../themes";
+import { getThemeById, themeColors, type ThemeColors } from "../themes";
 import {
   IconSpinner, IconFire, IconMusicNote, IconCrown, IconHeadphones,
   IconPlaySmall, IconChart, IconMoon, IconRocket, IconStar, IconHeart,
@@ -355,8 +356,8 @@ export function WrappedView({
                       background: tc.accentGradient,
                       width: `${pct}%`,
                       animation: `wrp-barGrow 0.8s ease-out ${0.4 + i * 0.15}s both`,
-                      ["--bar-w" as any]: `${pct}%`,
-                    }} />
+                      "--bar-w": `${pct}%`,
+                    } as JSX.CSSProperties} />
                   </div>
                 </div>
               );
@@ -637,7 +638,7 @@ export function WrappedView({
                 </div>
               </div>
               <div style={{ flexShrink: 0, textAlign: "right" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: tc.highlight }}>{(track as any).play_count}x</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: tc.highlight }}>{track.play_count}x</div>
                 <IconPlaySmall size={12} color={tc.hintColor} />
               </div>
             </div>
@@ -650,7 +651,7 @@ export function WrappedView({
 
 // ── Helper components ──
 
-function StatBubble({ label, value, tc, icon }: { label: string; value: number; tc: any; icon?: any }) {
+function StatBubble({ label, value, tc, icon }: { label: string; value: number; tc: ThemeColors; icon?: JSX.Element }) {
   return (
     <div style={{
       padding: "12px 16px", borderRadius: 14,
@@ -664,7 +665,7 @@ function StatBubble({ label, value, tc, icon }: { label: string; value: number; 
   );
 }
 
-function MiniStat({ label, value, tc }: { label: string; value: string; tc: any }) {
+function MiniStat({ label, value, tc }: { label: string; value: string; tc: ThemeColors }) {
   return (
     <div style={{
       padding: "10px 16px", borderRadius: 12,
@@ -677,7 +678,7 @@ function MiniStat({ label, value, tc }: { label: string; value: string; tc: any 
   );
 }
 
-function EmptySlide({ tc, text }: { tc: any; text: string }) {
+function EmptySlide({ tc, text }: { tc: ThemeColors; text: string }) {
   return (
     <div style={{
       borderRadius: 24, padding: "60px 20px", minHeight: 380,

@@ -12,10 +12,17 @@ Endpoints:
 import asyncio
 import json
 import logging
+import os
 import traceback
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from urllib.parse import urlparse
+
+# Initialize structlog
+os.environ.setdefault("STRUCTLOG_LAZY_INIT", "1")
+from bot.logging_config import configure_logging, get_logger
+configure_logging()
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,7 +68,16 @@ def _fire_task(coro) -> asyncio.Task:
     """Create a background task with GC protection."""
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+
+    def _on_done(done: asyncio.Task) -> None:
+        _background_tasks.discard(done)
+        if done.cancelled():
+            return
+        exc = done.exception()
+        if exc is not None:
+            logger.exception("Background task failed", exc_info=exc)
+
+    task.add_done_callback(_on_done)
     return task
 
 
@@ -146,7 +162,34 @@ _error_handler.setFormatter(logging.Formatter(
 ))
 logging.getLogger().addHandler(_error_handler)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def _normalize_origin(value: str) -> str | None:
+    parsed = urlparse(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
+def _build_allowed_origins() -> list[str]:
+    origins: set[str] = set()
+
+    for item in getattr(settings, "WEBAPP_CORS_ORIGINS", []) or []:
+        normalized = _normalize_origin(item)
+        if normalized:
+            origins.add(normalized)
+
+    tma_url = getattr(settings, "TMA_URL", None)
+    if tma_url:
+        normalized = _normalize_origin(tma_url)
+        if normalized:
+            origins.add(normalized)
+
+    if os.environ.get("ENV", "").lower() in {"dev", "development", "local"}:
+        origins.update({"http://localhost:5173", "http://127.0.0.1:5173"})
+
+    return sorted(origins)
 
 
 def _get_cached_user_audio(user_id: int) -> tuple[str, bool] | None:
@@ -201,13 +244,7 @@ async def lifespan(app: FastAPI):
     from bot.handlers.charts import _prewarm_charts_once
     _fire_task(_prewarm_charts_once())
 
-    # Background track indexer — harvests metadata from charts & APIs into DB
-    from bot.services.track_indexer import start_indexer_scheduler
-    await start_indexer_scheduler()
-
-    # Deep crawler — runs on separate VPS, not here
-    # from bot.services.deep_crawler import start_deep_crawler
-    # await start_deep_crawler()
+    # Background track indexer is started in bot/main.py — no need to duplicate here
 
     # Periodic cleanup of expired stream URL cache entries
     async def _cleanup_url_cache():
@@ -255,9 +292,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TMA Player", version="1.0.0", lifespan=lifespan)
 
+_allowed_origins = _build_allowed_origins()
+if not _allowed_origins:
+    logger.warning("CORS allow list is empty; cross-origin access is disabled")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -286,6 +328,25 @@ async def catch_exceptions_middleware(request: Request, call_next):
             traceback.format_exc(),
         )
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: https: blob:; "
+        "media-src 'self' https: blob:; "
+        "connect-src 'self' https: wss:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "frame-ancestors 'self' https://*.telegram.org https://t.me;"
+    )
+    return response
 
 
 # ── Simple in-memory rate limiter ──────────────────────────────────────
@@ -319,109 +380,58 @@ _stream_limiter = _RateLimiter(rate=2.0, burst=6)    # stream downloads
 
 @app.get("/health")
 async def health():
+    """Liveness probe — process is alive."""
+    return {"status": "ok", "uptime_s": int(_time_module.monotonic())}
+
+
+@app.get("/readyz")
+async def readiness():
+    """Readiness probe — all dependencies are available."""
     import os
+    checks: dict[str, str] = {}
+
+    # Check PostgreSQL
     try:
-        import resource
-        mem_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+        from sqlalchemy import text
+        from bot.models.base import async_session
+        async with async_session() as session:
+            await session.execute(text("SELECT 1"))
+        checks["db"] = "ok"
+    except Exception as e:
+        checks["db"] = f"error: {e}"
+
+    # Check Redis
+    try:
+        from bot.services.cache import cache
+        await cache.redis.ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+
+    # Memory usage (cross-platform)
+    try:
+        import psutil
+        mem_mb = round(psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024, 1)
     except ImportError:
-        mem_mb = round(os.getpid() / 1, 1)  # fallback: not meaningful on Windows
+        mem_mb = None
+
+    all_ok = all(v == "ok" for v in checks.values())
     return {
-        "status": "ok",
-        "uptime_s": int(_time_module.monotonic()),
+        "status": "ok" if all_ok else "degraded",
+        "checks": checks,
         "stream_cache_size": len(_stream_url_cache),
         "cover_cache_size": len(_cover_url_cache),
+        "mem_mb": mem_mb,
     }
 
 
 async def _get_or_create_webapp_user(tg_user: dict):
-    from datetime import datetime, timedelta, timezone
-    from sqlalchemy import select
-    from sqlalchemy.exc import IntegrityError
-
-    from bot.db import is_admin
-    from bot.models.base import async_session
-    from bot.models.user import User
+    from bot.db import get_or_create_user_raw
 
     user_id = int(tg_user["id"])
     username = tg_user.get("username")
     first_name = tg_user.get("first_name") or ""
-    admin = is_admin(user_id, username)
-    now = datetime.now(timezone.utc)
-    touch_interval = timedelta(seconds=60)
-
-    for attempt in range(3):
-        try:
-            async with async_session() as session:
-                db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-                if db_user is None:
-                    db_user = User(
-                        id=user_id,
-                        username=username,
-                        first_name=first_name,
-                        is_admin=admin,
-                        is_premium=admin,
-                    )
-                    session.add(db_user)
-                    try:
-                        await session.commit()
-                    except IntegrityError:
-                        await session.rollback()
-                        db_user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-                        if db_user is None:
-                            raise
-                        return db_user
-                    await session.refresh(db_user)
-                    return db_user
-
-                changed = False
-                if db_user.username != username:
-                    db_user.username = username
-                    changed = True
-                if db_user.first_name != first_name:
-                    db_user.first_name = first_name
-                    changed = True
-                if db_user.is_admin != admin:
-                    db_user.is_admin = admin
-                    changed = True
-
-                if db_user.last_active is None or (now - db_user.last_active) >= touch_interval:
-                    db_user.last_active = now
-                    changed = True
-
-                expired_premium = (
-                    not admin
-                    and db_user.is_premium
-                    and db_user.premium_until is not None
-                    and db_user.premium_until < now
-                )
-                if admin and not db_user.is_premium:
-                    db_user.is_premium = True
-                    changed = True
-                if expired_premium:
-                    db_user.is_premium = False
-                    changed = True
-
-                if changed:
-                    try:
-                        await session.commit()
-                    except Exception:
-                        await session.rollback()
-                        raise
-                return db_user
-        except IntegrityError:
-            if attempt < 2:
-                continue
-            raise
-        except asyncio.CancelledError:
-            logger.debug("_get_or_create_webapp_user cancelled for user %s", user_id)
-            raise
-        except Exception as exc:
-            if attempt < 2:
-                import asyncio as _aio
-                await _aio.sleep(0.2 * (attempt + 1))
-                continue
-            logger.error("_get_or_create_webapp_user failed after 3 attempts: %s", exc)
-            raise
+    return await get_or_create_user_raw(user_id, username, first_name)
 
 
 @app.get("/api/user/me", response_model=UserProfileSchema)
@@ -435,6 +445,14 @@ async def get_me(user: dict = Depends(get_current_user)):
         is_admin=bool(db_user.is_admin),
         quality=str(db_user.quality or "192"),
     )
+
+
+# Debug endpoint to diagnose Telegram SDK issues
+@app.post("/api/debug-auth")
+async def debug_auth(request: Request):
+    body = await request.json()
+    logger.warning("[DEBUG-AUTH] Client info: %s", body)
+    return {"ok": True}
 
 
 @app.post("/api/user/audio-settings", response_model=UserProfileSchema)
@@ -470,9 +488,16 @@ async def update_audio_settings(body: UserAudioSettingsSchema, user: dict = Depe
 @app.get("/api/errors")
 async def view_errors(
     lines: int = Query(200, ge=1, le=5000),
-    x_telegram_init_data: str | None = Header(None),
+    user: dict = Depends(get_current_user),
 ):
     """Return last N lines from errors.log (admin only)."""
+    from bot.db import is_admin
+
+    user_id = int(user.get("id", 0))
+    username = user.get("username")
+    if not is_admin(user_id, username):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     err_file = _LOG_DIR / "errors.log"
     if not err_file.exists():
         return {"errors": []}
@@ -646,6 +671,10 @@ async def stream_audio(
                             headers=response_headers,
                         )
                     upstream.close()
+                    # Invalidate cached stream URL on 403/404/410 (expired or geo-blocked)
+                    if upstream.status in (403, 404, 410):
+                        _stream_url_cache.pop(video_id, None)
+                        logger.info("Evicted stale stream URL for %s (HTTP %d)", video_id, upstream.status)
 
                 # Fallback: coalesced download via download manager
                 mp3_path = await download_manager.download(video_id, bitrate=preferred_bitrate)
@@ -2661,1302 +2690,10 @@ async def reorder_queue(body: ReorderRequest, user: dict = Depends(get_current_u
     return state
 
 
-# ── Party Playlists ──────────────────────────────────────────────────────
 
-import math
-import secrets
-import time
-from datetime import datetime, timedelta, timezone
-
-from bot.models.base import async_session
-from bot.models.party import PartyChatMessage, PartyEvent, PartyMember, PartyPlaybackState, PartyReaction, PartySession, PartyTrack, PartyTrackVote
-
-# In-memory SSE subscribers: invite_code -> list[asyncio.Queue]
-_party_subscribers: dict[str, list[asyncio.Queue]] = {}
-_PARTY_MEMBER_TOUCH_INTERVAL = timedelta(seconds=30)
-
-
-def _party_skip_threshold(member_count: int) -> int:
-    if member_count <= 1:
-        return 1
-    if member_count <= 3:
-        return 2
-    return min(5, max(3, math.ceil(member_count * 0.5)))
-
-
-def _iso_dt(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.astimezone(timezone.utc).isoformat()
-
-
-async def _record_party_event(
-    session,
-    party_id: int,
-    event_type: str,
-    message: str,
-    actor_id: int | None = None,
-    actor_name: str | None = None,
-    payload: dict | None = None,
-):
-    session.add(
-        PartyEvent(
-            party_id=party_id,
-            event_type=event_type,
-            actor_id=actor_id,
-            actor_name=actor_name,
-            message=message[:500],
-            payload=payload,
-        )
-    )
-
-
-async def _get_party_or_404(session, code: str) -> PartySession:
-    from sqlalchemy import select
-
-    result = await session.execute(
-        select(PartySession).where(
-            PartySession.invite_code == code,
-            PartySession.is_active == True,
-        )
-    )
-    party = result.scalar_one_or_none()
-    if not party:
-        raise HTTPException(status_code=404, detail="Party not found")
-    return party
-
-
-async def _ensure_party_member(session, party: PartySession, user: dict, *, mark_online: bool) -> PartyMember:
-    from sqlalchemy import select
-
-    user_id = int(user["id"])
-    name = user.get("first_name") or user.get("username") or f"User {user_id}"
-    result = await session.execute(
-        select(PartyMember).where(
-            PartyMember.party_id == party.id,
-            PartyMember.user_id == user_id,
-        )
-    )
-    member = result.scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if member is None:
-        member = PartyMember(
-            party_id=party.id,
-            user_id=user_id,
-            display_name=name,
-            role="dj" if party.creator_id == user_id else "listener",
-            is_online=mark_online,
-            joined_at=now,
-            last_seen_at=now,
-        )
-        session.add(member)
-    else:
-        if member.display_name != name:
-            member.display_name = name
-        if party.creator_id == user_id:
-            member.role = "dj"
-        should_touch_presence = mark_online or member.last_seen_at is None
-        if not should_touch_presence and member.last_seen_at is not None:
-            should_touch_presence = (now - member.last_seen_at) >= _PARTY_MEMBER_TOUCH_INTERVAL
-        if should_touch_presence:
-            member.last_seen_at = now
-        if mark_online and not member.is_online:
-            member.is_online = True
-    return member
-
-
-async def _get_or_create_party_playback(session, party_id: int) -> PartyPlaybackState:
-    from sqlalchemy import select
-
-    result = await session.execute(select(PartyPlaybackState).where(PartyPlaybackState.party_id == party_id))
-    playback = result.scalar_one_or_none()
-    if playback is None:
-        playback = PartyPlaybackState(party_id=party_id)
-        session.add(playback)
-        await session.flush()
-    return playback
-
-
-async def _get_party_playback(session, party_id: int) -> PartyPlaybackState | None:
-    from sqlalchemy import select
-
-    result = await session.execute(select(PartyPlaybackState).where(PartyPlaybackState.party_id == party_id))
-    return result.scalar_one_or_none()
-
-
-async def _normalize_party_positions(session, party_id: int):
-    from sqlalchemy import select
-
-    tracks = (
-        await session.execute(
-            select(PartyTrack)
-            .where(PartyTrack.party_id == party_id)
-            .order_by(PartyTrack.position, PartyTrack.id)
-        )
-    ).scalars().all()
-    changed = False
-    for idx, track in enumerate(tracks):
-        if track.position != idx:
-            track.position = idx
-            changed = True
-    return changed
-
-
-async def _build_party_schema(session, party: PartySession, viewer_id: int | None = None) -> PartySchema:
-    from sqlalchemy import func, select
-
-    tracks = (
-        await session.execute(
-            select(PartyTrack)
-            .where(PartyTrack.party_id == party.id)
-            .order_by(PartyTrack.position, PartyTrack.id)
-        )
-    ).scalars().all()
-    track_ids = [t.id for t in tracks]
-    vote_counts: dict[int, int] = {}
-    reaction_counts: dict[str, int] = {}
-    if track_ids:
-        rows = await session.execute(
-            select(PartyTrackVote.track_id, func.count())
-            .where(
-                PartyTrackVote.track_id.in_(track_ids),
-                PartyTrackVote.vote_type == "skip",
-            )
-            .group_by(PartyTrackVote.track_id)
-        )
-        vote_counts = {track_id: count for track_id, count in rows.all()}
-
-    current_track = next((t for t in tracks if t.position == party.current_position), None)
-    if current_track is not None:
-        reaction_rows = await session.execute(
-            select(PartyReaction.emoji, func.count())
-            .where(PartyReaction.track_id == current_track.id)
-            .group_by(PartyReaction.emoji)
-        )
-        reaction_counts = {emoji: count for emoji, count in reaction_rows.all()}
-
-    members = (
-        await session.execute(
-            select(PartyMember)
-            .where(PartyMember.party_id == party.id)
-            .order_by(PartyMember.is_online.desc(), PartyMember.joined_at.asc())
-        )
-    ).scalars().all()
-    events = (
-        await session.execute(
-            select(PartyEvent)
-            .where(PartyEvent.party_id == party.id)
-            .order_by(PartyEvent.created_at.desc())
-            .limit(12)
-        )
-    ).scalars().all()
-    events = list(reversed(events))
-    chat_messages = (
-        await session.execute(
-            select(PartyChatMessage)
-            .where(PartyChatMessage.party_id == party.id)
-            .order_by(PartyChatMessage.created_at.desc())
-            .limit(30)
-        )
-    ).scalars().all()
-    chat_messages = list(reversed(chat_messages))
-
-    playback = await _get_party_playback(session, party.id)
-    online_count = sum(1 for member in members if member.is_online)
-    viewer_role = "listener"
-    if viewer_id is not None:
-        if viewer_id == party.creator_id:
-            viewer_role = "dj"
-        else:
-            viewer_member = next((m for m in members if m.user_id == viewer_id), None)
-            if viewer_member:
-                viewer_role = viewer_member.role
-
-    return PartySchema(
-        id=party.id,
-        invite_code=party.invite_code,
-        creator_id=party.creator_id,
-        name=party.name,
-        is_active=party.is_active,
-        current_position=party.current_position,
-        member_count=online_count,
-        skip_threshold=_party_skip_threshold(online_count),
-        viewer_role=viewer_role,
-        members=[
-            PartyMemberSchema(
-                user_id=m.user_id,
-                display_name=m.display_name,
-                role=m.role,
-                is_online=bool(m.is_online),
-            )
-            for m in members
-        ],
-        events=[
-            PartyEventSchema(
-                id=e.id,
-                event_type=e.event_type,
-                actor_id=e.actor_id,
-                actor_name=e.actor_name,
-                message=e.message,
-                payload=e.payload,
-                created_at=_iso_dt(e.created_at),
-            )
-            for e in events
-        ],
-        chat_messages=[
-            PartyChatMessageSchema(
-                id=message.id,
-                user_id=message.user_id,
-                display_name=message.display_name,
-                message=message.message,
-                created_at=_iso_dt(message.created_at),
-            )
-            for message in chat_messages
-        ],
-        playback=PartyPlaybackStateSchema(
-            track_position=playback.track_position if playback is not None else 0,
-            action=playback.action if playback is not None else "idle",
-            seek_position=playback.seek_position if playback is not None else 0,
-            updated_by=playback.updated_by if playback is not None else None,
-            updated_at=_iso_dt(playback.updated_at) if playback is not None else None,
-        ),
-        current_reactions=reaction_counts,
-        tracks=[
-            PartyTrackSchema(
-                video_id=t.video_id,
-                title=t.title,
-                artist=t.artist,
-                duration=t.duration,
-                duration_fmt=t.duration_fmt,
-                source=t.source,
-                cover_url=t.cover_url,
-                added_by=t.added_by,
-                added_by_name=t.added_by_name,
-                skip_votes=vote_counts.get(t.id, 0),
-                position=t.position,
-            )
-            for t in tracks
-        ],
-    )
-
-
-async def _get_party_with_tracks(code: str, viewer_id: int | None = None) -> PartySchema:
-    """Load party session by invite code with all extended state."""
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        return await _build_party_schema(session, party, viewer_id)
-
-
-async def _commit_and_build_party_schema(
-    session,
-    party: PartySession,
-    viewer_id: int | None = None,
-) -> PartySchema:
-    """Flush pending party changes when needed and reuse the same session to build the response."""
-    if session.new or session.dirty or session.deleted:
-        await session.commit()
-    return await _build_party_schema(session, party, viewer_id)
-
-
-async def _notify_party(code: str, event: str, data: dict | None = None):
-    """Send SSE event to all subscribers of a party."""
-    subs = _party_subscribers.get(code, [])
-    payload = json.dumps({"event": event, "data": data or {}}, ensure_ascii=False)
-    dead: list[asyncio.Queue] = []
-    for q in subs:
-        try:
-            q.put_nowait(payload)
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        try:
-            subs.remove(q)
-        except ValueError:
-            pass
-
-
-async def _notify_party_state(code: str, event: str, data: dict | None = None):
-    await _notify_party(code, event, data)
-
-
-@app.post("/api/party", response_model=PartySchema)
-async def create_party(body: PartyCreateRequest, user: dict = Depends(get_current_user)):
-    """Create a new party session."""
-    # Ensure user exists in DB (FK constraint on creator_id → users.id)
-    await _get_or_create_webapp_user(user)
-    code = secrets.token_urlsafe(8)[:10]
-    async with async_session() as session:
-        from sqlalchemy import select, func
-        # Limit active parties per user to 3
-        count_result = await session.execute(
-            select(func.count()).where(
-                PartySession.creator_id == user["id"],
-                PartySession.is_active == True,
-            )
-        )
-        if (count_result.scalar() or 0) >= 3:
-            raise HTTPException(status_code=400, detail="Max 3 active parties")
-
-        party = PartySession(
-            invite_code=code,
-            creator_id=user["id"],
-            name=body.name[:100],
-        )
-        session.add(party)
-        await session.flush()
-        await _ensure_party_member(session, party, user, mark_online=False)
-        await _get_or_create_party_playback(session, party.id)
-        await _record_party_event(
-            session,
-            party.id,
-            "party_created",
-            f"{user.get('first_name', 'DJ')} создал пати",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    return party_schema
-
-
-@app.get("/api/party/{code}", response_model=PartySchema)
-async def get_party(code: str, user: dict = Depends(get_current_user)):
-    """Get party state with tracks."""
-    await _get_or_create_webapp_user(user)
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        await _ensure_party_member(session, party, user, mark_online=False)
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-    return party_schema
-
-
-@app.post("/api/party/{code}/tracks", response_model=PartySchema)
-async def add_party_track(code: str, body: PartyAddTrackRequest, user: dict = Depends(get_current_user)):
-    """Add a track to party queue."""
-    async with async_session() as session:
-        from sqlalchemy import select, func
-        party = await _get_party_or_404(session, code)
-        await _ensure_party_member(session, party, user, mark_online=False)
-
-        # Prevent duplicate tracks in queue (same video_id that hasn't played yet)
-        existing_dup = await session.execute(
-            select(PartyTrack.id).where(
-                PartyTrack.party_id == party.id,
-                PartyTrack.video_id == body.video_id,
-                PartyTrack.position >= party.current_position,
-            ).limit(1)
-        )
-        if existing_dup.scalar() is not None:
-            raise HTTPException(status_code=409, detail="Track already in queue")
-
-        # Get max position
-        max_pos_result = await session.execute(
-            select(func.coalesce(func.max(PartyTrack.position), -1))
-            .where(PartyTrack.party_id == party.id)
-        )
-        max_pos = max_pos_result.scalar() or 0
-
-        track = PartyTrack(
-            party_id=party.id,
-            video_id=body.video_id,
-            title=body.title,
-            artist=body.artist,
-            duration=body.duration,
-            duration_fmt=body.duration_fmt,
-            source=body.source,
-            cover_url=body.cover_url,
-            added_by=user["id"],
-            added_by_name=user.get("first_name", "User"),
-            position=max_pos + 1,
-        )
-        session.add(track)
-        await session.flush()
-        await _record_party_event(
-            session,
-            party.id,
-            "track_added",
-            f"{user.get('first_name', 'User')} добавил(а) {body.title}",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "User"),
-            payload={"video_id": body.video_id, "title": body.title},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "track_added", {
-        "video_id": body.video_id,
-        "title": body.title,
-        "artist": body.artist,
-        "added_by_name": user.get("first_name", "User"),
-    })
-    return party_schema
-
-
-@app.post("/api/party/{code}/tracks/{video_id}/play-next", response_model=PartySchema)
-async def play_next_party_track(code: str, video_id: str, user: dict = Depends(get_current_user)):
-    """Move a queued track to play next."""
-    async with async_session() as session:
-        from sqlalchemy import select
-
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ/co-host can reorder tracks")
-
-        tracks = (
-            await session.execute(
-                select(PartyTrack)
-                .where(PartyTrack.party_id == party.id)
-                .order_by(PartyTrack.position, PartyTrack.id)
-            )
-        ).scalars().all()
-        target = next((t for t in tracks if t.video_id == video_id), None)
-        if target is None:
-            raise HTTPException(status_code=404, detail="Track not found")
-        if target.position <= party.current_position:
-            raise HTTPException(status_code=400, detail="Track is already playing or finished")
-
-        upcoming = [t for t in tracks if t.position > party.current_position]
-        upcoming = [t for t in upcoming if t.video_id != video_id]
-        upcoming.insert(0, target)
-        start_pos = party.current_position + 1
-        for idx, track in enumerate(upcoming):
-            track.position = start_pos + idx
-        await _record_party_event(
-            session,
-            party.id,
-            "queue_reordered",
-            f"{user.get('first_name', 'DJ')} перенёс(ла) {target.title} в play next",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-            payload={"video_id": video_id, "mode": "play_next"},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "queue_reordered", {"video_id": video_id, "mode": "play_next"})
-    return party_schema
-
-
-@app.post("/api/party/{code}/reorder", response_model=PartySchema)
-async def reorder_party_tracks(code: str, body: PartyReorderRequest, user: dict = Depends(get_current_user)):
-    """Reorder queued tracks for DJ/co-hosts."""
-    async with async_session() as session:
-        from sqlalchemy import select
-
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ/co-host can reorder tracks")
-        if body.from_position <= party.current_position or body.to_position <= party.current_position:
-            raise HTTPException(status_code=400, detail="Only upcoming tracks can be reordered")
-
-        tracks = (
-            await session.execute(
-                select(PartyTrack)
-                .where(PartyTrack.party_id == party.id)
-                .order_by(PartyTrack.position, PartyTrack.id)
-            )
-        ).scalars().all()
-        upcoming = [t for t in tracks if t.position > party.current_position]
-        from_index = next((idx for idx, track in enumerate(upcoming) if track.position == body.from_position), None)
-        to_index = next((idx for idx, track in enumerate(upcoming) if track.position == body.to_position), None)
-        if from_index is None or to_index is None:
-            raise HTTPException(status_code=404, detail="Track position not found")
-
-        track = upcoming.pop(from_index)
-        upcoming.insert(to_index, track)
-        start_pos = party.current_position + 1
-        for idx, queued_track in enumerate(upcoming):
-            queued_track.position = start_pos + idx
-
-        await _record_party_event(
-            session,
-            party.id,
-            "queue_reordered",
-            f"{user.get('first_name', 'DJ')} изменил(а) порядок очереди",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-            payload={"from_position": body.from_position, "to_position": body.to_position},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "queue_reordered", {"from_position": body.from_position, "to_position": body.to_position})
-    return party_schema
-
-
-@app.delete("/api/party/{code}/tracks/{video_id}")
-async def remove_party_track(code: str, video_id: str, user: dict = Depends(get_current_user)):
-    """Remove a track from party queue (creator only)."""
-    async with async_session() as session:
-        from sqlalchemy import delete, select
-
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ/co-host can remove tracks")
-
-        track = (
-            await session.execute(
-                select(PartyTrack).where(
-                    PartyTrack.party_id == party.id,
-                    PartyTrack.video_id == video_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if track is None:
-            raise HTTPException(status_code=404, detail="Track not found")
-
-        await session.execute(delete(PartyTrackVote).where(PartyTrackVote.track_id == track.id))
-        removed_position = track.position
-        await session.execute(delete(PartyTrack).where(PartyTrack.id == track.id))
-        # Adjust current_position if a played/current track was removed
-        if removed_position < party.current_position:
-            party.current_position = max(0, party.current_position - 1)
-        await _normalize_party_positions(session, party.id)
-        await _record_party_event(
-            session,
-            party.id,
-            "track_removed",
-            f"{user.get('first_name', 'DJ')} удалил(а) {track.title}",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-            payload={"video_id": video_id},
-        )
-        await session.commit()
-
-    await _notify_party_state(code, "track_removed", {"video_id": video_id})
-    return {"ok": True}
-
-
-@app.post("/api/party/{code}/skip")
-async def skip_party_track(code: str, user: dict = Depends(get_current_user)):
-    """Vote to skip or force-skip (DJ). Auto-skips at 3 votes."""
-    async with async_session() as session:
-        from sqlalchemy import delete, func, select
-
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        can_control = member.role in {"dj", "cohost"} or party.creator_id == user["id"]
-
-        # Get current track
-        track_result = await session.execute(
-            select(PartyTrack).where(
-                PartyTrack.party_id == party.id,
-                PartyTrack.position == party.current_position,
-            )
-        )
-        current_track = track_result.scalar_one_or_none()
-        if current_track is None:
-            raise HTTPException(status_code=400, detail="No active track")
-
-        member_count = (
-            await session.execute(
-                select(func.count()).where(
-                    PartyMember.party_id == party.id,
-                    PartyMember.is_online == True,
-                )
-            )
-        ).scalar() or 0
-        threshold = _party_skip_threshold(int(member_count))
-
-        skip = can_control
-        votes = 0
-        if not can_control:
-            existing_vote = (
-                await session.execute(
-                    select(PartyTrackVote).where(
-                        PartyTrackVote.track_id == current_track.id,
-                        PartyTrackVote.user_id == user["id"],
-                        PartyTrackVote.vote_type == "skip",
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing_vote:
-                raise HTTPException(status_code=400, detail="Already voted to skip")
-            session.add(
-                PartyTrackVote(
-                    party_id=party.id,
-                    track_id=current_track.id,
-                    user_id=user["id"],
-                    vote_type="skip",
-                )
-            )
-            await session.flush()
-            votes = (
-                await session.execute(
-                    select(func.count()).where(
-                        PartyTrackVote.track_id == current_track.id,
-                        PartyTrackVote.vote_type == "skip",
-                    )
-                )
-            ).scalar() or 0
-            skip = votes >= threshold
-            await _record_party_event(
-                session,
-                party.id,
-                "skip_vote",
-                f"{user.get('first_name', 'User')} проголосовал(а) за skip",
-                actor_id=user["id"],
-                actor_name=user.get("first_name", "User"),
-                payload={"votes": votes, "threshold": threshold},
-            )
-
-        if skip:
-            await session.execute(delete(PartyTrackVote).where(PartyTrackVote.track_id == current_track.id))
-            party.current_position += 1
-            playback = await _get_or_create_party_playback(session, party.id)
-            playback.track_position = party.current_position
-            playback.action = "play"
-            playback.seek_position = 0
-            playback.updated_by = int(user["id"])
-            playback.updated_at = datetime.now(timezone.utc)
-            await _record_party_event(
-                session,
-                party.id,
-                "next_track",
-                f"{user.get('first_name', 'DJ')} переключил(а) следующий трек",
-                actor_id=user["id"],
-                actor_name=user.get("first_name", "DJ"),
-                payload={"position": party.current_position},
-            )
-
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    if skip:
-        await _notify_party_state(code, "next", {"position": party.current_position})
-    else:
-        await _notify_party_state(code, "vote_skip", {"votes": votes, "threshold": threshold})
-
-    return party_schema
-
-
-@app.post("/api/party/{code}/members/{member_user_id}/role", response_model=PartySchema)
-async def update_party_member_role(
-    code: str,
-    member_user_id: int,
-    body: PartyRoleUpdateRequest,
-    user: dict = Depends(get_current_user),
-):
-    """Promote or demote co-hosts inside a party."""
-    if body.role not in {"cohost", "listener"}:
-        raise HTTPException(status_code=400, detail="Unsupported role")
-
-    async with async_session() as session:
-        from sqlalchemy import select
-
-        party = await _get_party_or_404(session, code)
-        await _ensure_party_member(session, party, user, mark_online=False)
-        if party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ can change roles")
-        if member_user_id == party.creator_id:
-            raise HTTPException(status_code=400, detail="DJ role cannot be changed")
-
-        target = (
-            await session.execute(
-                select(PartyMember).where(
-                    PartyMember.party_id == party.id,
-                    PartyMember.user_id == member_user_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if target is None:
-            raise HTTPException(status_code=404, detail="Member not found")
-
-        target.role = body.role
-        await _record_party_event(
-            session,
-            party.id,
-            "role_updated",
-            f"{target.display_name or 'Участник'} теперь {body.role}",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-            payload={"user_id": member_user_id, "role": body.role},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "role_updated", {"user_id": member_user_id, "role": body.role})
-    return party_schema
-
-
-@app.post("/api/party/{code}/playback", response_model=PartySchema)
-async def sync_party_playback(code: str, body: PartyPlaybackRequest, user: dict = Depends(get_current_user)):
-    """Sync party playback for all listeners (DJ/co-host)."""
-    if body.action not in {"play", "pause", "seek"}:
-        raise HTTPException(status_code=400, detail="Unsupported playback action")
-
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ/co-host can sync playback")
-
-        playback = await _get_or_create_party_playback(session, party.id)
-        playback.action = body.action
-        playback.track_position = max(0, body.track_position)
-        playback.seek_position = max(0, body.seek_position)
-        playback.updated_by = int(user["id"])
-        playback.updated_at = datetime.now(timezone.utc)
-        if body.action == "play":
-            party.current_position = max(0, body.track_position)
-
-        await _record_party_event(
-            session,
-            party.id,
-            "playback_sync",
-            f"{user.get('first_name', 'DJ')} синхронизировал(а) playback: {body.action}",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-            payload={
-                "action": body.action,
-                "track_position": body.track_position,
-                "seek_position": body.seek_position,
-            },
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(
-        code,
-        "playback_sync",
-        {
-            "action": body.action,
-            "track_position": body.track_position,
-            "seek_position": body.seek_position,
-            "updated_by": user["id"],
-        },
-    )
-    return party_schema
-
-
-@app.post("/api/party/{code}/close")
-async def close_party(code: str, user: dict = Depends(get_current_user)):
-    """Close party session (creator only)."""
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        if party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ can close")
-
-        party.is_active = False
-        await _record_party_event(
-            session,
-            party.id,
-            "closed",
-            f"{user.get('first_name', 'DJ')} завершил(а) пати",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-        )
-        await session.commit()
-
-    await _notify_party_state(code, "closed", {})
-    # Clean up subscribers
-    _party_subscribers.pop(code, None)
-    return {"ok": True}
-
-
-@app.post("/api/party/{code}/save-playlist", response_model=PlaylistSchema)
-async def save_party_as_playlist(code: str, user: dict = Depends(get_current_user)):
-    """Save current party queue as a regular playlist for the requesting user."""
-    from sqlalchemy import func, select
-
-    from bot.db import upsert_track
-    from bot.models.playlist import Playlist, PlaylistTrack
-
-    await _get_or_create_webapp_user(user)
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        tracks = (
-            await session.execute(
-                select(PartyTrack)
-                .where(PartyTrack.party_id == party.id)
-                .order_by(PartyTrack.position, PartyTrack.id)
-            )
-        ).scalars().all()
-        if not tracks:
-            raise HTTPException(status_code=400, detail="Party queue is empty")
-
-        playlist = Playlist(user_id=user["id"], name=f"Party • {party.name}"[:100])
-        session.add(playlist)
-        await session.flush()
-
-        for idx, track in enumerate(tracks):
-            db_track = await upsert_track(
-                source_id=track.video_id,
-                source=track.source,
-                title=track.title,
-                artist=track.artist,
-                duration=track.duration,
-                cover_url=track.cover_url,
-            )
-            session.add(PlaylistTrack(playlist_id=playlist.id, track_id=db_track.id, position=idx))
-
-        await _record_party_event(
-            session,
-            party.id,
-            "playlist_saved",
-            f"{user.get('first_name', 'User')} сохранил(а) пати как плейлист",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "User"),
-            payload={"playlist_name": playlist.name},
-        )
-        await session.commit()
-
-        cnt = (
-            await session.execute(
-                select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist.id)
-            )
-        ).scalar() or 0
-
-    await _notify_party_state(code, "playlist_saved", {"playlist_name": f"Party • {party.name}"[:100]})
-    return PlaylistSchema(id=playlist.id, name=playlist.name, track_count=cnt)
-
-
-@app.post("/api/party/{code}/chat", response_model=PartySchema)
-async def send_party_chat_message(code: str, body: PartyChatRequest, user: dict = Depends(get_current_user)):
-    """Send a live chat message to the party room."""
-    message = (body.message or "").strip()
-    if not message:
-        raise HTTPException(status_code=400, detail="Message is required")
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        await _ensure_party_member(session, party, user, mark_online=False)
-        session.add(
-            PartyChatMessage(
-                party_id=party.id,
-                user_id=user["id"],
-                display_name=user.get("first_name", "User"),
-                message=message[:400],
-            )
-        )
-        await _record_party_event(
-            session,
-            party.id,
-            "chat",
-            f"{user.get('first_name', 'User')}: {message[:180]}",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "User"),
-            payload={"message": message[:400]},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "chat", {"message": message[:400], "actor_name": user.get("first_name", "User")})
-    return party_schema
-
-
-@app.delete("/api/party/{code}/chat/{message_id}", response_model=PartySchema)
-async def delete_party_chat_message(code: str, message_id: int, user: dict = Depends(get_current_user)):
-    """Delete one chat message from the party room."""
-    async with async_session() as session:
-        from sqlalchemy import select
-
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        message = (
-            await session.execute(
-                select(PartyChatMessage).where(
-                    PartyChatMessage.party_id == party.id,
-                    PartyChatMessage.id == message_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if message is None:
-            raise HTTPException(status_code=404, detail="Chat message not found")
-        can_moderate = member.role in {"dj", "cohost"} or party.creator_id == user["id"]
-        if not can_moderate and message.user_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Not allowed to delete this message")
-
-        deleted_preview = message.message[:120]
-        await session.delete(message)
-        await _record_party_event(
-            session,
-            party.id,
-            "chat_delete",
-            f"{user.get('first_name', 'User')} удалил(а) сообщение из чата",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "User"),
-            payload={"message_id": message_id, "preview": deleted_preview},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "chat_delete", {"message_id": message_id})
-    return party_schema
-
-
-@app.post("/api/party/{code}/chat/clear", response_model=PartySchema)
-async def clear_party_chat(code: str, user: dict = Depends(get_current_user)):
-    """Clear party chat history for moderators."""
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ/co-host can clear chat")
-
-        await session.execute(
-            PartyChatMessage.__table__.delete().where(PartyChatMessage.party_id == party.id)
-        )
-        await _record_party_event(
-            session,
-            party.id,
-            "chat_clear",
-            f"{user.get('first_name', 'User')} очистил(а) чат",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "User"),
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "chat_clear", {})
-    return party_schema
-
-
-@app.post("/api/party/{code}/react", response_model=PartySchema)
-async def react_to_party_track(code: str, body: PartyReactionRequest, user: dict = Depends(get_current_user)):
-    """Add a live emoji reaction to the current party track."""
-    emoji = (body.emoji or "🔥")[:8]
-    async with async_session() as session:
-        from sqlalchemy import select
-
-        party = await _get_party_or_404(session, code)
-        await _ensure_party_member(session, party, user, mark_online=False)
-        current_track = (
-            await session.execute(
-                select(PartyTrack).where(
-                    PartyTrack.party_id == party.id,
-                    PartyTrack.position == party.current_position,
-                )
-            )
-        ).scalar_one_or_none()
-        if current_track is None:
-            raise HTTPException(status_code=400, detail="No active track")
-
-        existing = (
-            await session.execute(
-                select(PartyReaction).where(
-                    PartyReaction.track_id == current_track.id,
-                    PartyReaction.user_id == user["id"],
-                    PartyReaction.emoji == emoji,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is None:
-            session.add(
-                PartyReaction(
-                    party_id=party.id,
-                    track_id=current_track.id,
-                    user_id=user["id"],
-                    emoji=emoji,
-                )
-            )
-            await _record_party_event(
-                session,
-                party.id,
-                "reaction",
-                f"{user.get('first_name', 'User')} отреагировал(а) {emoji}",
-                actor_id=user["id"],
-                actor_name=user.get("first_name", "User"),
-                payload={"emoji": emoji, "video_id": current_track.video_id},
-            )
-            party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-        else:
-            party_schema = await _build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "reaction", {"emoji": emoji, "user_id": user["id"]})
-    return party_schema
-
-
-@app.post("/api/party/{code}/auto-dj", response_model=PartySchema)
-async def auto_dj_fill_party(code: str, limit: int = Query(default=5, ge=1, le=10), user: dict = Depends(get_current_user)):
-    """Auto-fill the party queue with AI recommendations based on the room vibe."""
-    async with async_session() as session:
-        from sqlalchemy import func, select
-
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=False)
-        if member.role not in {"dj", "cohost"} and party.creator_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Only DJ/co-host can run Auto-DJ")
-
-        tracks = (
-            await session.execute(
-                select(PartyTrack)
-                .where(PartyTrack.party_id == party.id)
-                .order_by(PartyTrack.position.desc())
-            )
-        ).scalars().all()
-        existing_ids = {t.video_id for t in tracks}
-        seed_track = next((t for t in tracks if t.position == party.current_position), None) or (tracks[0] if tracks else None)
-
-        suggestions: list[TrackSchema] = []
-        if seed_track is not None and settings.SUPABASE_AI_ENABLED:
-            suggestions = (await get_similar(seed_track.video_id, limit=limit * 2, user=user)).tracks
-        if not suggestions:
-            suggestions = (await get_wave(int(user["id"]), limit=limit * 2, mood=None, user=user)).tracks
-        if not suggestions and seed_track is not None:
-            from bot.services.downloader import search_tracks
-
-            raw_results = await search_tracks(f"{seed_track.artist} similar", max_results=limit * 2, source="youtube")
-            suggestions = [
-                TrackSchema(
-                    video_id=r.get("video_id", ""),
-                    title=r.get("title", "Unknown"),
-                    artist=r.get("artist", r.get("uploader", "Unknown")),
-                    duration=r.get("duration", 0),
-                    duration_fmt=r.get("duration_fmt", "0:00"),
-                    source=r.get("source", "youtube"),
-                    cover_url=r.get("cover_url"),
-                )
-                for r in raw_results
-                if r.get("video_id")
-            ]
-
-        max_pos = (await session.execute(select(func.coalesce(func.max(PartyTrack.position), -1)).where(PartyTrack.party_id == party.id))).scalar() or -1
-        added = 0
-        for suggestion in suggestions:
-            if suggestion.video_id in existing_ids:
-                continue
-            max_pos += 1
-            session.add(
-                PartyTrack(
-                    party_id=party.id,
-                    video_id=suggestion.video_id,
-                    title=suggestion.title,
-                    artist=suggestion.artist,
-                    duration=suggestion.duration,
-                    duration_fmt=suggestion.duration_fmt,
-                    source=suggestion.source,
-                    cover_url=suggestion.cover_url,
-                    added_by=user["id"],
-                    added_by_name="AI Auto-DJ",
-                    position=max_pos,
-                )
-            )
-            existing_ids.add(suggestion.video_id)
-            added += 1
-            if added >= limit:
-                break
-
-        if added == 0:
-            raise HTTPException(status_code=400, detail="Auto-DJ found no new tracks")
-
-        await _record_party_event(
-            session,
-            party.id,
-            "auto_dj",
-            f"{user.get('first_name', 'DJ')} включил(а) AI Auto-DJ (+{added} треков)",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "DJ"),
-            payload={"added": added},
-        )
-        party_schema = await _commit_and_build_party_schema(session, party, int(user["id"]))
-
-    await _notify_party_state(code, "auto_dj", {"added": added})
-    return party_schema
-
-
-@app.get("/api/party/{code}/recap", response_model=PartyRecapSchema)
-async def get_party_recap(code: str, user: dict = Depends(get_current_user)):
-    """Return summary stats for a party session."""
-    async with async_session() as session:
-        from collections import Counter
-        from sqlalchemy import func, select
-
-        party = await _get_party_or_404(session, code)
-        await _ensure_party_member(session, party, user, mark_online=False)
-        tracks = (
-            await session.execute(
-                select(PartyTrack).where(PartyTrack.party_id == party.id)
-            )
-        ).scalars().all()
-        members = (
-            await session.execute(
-                select(PartyMember).where(PartyMember.party_id == party.id)
-            )
-        ).scalars().all()
-        events_count = (
-            await session.execute(select(func.count(PartyEvent.id)).where(PartyEvent.party_id == party.id))
-        ).scalar() or 0
-        skip_votes = (
-            await session.execute(select(func.count(PartyTrackVote.id)).where(PartyTrackVote.party_id == party.id, PartyTrackVote.vote_type == "skip"))
-        ).scalar() or 0
-
-        contributor_counter = Counter(t.added_by_name or "Unknown" for t in tracks)
-        artist_counter = Counter(t.artist or "Unknown" for t in tracks)
-        total_duration = sum(t.duration or 0 for t in tracks)
-
-        return PartyRecapSchema(
-            total_tracks=len(tracks),
-            total_members=len(members),
-            online_members=sum(1 for m in members if m.is_online),
-            total_duration=total_duration,
-            total_skip_votes=skip_votes,
-            events_count=events_count,
-            top_contributors=[PartyRecapStatSchema(label=label, value=value) for label, value in contributor_counter.most_common(3)],
-            top_artists=[PartyRecapStatSchema(label=label, value=value) for label, value in artist_counter.most_common(3)],
-        )
-
-
-@app.get("/api/party/{code}/events")
-async def party_events(
-    code: str,
-    request: Request,
-    x_telegram_init_data: str | None = Header(None),
-    token: str | None = Query(None),
-):
-    """SSE stream for real-time party updates."""
-    # Auth: accept header or query param (EventSource can't send headers)
-    init_data = x_telegram_init_data or token
-    if not init_data:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    user = verify_init_data(init_data)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid initData")
-    await _get_or_create_webapp_user(user)
-    # Verify party exists
-    async with async_session() as session:
-        party = await _get_party_or_404(session, code)
-        member = await _ensure_party_member(session, party, user, mark_online=True)
-        joined_message = None
-        if member.display_name:
-            joined_message = f"{member.display_name} присоединился(ась) к пати"
-        await _record_party_event(
-            session,
-            party.id,
-            "member_joined",
-            joined_message or "Новый участник вошёл в комнату",
-            actor_id=user["id"],
-            actor_name=user.get("first_name", "User"),
-            payload={"user_id": user["id"]},
-        )
-        await session.commit()
-
-    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
-    if code not in _party_subscribers:
-        _party_subscribers[code] = []
-    _party_subscribers[code].append(queue)
-
-    # Notify others that someone joined
-    await _notify_party_state(code, "member_joined", {
-        "user_id": user["id"],
-        "name": user.get("first_name", "User"),
-        "member_count": len(_party_subscribers.get(code, [])),
-    })
-
-    async def event_generator():
-        try:
-            yield f"data: {json.dumps({'event': 'connected'})}\n\n"
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=30)
-                    yield f"data: {msg}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            subs = _party_subscribers.get(code, [])
-            try:
-                subs.remove(queue)
-            except ValueError:
-                pass
-            try:
-                async with async_session() as session:
-                    from sqlalchemy import select
-
-                    result = await session.execute(
-                        select(PartySession).where(PartySession.invite_code == code)
-                    )
-                    party = result.scalar_one_or_none()
-                    if party is not None:
-                        member = (
-                            await session.execute(
-                                select(PartyMember).where(
-                                    PartyMember.party_id == party.id,
-                                    PartyMember.user_id == user["id"],
-                                )
-                            )
-                        ).scalar_one_or_none()
-                        if member is not None:
-                            member.is_online = False
-                            member.last_seen_at = datetime.now(timezone.utc)
-                        await _record_party_event(
-                            session,
-                            party.id,
-                            "member_left",
-                            f"{user.get('first_name', 'User')} вышел(шла) из комнаты",
-                            actor_id=user["id"],
-                            actor_name=user.get("first_name", "User"),
-                            payload={"user_id": user["id"]},
-                        )
-                        await session.commit()
-            except Exception:
-                pass
-            # Notify others that someone left
-            await _notify_party_state(code, "member_left", {
-                "member_count": len(_party_subscribers.get(code, [])),
-            })
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.get("/api/my-parties", response_model=list[PartySchema])
-async def my_parties(user: dict = Depends(get_current_user)):
-    """List user's active parties."""
-    async with async_session() as session:
-        from sqlalchemy import func, select
-
-        result = await session.execute(
-            select(PartySession).where(
-                PartySession.creator_id == user["id"],
-                PartySession.is_active == True,
-            ).order_by(PartySession.created_at.desc())
-        )
-        parties = result.scalars().all()
-        if not parties:
-            return []
-
-        party_ids = [party.id for party in parties]
-        track_rows = await session.execute(
-            select(PartyTrack.party_id, func.count(PartyTrack.id))
-            .where(PartyTrack.party_id.in_(party_ids))
-            .group_by(PartyTrack.party_id)
-        )
-        track_counts = {party_id: count for party_id, count in track_rows.all()}
-
-        member_rows = await session.execute(
-            select(PartyMember.party_id, func.count(PartyMember.id))
-            .where(
-                PartyMember.party_id.in_(party_ids),
-                PartyMember.is_online == True,
-            )
-            .group_by(PartyMember.party_id)
-        )
-        online_counts = {party_id: count for party_id, count in member_rows.all()}
-
-        return [
-            PartySchema(
-                id=party.id,
-                invite_code=party.invite_code,
-                creator_id=party.creator_id,
-                name=party.name,
-                is_active=party.is_active,
-                current_position=party.current_position,
-                track_count=int(track_counts.get(party.id, 0)),
-                tracks=[],
-                member_count=int(online_counts.get(party.id, 0)),
-                skip_threshold=_party_skip_threshold(int(online_counts.get(party.id, 0))),
-                viewer_role="dj",
-                members=[],
-                events=[],
-                chat_messages=[],
-                playback=PartyPlaybackStateSchema(),
-                current_reactions={},
-            )
-            for party in parties
-        ]
-
+# ── Party Playlists (extracted to webapp/routes/party.py) ──────────────
+from webapp.routes.party import router as party_router
+app.include_router(party_router)
 
 # ── Radio Mode (infinite autoplay) ─────────────────────────────────────
 
@@ -4064,7 +2801,7 @@ async def get_wrapped(user: dict = Depends(get_current_user)):
             # User info
             u = (await session.execute(select(User).where(User.id == user_id))).scalar()
             if not u:
-                return {"error": "User not found"}
+                raise HTTPException(status_code=404, detail="User not found")
 
             # Total plays
             total_plays = (await session.execute(
@@ -4196,10 +2933,18 @@ async def get_wrapped(user: dict = Depends(get_current_user)):
     try:
         return await asyncio.wait_for(_build(), timeout=8.0)
     except asyncio.TimeoutError:
-        return {"error": "timeout", "total_plays": 0}
+        return JSONResponse(
+            status_code=504,
+            content={"detail": "timeout", "error": "timeout", "total_plays": 0},
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Wrapped failed: %s", e)
-        return {"error": str(e), "total_plays": 0}
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Wrapped build failed", "error": str(e), "total_plays": 0},
+        )
 
 
 # ── Smart Playlists (auto-generated) ──────────────────────────────────
@@ -4351,874 +3096,10 @@ async def smart_playlists(user: dict = Depends(get_current_user)):
         return {"playlists": []}
 
 
-# ── Live Radio Broadcast (DJ-controlled stream) ───────────────────────
 
-_broadcast_subscribers: list[asyncio.Queue] = []
-
-_BCAST_LIVE_KEY = "broadcast:live"
-_BCAST_STATE_KEY = "broadcast:state"
-_BCAST_QUEUE_KEY = "broadcast:queue"
-
-
-_BROADCAST_DJ_USERNAMES = {"tequilasunshine1", "kg_1988hp"}
-
-
-def _is_broadcast_dj(user: dict) -> bool:
-    """Check if user is an authorized broadcast DJ."""
-    username = (user.get("username") or "").lower()
-    return username in _BROADCAST_DJ_USERNAMES
-
-
-async def _require_broadcast_admin(user: dict):
-    if not _is_broadcast_dj(user):
-        raise HTTPException(status_code=403, detail="Only authorized DJs can control the broadcast")
-
-
-async def _notify_broadcast(event: str, data: dict | None = None):
-    """Send SSE event to all broadcast listeners."""
-    payload = json.dumps({"event": event, "data": data or {}}, ensure_ascii=False)
-    dead: list[asyncio.Queue] = []
-    for q in _broadcast_subscribers:
-        try:
-            q.put_nowait(payload)
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        try:
-            _broadcast_subscribers.remove(q)
-        except ValueError:
-            pass
-
-
-def _clamp_broadcast_index(index: int, queue_len: int) -> int:
-    if queue_len <= 0:
-        return 0
-    return min(max(index, 0), queue_len - 1)
-
-
-def _reorder_broadcast_index(current_idx: int, from_pos: int, to_pos: int) -> int:
-    if from_pos == to_pos:
-        return current_idx
-    if current_idx == from_pos:
-        return to_pos
-    if from_pos < current_idx <= to_pos:
-        return current_idx - 1
-    if to_pos <= current_idx < from_pos:
-        return current_idx + 1
-    return current_idx
-
-
-async def _normalize_broadcast_state(r) -> tuple[int, int]:
-    queue_len = await r.llen(_BCAST_QUEUE_KEY)
-    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
-    normalized_idx = _clamp_broadcast_index(current_idx, queue_len)
-
-    mapping: dict[str, str] = {}
-    if normalized_idx != current_idx:
-        mapping["current_idx"] = str(normalized_idx)
-    if queue_len <= 0:
-        mapping["seek_pos"] = "0"
-        mapping["action"] = "idle"
-
-    if mapping:
-        await r.hset(_BCAST_STATE_KEY, mapping=mapping)
-
-    return normalized_idx, queue_len
-
-
-async def _get_broadcast_state() -> dict:
-    """Read broadcast state from Redis."""
-    r = await _get_redis()
-    is_live = await r.get(_BCAST_LIVE_KEY)
-    if not is_live:
-        return {
-            "is_live": False, "dj_id": None, "dj_name": None,
-            "current_idx": 0, "seek_pos": 0, "action": "idle",
-            "started_at": None, "updated_at": None, "channel": None,
-            "listener_count": len(_broadcast_subscribers), "tracks": [],
-        }
-
-    current_idx, _queue_len = await _normalize_broadcast_state(r)
-    state = await r.hgetall(_BCAST_STATE_KEY)
-    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-    tracks = []
-    for i, raw in enumerate(queue_raw):
-        try:
-            t = json.loads(raw)
-            t["position"] = i
-            tracks.append(t)
-        except Exception:
-            pass
-
-    return {
-        "is_live": True,
-        "dj_id": int(state.get("dj_id", 0)) if state.get("dj_id") else None,
-        "dj_name": state.get("dj_name"),
-        "current_idx": current_idx,
-        "seek_pos": float(state.get("seek_pos", 0)),
-        "action": state.get("action", "idle") if tracks else "idle",
-        "started_at": state.get("started_at"),
-        "updated_at": state.get("updated_at"),
-        "channel": state.get("channel"),
-        "listener_count": len(_broadcast_subscribers),
-        "tracks": tracks,
-    }
-
-
-_BCAST_PIN_KEY = "broadcast:pinned_msgs"  # Redis hash: group_id -> message_id
-
-
-async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
-    """Send broadcast notification to Telegram group chat. Pin ON AIR, unpin on stop."""
-    try:
-        from aiogram import Bot
-        from aiogram.client.default import DefaultBotProperties
-        from aiogram.enums import ParseMode
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-
-        if not settings.BLACKROOM_GROUP_ID or not settings.BOT_TOKEN:
-            return
-
-        bot = Bot(
-            token=settings.BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        )
-        try:
-            r = await _get_redis()
-
-            group_ids = [
-                int(gid.strip())
-                for gid in str(settings.BLACKROOM_GROUP_ID).split(",")
-                if gid.strip()
-            ]
-
-            if action == "started":
-                text = (
-                    f"<b>ON AIR</b>\n\n"
-                    f"DJ <b>{dj_name}</b> started a live broadcast!\n"
-                    f"Open the app to listen together"
-                )
-                rows = []
-                if settings.TMA_URL:
-                    broadcast_url = f"{settings.TMA_URL.rstrip('/')}?startapp=broadcast"
-                    rows.append([
-                        InlineKeyboardButton(
-                            text="Listen Live",
-                            web_app=WebAppInfo(url=broadcast_url),
-                        ),
-                    ])
-                kb = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-
-                for gid in group_ids:
-                    try:
-                        msg = await bot.send_message(gid, text, reply_markup=kb)
-                        try:
-                            await bot.pin_chat_message(
-                                chat_id=gid,
-                                message_id=msg.message_id,
-                                disable_notification=False,
-                            )
-                            await r.hset(_BCAST_PIN_KEY, str(gid), str(msg.message_id))
-                        except Exception as pin_err:
-                            logger.warning("Failed to pin ON AIR in %s: %s", gid, pin_err)
-                    except Exception as e:
-                        logger.warning("Failed to notify group %s: %s", gid, e)
-
-            elif action == "stopped":
-                for gid in group_ids:
-                    try:
-                        pinned_mid = await r.hget(_BCAST_PIN_KEY, str(gid))
-                        if pinned_mid:
-                            mid = int(pinned_mid)
-                            try:
-                                await bot.unpin_chat_message(chat_id=gid, message_id=mid)
-                            except Exception:
-                                pass
-                            try:
-                                await bot.delete_message(chat_id=gid, message_id=mid)
-                            except Exception:
-                                pass
-                            await r.hdel(_BCAST_PIN_KEY, str(gid))
-                    except Exception:
-                        pass
-
-                text = "The broadcast has ended. See you next time!"
-                for gid in group_ids:
-                    try:
-                        await bot.send_message(gid, text)
-                    except Exception as e:
-                        logger.warning("Failed to notify group %s: %s", gid, e)
-        finally:
-            await bot.session.close()
-    except Exception as e:
-        logger.error("Broadcast chat notification failed: %s", e)
-
-
-def _broadcast_voice_chat_keys(channel: str | None) -> tuple[str, str]:
-    channel_name = (channel or "tequila").strip() or "tequila"
-    return f"radio:queue:{channel_name}", f"radio:current:{channel_name}"
-
-
-async def _broadcast_append_voice_chat_queue(r, channel: str | None, tracks_raw: list[str]) -> None:
-    if not tracks_raw:
-        return
-
-    vc_queue_key, _ = _broadcast_voice_chat_keys(channel)
-    for raw in tracks_raw:
-        await r.rpush(vc_queue_key, raw)
-
-
-async def _broadcast_rebuild_voice_chat_queue(
-    r,
-    channel: str | None,
-    *,
-    include_current: bool = False,
-) -> None:
-    vc_queue_key, _ = _broadcast_voice_chat_keys(channel)
-    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-    if not queue_raw:
-        await r.delete(vc_queue_key)
-        return
-
-    current_idx = _clamp_broadcast_index(
-        int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0),
-        len(queue_raw),
-    )
-    start_idx = current_idx if include_current else current_idx + 1
-    pending_tracks = queue_raw[start_idx:] if start_idx < len(queue_raw) else []
-
-    await r.delete(vc_queue_key)
-    if pending_tracks:
-        for raw in pending_tracks:
-            await r.rpush(vc_queue_key, raw)
-
-
-async def _broadcast_sync_voice_chat(r, action: str, channel: str = "tequila"):
-    """Sync broadcast queue to voice chat Redis queue for the streamer."""
-    try:
-        state = await r.hgetall(_BCAST_STATE_KEY)
-        active_channel = state.get("channel") or channel
-        vc_queue_key, vc_current_key = _broadcast_voice_chat_keys(active_channel)
-
-        if action == "started":
-            # Copy current broadcast queue to voice chat queue
-            queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-            await r.delete(vc_queue_key)
-            if queue_raw:
-                for raw in queue_raw:
-                    await r.rpush(vc_queue_key, raw)
-                logger.info("Synced %d broadcast tracks to %s", len(queue_raw), vc_queue_key)
-            else:
-                await r.delete(vc_current_key)
-
-        elif action == "stopped":
-            await r.delete(vc_queue_key)
-            await r.delete(vc_current_key)
-    except Exception as e:
-        logger.error("Voice chat sync failed: %s", e)
-
-
-async def _broadcast_publish_voice_chat_command(r, command: str) -> None:
-    try:
-        await r.publish("radio:cmd", command)
-    except Exception as e:
-        logger.error("Voice chat command publish failed: %s", e)
-
-
-async def _broadcast_wake_voice_chat_if_idle(r, added_tracks: list[str], *, queue_len_before: int) -> None:
-    if queue_len_before <= 0 and added_tracks:
-        await _broadcast_publish_voice_chat_command(r, "skip")
-
-
-@app.get("/api/broadcast")
-async def get_broadcast(user: dict = Depends(get_current_user)):
-    """Get current broadcast state + queue."""
-    state = await _get_broadcast_state()
-    state["is_dj"] = _is_broadcast_dj(user)
-    return state
-
-
-@app.post("/api/broadcast/start")
-async def start_broadcast(request: Request, user: dict = Depends(get_current_user)):
-    """Start a live broadcast. Admin only."""
-    await _require_broadcast_admin(user)
-    r = await _get_redis()
-
-    body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
-
-    channel = body.get("channel", "tequila")
-    limit = min(int(body.get("limit", 30)), 100)
-
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
-
-    await r.set(_BCAST_LIVE_KEY, "1")
-    await r.hset(_BCAST_STATE_KEY, mapping={
-        "dj_id": str(user["id"]),
-        "dj_name": user.get("first_name", "DJ"),
-        "action": "idle",
-        "current_idx": "0",
-        "seek_pos": "0",
-        "started_at": now,
-        "updated_at": now,
-        "channel": channel,
-    })
-    # Clear old queue
-    await r.delete(_BCAST_QUEUE_KEY)
-
-    # Load tracks from channel
-    try:
-        await _load_channel_to_broadcast(r, channel, limit)
-    except Exception as e:
-        logger.error("Failed to load channel tracks for broadcast: %s", e)
-
-    await _notify_broadcast("started", {
-        "dj_id": user["id"], "dj_name": user.get("first_name", "DJ"),
-    })
-
-    # Notify Telegram group chat + sync voice chat
-    dj_name = user.get("first_name", "DJ")
-    _fire_task(_broadcast_notify_chat("started", dj_name))
-    _fire_task(_broadcast_sync_voice_chat(r, "started", channel))
-    _fire_task(_broadcast_publish_voice_chat_command(r, "skip"))
-
-    return await _get_broadcast_state()
-
-
-async def _load_channel_to_broadcast(r, channel: str, limit: int, exclude: list[str] | None = None) -> list[str]:
-    """Load tracks from DB channel into broadcast queue."""
-    from bot.models.base import async_session as _as
-    from bot.models.track import Track as TrackModel
-    from sqlalchemy import select, func
-
-    exclude_set = set(exclude or [])
-    added_tracks: list[str] = []
-
-    async with _as() as session:
-        q = select(
-            TrackModel.source_id, TrackModel.title, TrackModel.artist,
-            TrackModel.duration, TrackModel.cover_url, TrackModel.file_id,
-        ).where(
-            TrackModel.channel == channel,
-            TrackModel.file_id.isnot(None),
-        ).order_by(func.random()).limit(limit)
-
-        result = await session.execute(q)
-        for row in result.all():
-            vid = row[0]
-            if vid in exclude_set:
-                continue
-            track_data = json.dumps({
-                "video_id": vid,
-                "title": row[1] or "Unknown",
-                "artist": row[2] or "Unknown",
-                "duration": row[3] or 0,
-                "duration_fmt": f"{(row[3] or 0) // 60}:{(row[3] or 0) % 60:02d}",
-                "source": "channel",
-                "cover_url": row[4],
-                "file_id": row[5],
-                "channel": channel,
-            }, ensure_ascii=False)
-            await r.rpush(_BCAST_QUEUE_KEY, track_data)
-            added_tracks.append(track_data)
-
-    return added_tracks
-
-
-@app.get("/api/broadcast/channels")
-async def broadcast_channels(user: dict = Depends(get_current_user)):
-    """List available channel labels with track counts."""
-    await _require_broadcast_admin(user)
-    from bot.models.base import async_session as _as
-    from bot.models.track import Track as TrackModel
-    from sqlalchemy import select, func
-
-    async with _as() as session:
-        result = await session.execute(
-            select(TrackModel.channel, func.count())
-            .where(TrackModel.channel.isnot(None), TrackModel.file_id.isnot(None))
-            .group_by(TrackModel.channel)
-            .order_by(func.count().desc())
-        )
-        channels = [{"label": r[0], "track_count": r[1]} for r in result.all()]
-    return {"channels": channels}
-
-
-@app.post("/api/broadcast/import-channel")
-async def broadcast_import_channel(request: Request, user: dict = Depends(get_current_user)):
-    """
-    Import audio tracks from a Telegram channel into DB.
-    DJ enters @channel_username, backend scans it via Bot API.
-    """
-    await _require_broadcast_admin(user)
-    body = await request.json()
-    channel_ref = body.get("channel_ref", "").strip()
-    label = body.get("label", "").strip().lower() or channel_ref.lstrip("@").lower()
-
-    if not channel_ref:
-        raise HTTPException(400, "channel_ref required (e.g. @my_music_channel)")
-    if len(channel_ref) > 128:
-        raise HTTPException(400, "channel_ref too long")
-    import re as _re
-    if not _re.match(r'^@?[a-zA-Z0-9_]+$', channel_ref):
-        raise HTTPException(400, "Invalid channel_ref format")
-
-    # Import in background so the request doesn't timeout
-    _fire_task(_import_channel_tracks(user, channel_ref, label))
-    return {"status": "importing", "channel": channel_ref, "label": label}
-
-
-async def _import_channel_tracks(user: dict, channel_ref: str, label: str):
-    """Background task: scan a Telegram channel and import audio to DB."""
-    import time as _time
-    try:
-        from aiogram import Bot
-        from aiogram.client.default import DefaultBotProperties
-        from aiogram.enums import ParseMode
-        from bot.db import upsert_track
-
-        bot = Bot(
-            token=settings.BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        )
-        admin_id = int(user["id"])
-        try:
-            chat = await bot.get_chat(channel_ref)
-            chat_id = chat.id
-            saved, msg_id, consecutive_fails = 0, 0, 0
-            start_time = _time.monotonic()
-            max_scan = 5000  # Max messages to scan
-            timeout_sec = 300  # 5 min limit
-
-            while consecutive_fails < 30 and msg_id < max_scan:
-                if _time.monotonic() - start_time > timeout_sec:
-                    logger.warning("Channel import timeout for %s after %d msgs", channel_ref, msg_id)
-                    break
-                msg_id += 1
-                try:
-                    fwd = await bot.forward_message(
-                        chat_id=admin_id,
-                        from_chat_id=chat_id,
-                        message_id=msg_id,
-                        disable_notification=True,
-                    )
-                    consecutive_fails = 0
-
-                    if fwd.audio:
-                        audio = fwd.audio
-                        source_id = f"tg_{chat_id}_{msg_id}"
-                        title = audio.title or (audio.file_name or "Unknown")
-                        artist = audio.performer or ""
-
-                        await upsert_track(
-                            source_id=source_id,
-                            title=title,
-                            artist=artist,
-                            duration=audio.duration,
-                            file_id=audio.file_id,
-                            source="channel",
-                            channel=label,
-                        )
-                        saved += 1
-
-                    try:
-                        await bot.delete_message(admin_id, fwd.message_id)
-                    except Exception:
-                        pass
-
-                    await asyncio.sleep(0.1)
-                except Exception:
-                    consecutive_fails += 1
-                    await asyncio.sleep(0.05)
-
-            logger.info("Imported %d tracks from %s -> %s", saved, channel_ref, label)
-
-            try:
-                await bot.send_message(
-                    admin_id,
-                    f"Import done! {saved} tracks from {channel_ref} -> {label}",
-                )
-            except Exception:
-                pass
-        finally:
-            await bot.session.close()
-    except Exception as e:
-        logger.error("Channel import failed: %s", e)
-
-
-@app.post("/api/broadcast/stop")
-async def stop_broadcast(user: dict = Depends(get_current_user)):
-    """Stop the broadcast. Admin only."""
-    await _require_broadcast_admin(user)
-    r = await _get_redis()
-    channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
-    await r.delete(_BCAST_LIVE_KEY, _BCAST_STATE_KEY, _BCAST_QUEUE_KEY)
-    await _notify_broadcast("stopped", {})
-
-    # Notify chat + stop voice chat
-    _fire_task(_broadcast_notify_chat("stopped"))
-    _fire_task(_broadcast_sync_voice_chat(r, "stopped", channel))
-    _fire_task(_broadcast_publish_voice_chat_command(r, "stop"))
-
-    return {"ok": True}
-
-
-@app.post("/api/broadcast/load-channel")
-async def broadcast_load_channel(request: Request, user: dict = Depends(get_current_user)):
-    """Load tracks from a Telegram channel into broadcast queue. Admin only."""
-    await _require_broadcast_admin(user)
-    body = await request.json()
-    channel = body.get("channel", "tequila")
-    limit = min(int(body.get("limit", 30)), 100)
-
-    r = await _get_redis()
-    is_live = await r.get(_BCAST_LIVE_KEY)
-    if not is_live:
-        raise HTTPException(400, "Broadcast not active")
-
-    # Get existing queue video_ids to avoid duplicates
-    existing = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-    queue_len_before = len(existing)
-    exclude = []
-    for raw in existing:
-        try:
-            exclude.append(json.loads(raw).get("video_id", ""))
-        except Exception:
-            pass
-
-    added_tracks = await _load_channel_to_broadcast(r, channel, limit, exclude)
-    _fire_task(_broadcast_append_voice_chat_queue(r, await r.hget(_BCAST_STATE_KEY, "channel") or channel, added_tracks))
-    _fire_task(_broadcast_wake_voice_chat_if_idle(r, added_tracks, queue_len_before=queue_len_before))
-    await _notify_broadcast("queue_updated", {
-        "track_count": await r.llen(_BCAST_QUEUE_KEY),
-    })
-    return await _get_broadcast_state()
-
-
-@app.post("/api/broadcast/tracks")
-async def broadcast_add_track(request: Request, user: dict = Depends(get_current_user)):
-    """Add a single track to broadcast queue. Admin only."""
-    await _require_broadcast_admin(user)
-    body = await request.json()
-    r = await _get_redis()
-
-    is_live = await r.get(_BCAST_LIVE_KEY)
-    if not is_live:
-        raise HTTPException(400, "Broadcast not active")
-
-    active_channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
-    queue_len_before = await r.llen(_BCAST_QUEUE_KEY)
-
-    track_data = json.dumps({
-        "video_id": body.get("video_id", ""),
-        "title": body.get("title", ""),
-        "artist": body.get("artist", ""),
-        "duration": body.get("duration", 0),
-        "duration_fmt": body.get("duration_fmt", "0:00"),
-        "source": body.get("source", "youtube"),
-        "cover_url": body.get("cover_url"),
-        "channel": body.get("channel") or active_channel,
-    }, ensure_ascii=False)
-    await r.rpush(_BCAST_QUEUE_KEY, track_data)
-    _fire_task(_broadcast_append_voice_chat_queue(r, active_channel, [track_data]))
-    _fire_task(_broadcast_wake_voice_chat_if_idle(r, [track_data], queue_len_before=queue_len_before))
-
-    await _notify_broadcast("queue_updated", {
-        "track_count": await r.llen(_BCAST_QUEUE_KEY),
-    })
-    return await _get_broadcast_state()
-
-
-@app.delete("/api/broadcast/tracks/{video_id}")
-async def broadcast_remove_track(video_id: str, user: dict = Depends(get_current_user)):
-    """Remove a track from broadcast queue. Admin only."""
-    await _require_broadcast_admin(user)
-    r = await _get_redis()
-
-    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
-    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-    removed_index: int | None = None
-    for index, raw in enumerate(queue_raw):
-        try:
-            t = json.loads(raw)
-            if t.get("video_id") == video_id:
-                removed_index = index
-                await r.lrem(_BCAST_QUEUE_KEY, 1, raw)
-                break
-        except Exception:
-            pass
-
-    queue_len = await r.llen(_BCAST_QUEUE_KEY)
-    next_idx = current_idx
-    mapping: dict[str, str] = {}
-    if removed_index is not None:
-        if queue_len <= 0:
-            mapping = {"current_idx": "0", "seek_pos": "0", "action": "idle"}
-            next_idx = 0
-        else:
-            if removed_index < current_idx:
-                next_idx = current_idx - 1
-            else:
-                next_idx = _clamp_broadcast_index(current_idx, queue_len)
-            mapping["current_idx"] = str(_clamp_broadcast_index(next_idx, queue_len))
-            if removed_index == current_idx:
-                mapping["seek_pos"] = "0"
-        if mapping:
-            await r.hset(_BCAST_STATE_KEY, mapping=mapping)
-        active_channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
-        _fire_task(_broadcast_rebuild_voice_chat_queue(
-            r,
-            active_channel,
-            include_current=removed_index == current_idx,
-        ))
-        if removed_index == current_idx:
-            _fire_task(_broadcast_publish_voice_chat_command(r, "skip" if queue_len > 0 else "stop"))
-
-    await _notify_broadcast("queue_updated", {
-        "track_count": queue_len,
-        "current_idx": _clamp_broadcast_index(next_idx, queue_len),
-    })
-    return await _get_broadcast_state()
-
-
-@app.post("/api/broadcast/reorder")
-async def broadcast_reorder(request: Request, user: dict = Depends(get_current_user)):
-    """Reorder tracks in broadcast queue. Admin only."""
-    await _require_broadcast_admin(user)
-    body = await request.json()
-    from_pos = int(body.get("from_position", 0))
-    to_pos = int(body.get("to_position", 0))
-
-    r = await _get_redis()
-    queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-    if from_pos < 0 or from_pos >= len(queue_raw) or to_pos < 0 or to_pos >= len(queue_raw):
-        raise HTTPException(400, "Invalid positions")
-
-    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
-
-    items = list(queue_raw)
-    item = items.pop(from_pos)
-    items.insert(to_pos, item)
-    next_idx = _clamp_broadcast_index(
-        _reorder_broadcast_index(current_idx, from_pos, to_pos),
-        len(items),
-    )
-
-    pipe = r.pipeline()
-    pipe.delete(_BCAST_QUEUE_KEY)
-    for it in items:
-        pipe.rpush(_BCAST_QUEUE_KEY, it)
-    pipe.hset(_BCAST_STATE_KEY, mapping={"current_idx": str(next_idx)})
-    await pipe.execute()
-
-    active_channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
-    _fire_task(_broadcast_rebuild_voice_chat_queue(r, active_channel))
-
-    await _notify_broadcast("queue_updated", {
-        "track_count": len(items),
-        "current_idx": next_idx,
-    })
-    return await _get_broadcast_state()
-
-
-@app.post("/api/broadcast/skip")
-async def broadcast_skip(user: dict = Depends(get_current_user)):
-    """Skip to next track. Admin only."""
-    await _require_broadcast_admin(user)
-    r = await _get_redis()
-
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
-
-    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
-    queue_len = await r.llen(_BCAST_QUEUE_KEY)
-    if queue_len <= 0:
-        await r.hset(_BCAST_STATE_KEY, mapping={"current_idx": "0", "seek_pos": "0", "action": "idle", "updated_at": now})
-        return await _get_broadcast_state()
-
-    new_idx = min(current_idx + 1, max(queue_len - 1, 0))
-
-    await r.hset(_BCAST_STATE_KEY, mapping={
-        "current_idx": str(new_idx),
-        "seek_pos": "0",
-        "action": "play",
-        "updated_at": now,
-    })
-
-    # Get new track info
-    track_raw = await r.lindex(_BCAST_QUEUE_KEY, new_idx)
-    track = json.loads(track_raw) if track_raw else {}
-
-    await _notify_broadcast("next", {
-        "position": new_idx,
-        "track": track,
-    })
-    _fire_task(_broadcast_rebuild_voice_chat_queue(
-        r,
-        await r.hget(_BCAST_STATE_KEY, "channel") or "tequila",
-        include_current=True,
-    ))
-    _fire_task(_broadcast_publish_voice_chat_command(r, "skip"))
-    return await _get_broadcast_state()
-
-
-@app.post("/api/broadcast/playback")
-async def broadcast_playback(request: Request, user: dict = Depends(get_current_user)):
-    """Sync playback state (play/pause/seek). Admin only."""
-    await _require_broadcast_admin(user)
-    body = await request.json()
-    action = body.get("action", "play")
-    seek_pos = float(body.get("seek_pos", 0))
-
-    r = await _get_redis()
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
-    previous_current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
-
-    mapping = {"action": action, "updated_at": now}
-    if seek_pos > 0:
-        mapping["seek_pos"] = str(seek_pos)
-    if "current_idx" in body:
-        mapping["current_idx"] = str(int(body["current_idx"]))
-
-    await r.hset(_BCAST_STATE_KEY, mapping=mapping)
-    current_idx, queue_len = await _normalize_broadcast_state(r)
-    effective_action = action if queue_len > 0 else "idle"
-    effective_seek_pos = seek_pos if queue_len > 0 else 0
-
-    await _notify_broadcast("playback_sync", {
-        "action": effective_action,
-        "seek_pos": effective_seek_pos,
-        "current_idx": current_idx,
-    })
-    _fire_task(_broadcast_rebuild_voice_chat_queue(
-        r,
-        await r.hget(_BCAST_STATE_KEY, "channel") or "tequila",
-        include_current="current_idx" in body,
-    ))
-    target_idx = int(body["current_idx"]) if "current_idx" in body else previous_current_idx
-    if queue_len > 0 and target_idx != previous_current_idx:
-        _fire_task(_broadcast_publish_voice_chat_command(r, "skip"))
-    elif action in {"pause", "stop"}:
-        _fire_task(_broadcast_publish_voice_chat_command(r, action))
-    return await _get_broadcast_state()
-
-
-@app.post("/api/broadcast/advance")
-async def broadcast_advance(user: dict = Depends(get_current_user)):
-    """Auto-advance to next track (called by DJ client when track ends). Admin only."""
-    await _require_broadcast_admin(user)
-    r = await _get_redis()
-
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
-
-    current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
-    queue_len = await r.llen(_BCAST_QUEUE_KEY)
-    if queue_len <= 0:
-        await r.hset(_BCAST_STATE_KEY, mapping={"current_idx": "0", "seek_pos": "0", "action": "idle", "updated_at": now})
-        return await _get_broadcast_state()
-
-    new_idx = current_idx + 1
-
-    # Auto-refill if running low
-    if queue_len - new_idx < 5:
-        channel = await r.hget(_BCAST_STATE_KEY, "channel") or "tequila"
-        existing = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)
-        exclude = []
-        for raw in existing:
-            try:
-                exclude.append(json.loads(raw).get("video_id", ""))
-            except Exception:
-                pass
-        try:
-            added_tracks = await _load_channel_to_broadcast(r, channel, 20, exclude)
-            _fire_task(_broadcast_append_voice_chat_queue(r, channel, added_tracks))
-        except Exception as e:
-            logger.error("Broadcast auto-refill failed: %s", e)
-        queue_len = await r.llen(_BCAST_QUEUE_KEY)
-
-    # Wrap around if at end
-    if new_idx >= queue_len:
-        new_idx = 0
-
-    await r.hset(_BCAST_STATE_KEY, mapping={
-        "current_idx": str(new_idx),
-        "seek_pos": "0",
-        "action": "play",
-        "updated_at": now,
-    })
-
-    track_raw = await r.lindex(_BCAST_QUEUE_KEY, new_idx)
-    track = json.loads(track_raw) if track_raw else {}
-
-    await _notify_broadcast("next", {
-        "position": new_idx,
-        "track": track,
-    })
-
-    return await _get_broadcast_state()
-
-
-@app.get("/api/broadcast/events")
-async def broadcast_events(
-    request: Request,
-    x_telegram_init_data: str | None = Header(None),
-    token: str | None = Query(None),
-):
-    """SSE stream for real-time broadcast updates."""
-    init_data = x_telegram_init_data or token
-    if not init_data:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    user = verify_init_data(init_data)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid initData")
-    await _get_or_create_webapp_user(user)
-
-    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
-    _broadcast_subscribers.append(queue)
-
-    # Notify listener count update
-    await _notify_broadcast("listener_count", {
-        "count": len(_broadcast_subscribers),
-    })
-
-    async def event_generator():
-        try:
-            # Send initial state snapshot
-            state = await _get_broadcast_state()
-            yield f"data: {json.dumps({'event': 'connected', 'data': state}, ensure_ascii=False)}\n\n"
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=30)
-                    yield f"data: {msg}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            try:
-                _broadcast_subscribers.remove(queue)
-            except ValueError:
-                pass
-            await _notify_broadcast("listener_count", {
-                "count": len(_broadcast_subscribers),
-            })
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
+# ── Live Radio Broadcast (extracted to webapp/routes/broadcast.py) ─────
+from webapp.routes.broadcast import router as broadcast_router
+app.include_router(broadcast_router)
 
 # ── Frontend SPA serving ────────────────────────────────────────────────
 
@@ -5252,3 +3133,6 @@ if _FRONTEND_DIST.is_dir():
             _FRONTEND_DIST / "index.html",
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
+
+
+

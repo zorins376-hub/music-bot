@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -8,6 +10,7 @@ from bot.i18n import t
 from bot.services.analytics import track_event
 
 router = Router()
+logger = logging.getLogger(__name__)
 _FAVORITES_PAGE_SIZE = 10
 
 
@@ -108,12 +111,12 @@ async def handle_favorite_action(callback: CallbackQuery, callback_data: Favorit
                 from bot.services.achievements import check_and_award_badges
                 await check_and_award_badges(user.id, "like")
             except Exception:
-                pass
+                logger.debug("Failed to award like badge for user_id=%s", user.id, exc_info=True)
             try:
                 from bot.services.leaderboard import add_xp, XP_LIKE
                 await add_xp(user.id, XP_LIKE)
             except Exception:
-                pass
+                logger.debug("Failed to add like XP for user_id=%s", user.id, exc_info=True)
         return
 
     removed = await remove_favorite_track(user.id, callback_data.tid)

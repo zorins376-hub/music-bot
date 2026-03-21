@@ -42,7 +42,7 @@ interface UserStats {
   total_favorites: number;
   top_artists: Array<{ name: string; count: number }>;
   top_genres: Array<{ name: string; count: number }>;
-  recent_tracks: Track[];
+  recent_tracks: Array<Track & { played_at?: string }>;
   xp: number;
   level: number;
   streak_days: number;
@@ -936,11 +936,11 @@ export const ProfileView = memo(function ProfileView({
               </div>
 
               {/* Time ago */}
-              {(t as any).played_at && (
+              {t.played_at && (
                 <div style={{
                   fontSize: 11, color: tc.hintColor, flexShrink: 0, marginLeft: 8,
                 }}>
-                  {timeAgo((t as any).played_at)}
+                  {timeAgo(t.played_at)}
                 </div>
               )}
 

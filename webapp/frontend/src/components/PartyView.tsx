@@ -50,6 +50,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   const eventSourceRef = useRef<EventSource | null>(null);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const reactionBurstIdRef = useRef(0);
   const lastTrackIdRef = useRef<string | null>(null);
   const onPlaybackActionRef = useRef(onPlaybackAction);
@@ -112,12 +114,24 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   };
 
   const connectSSE = useCallback((code: string) => {
+    const MAX_RECONNECT_ATTEMPTS = 10;
+    const BASE_RECONNECT_DELAY_MS = 2000;
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
     const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
     const es = new EventSource(`/api/party/${encodeURIComponent(code)}/events?token=${initData}`);
     eventSourceRef.current = es;
+
+    es.onopen = () => {
+      reconnectAttemptsRef.current = 0;
+    };
 
     es.onmessage = (ev) => {
       try {
@@ -162,13 +176,22 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     };
 
     es.onerror = () => {
-      // Reconnect on error after 2s delay
       es.close();
-      setTimeout(() => {
+
+      if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        showToast("Потеряно соединение с пати");
+        return;
+      }
+
+      const attempt = reconnectAttemptsRef.current;
+      const delay = Math.min(BASE_RECONNECT_DELAY_MS * (2 ** attempt), 60000);
+      reconnectAttemptsRef.current = attempt + 1;
+
+      reconnectTimerRef.current = setTimeout(() => {
         if (eventSourceRef.current === es) {
           connectSSE(code);
         }
-      }, 2000);
+      }, delay);
     };
   }, []);
 
@@ -387,6 +410,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
     }
     return () => {
       eventSourceRef.current?.close();
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
     };
   }, [initialCode, connectSSE]);
@@ -419,6 +443,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
   useEffect(() => {
     const onBeforeUnload = () => {
       if (eventSourceRef.current) eventSourceRef.current.close();
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
@@ -476,8 +501,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       setShowSearch(false);
       setSearchQuery("");
       setSearchResults([]);
-    } catch (err: any) {
-      const detail = err?.message || "";
+    } catch (err: unknown) {
+      const detail = (err as Error)?.message || "";
       if (detail.includes("409") || detail.includes("already")) {
         showToast("Этот трек уже в очереди");
       } else {
@@ -965,8 +990,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
               type="text"
               placeholder="Написать в чат..."
               value={chatMessage}
-              onInput={(e: any) => setChatMessage(e.target.value)}
-              onKeyDown={(e: any) => { if (e.key === "Enter") handleSendChat(); }}
+              onInput={(e) => setChatMessage((e.target as HTMLInputElement).value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSendChat(); }}
               style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 13, outline: "none" }}
             />
             <button onClick={handleSendChat} style={{ padding: "10px 12px", borderRadius: 12, border: "none", background: activeBg, color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Send</button>
@@ -989,7 +1014,7 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <input
                 type="text" placeholder="Поиск треков..." value={searchQuery}
-                onInput={(e: any) => setSearchQuery(e.target.value)}
+                onInput={(e) => setSearchQuery((e.target as HTMLInputElement).value)}
                 autoFocus
                 style={{
                   flex: 1, padding: "10px 12px", borderRadius: 12,
@@ -1043,14 +1068,14 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
                 <div style={{ fontSize: 11, color: hintColor, flexShrink: 0, padding: "4px 8px", borderRadius: 999, background: "rgba(255,255,255,0.05)" }}>{t.duration_fmt}</div>
                 {canControl && (
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8 }}>
-                    <button onClick={(e: any) => { e.stopPropagation(); handlePlayNext(t.video_id); }} style={{ padding: "5px 8px", borderRadius: 8, border: cardBorder, background: "transparent", color: warm ? "#ffd54f" : accentColor, fontSize: 11, cursor: "pointer" }}>⏭</button>
+                    <button onClick={(e) => { e.stopPropagation(); handlePlayNext(t.video_id); }} style={{ padding: "5px 8px", borderRadius: 8, border: cardBorder, background: "transparent", color: warm ? "#ffd54f" : accentColor, fontSize: 11, cursor: "pointer" }}>⏭</button>
                     {idx > 0 && (
-                      <button onClick={(e: any) => { e.stopPropagation(); handleMoveTrack(t.position, upNext[idx - 1].position); }} style={{ padding: "5px 8px", borderRadius: 8, border: cardBorder, background: "transparent", color: textColor, fontSize: 11, cursor: "pointer" }}>↑</button>
+                      <button onClick={(e) => { e.stopPropagation(); handleMoveTrack(t.position, upNext[idx - 1].position); }} style={{ padding: "5px 8px", borderRadius: 8, border: cardBorder, background: "transparent", color: textColor, fontSize: 11, cursor: "pointer" }}>↑</button>
                     )}
                     {idx < upNext.length - 1 && (
-                      <button onClick={(e: any) => { e.stopPropagation(); handleMoveTrack(t.position, upNext[idx + 1].position); }} style={{ padding: "5px 8px", borderRadius: 8, border: cardBorder, background: "transparent", color: textColor, fontSize: 11, cursor: "pointer" }}>↓</button>
+                      <button onClick={(e) => { e.stopPropagation(); handleMoveTrack(t.position, upNext[idx + 1].position); }} style={{ padding: "5px 8px", borderRadius: 8, border: cardBorder, background: "transparent", color: textColor, fontSize: 11, cursor: "pointer" }}>↓</button>
                     )}
-                    <button onClick={(e: any) => { e.stopPropagation(); handleRemoveTrack(t.video_id); }} style={{
+                    <button onClick={(e) => { e.stopPropagation(); handleRemoveTrack(t.video_id); }} style={{
                       width: 28, height: 28, borderRadius: 8, border: "none",
                       background: "transparent", color: "#ef5350", fontSize: 14, cursor: "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center",
@@ -1427,8 +1452,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
       {showCreate && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, padding: 12, borderRadius: 18, ...glassCard }}>
           <input type="text" placeholder="Название пати" maxLength={100} value={newName}
-            onInput={(e: any) => setNewName(e.target.value)}
-            onKeyDown={(e: any) => { if (e.key === "Enter") handleCreate(); }}
+            onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
             style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none" }} />
           <button onClick={handleCreate} style={{ padding: "10px 16px", borderRadius: 12, border: "none", background: partyGradient, color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><IconParty size={14} /> Go</button>
           <button onClick={() => { setShowCreate(false); setNewName(""); }} style={{ padding: "10px 12px", borderRadius: 12, border: cardBorder, background: "transparent", color: hintColor, fontSize: 13, cursor: "pointer" }}><IconClose size={14} /></button>
@@ -1469,8 +1494,8 @@ export function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor =
         <div style={{ ...sectionLabel, marginBottom: 10, fontSize: 10 }}>Присоединиться по коду</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input type="text" placeholder="Вставь код пати" maxLength={16} value={joinCode}
-            onInput={(e: any) => setJoinCode(e.target.value.trim())}
-            onKeyDown={(e: any) => { if (e.key === "Enter" && joinCode) handleJoinParty(joinCode); }}
+            onInput={(e) => setJoinCode(((e.target as HTMLInputElement).value).trim())}
+            onKeyDown={(e) => { if (e.key === "Enter" && joinCode) handleJoinParty(joinCode); }}
             style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none", fontFamily: "monospace" }} />
           <button onClick={() => { if (joinCode) handleJoinParty(joinCode); }} disabled={!joinCode} style={{
             padding: "10px 16px", borderRadius: 12, border: "none",

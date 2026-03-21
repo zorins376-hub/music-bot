@@ -30,7 +30,7 @@ async def is_enabled(flag: str) -> bool:
         if val is not None:
             return val == "1"
     except Exception:
-        pass
+        logger.debug("feature flag read failed flag=%s", flag, exc_info=True)
     return _DEFAULTS.get(flag, False)
 
 

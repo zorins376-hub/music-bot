@@ -174,7 +174,7 @@ async def handle_video_select(callback: CallbackQuery, callback_data: VideoCb) -
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        logger.debug("Failed to edit video quality selection message", exc_info=True)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("vback:"))
@@ -194,7 +194,7 @@ async def handle_video_back(callback: CallbackQuery) -> None:
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        logger.debug("Failed to edit video results message", exc_info=True)
 
 
 @router.callback_query(VideoQualCb.filter())

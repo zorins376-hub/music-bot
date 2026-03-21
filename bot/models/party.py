@@ -12,7 +12,7 @@ class PartySession(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     invite_code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
-    creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     name: Mapped[str] = mapped_column(String(100), default="Party 🎉")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

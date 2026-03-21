@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 # Автоопределение: Docker или локалка
@@ -30,10 +30,11 @@ class Settings(BaseSettings):
     WEBHOOK_PATH: str = "/webhook"
     WEB_SERVER_HOST: str = "0.0.0.0"
     WEB_SERVER_PORT: int = 8080
+    WEBAPP_CORS_ORIGINS: List[str] = []
 
     # ── Admins ────────────────────────────────────────────────────────────
     ADMIN_IDS: List[int] = []
-    ADMIN_USERNAMES: List[str] = ["Tequilasunshine1", "Kg_1988hp"]
+    ADMIN_USERNAMES: List[str] = []
 
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
@@ -47,6 +48,21 @@ class Settings(BaseSettings):
     def parse_admin_usernames(cls, v):
         if isinstance(v, str):
             return [x.strip() for x in v.split(",") if x.strip()]
+        return v
+
+    @model_validator(mode="after")
+    def validate_required_runtime_settings(self):
+        if not self.BOT_TOKEN or not self.BOT_TOKEN.strip():
+            raise ValueError("BOT_TOKEN is required and cannot be empty")
+        if not self.ADMIN_IDS and not self.ADMIN_USERNAMES:
+            raise ValueError("At least one admin must be configured via ADMIN_IDS or ADMIN_USERNAMES")
+        return self
+
+    @field_validator("WEBAPP_CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_webapp_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [x.strip().rstrip("/") for x in v.split(",") if x.strip()]
         return v
 
     # ── Audio ─────────────────────────────────────────────────────────────

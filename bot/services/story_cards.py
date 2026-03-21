@@ -53,7 +53,7 @@ def _get_font(size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
         if font_file.exists():
             return ImageFont.truetype(str(font_file), size)
     except Exception:
-        pass
+        logger.debug("custom font load failed", exc_info=True)
     try:
         return ImageFont.truetype("arial.ttf", size)
     except Exception:
@@ -123,7 +123,7 @@ def generate_track_card(
         qr_pos = ((_WIDTH - 200) // 2, _HEIGHT - 380)
         img.paste(qr_img, qr_pos)
     except Exception:
-        pass
+        logger.debug("QR code generation failed", exc_info=True)
 
     # Footer
     font_footer = _get_font(28)

@@ -163,4 +163,4 @@ async def cb_close_party(callback: CallbackQuery) -> None:
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        logger.debug("Failed to edit close-party message for invite_code=%s", code, exc_info=True)

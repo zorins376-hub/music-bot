@@ -290,7 +290,7 @@ async def handle_successful_payment(message: Message) -> None:
             try:
                 await message.bot.send_message(target_id, t("ru", "gift_received", from_name=user.first_name or str(user.id)), parse_mode="HTML")
             except Exception:
-                pass
+                logger.debug("Failed to notify gift recipient user_id=%s", target_id, exc_info=True)
 
         else:
             await session.commit()

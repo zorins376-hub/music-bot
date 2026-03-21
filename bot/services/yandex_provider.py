@@ -111,7 +111,7 @@ async def _admin_alert(text: str) -> None:
         should_send = bool(throttle_ok)
         await cache.redis.setex("alert:yandex_token_refresh_fail", _ADMIN_ALERT_THROTTLE_SECONDS, text)
     except Exception:
-        pass
+        logger.debug("yandex alert throttle redis failed", exc_info=True)
 
     if should_send:
         await _send_admin_telegram_alert(text)
@@ -239,7 +239,7 @@ def _track_to_dict(track, source_id: str | None = None) -> dict | None:
                 if hasattr(album, "cover_uri") and album.cover_uri:
                     cover_url = "https://" + album.cover_uri.replace("%%", "400x400")
         except Exception:
-            pass
+            logger.debug("yandex cover url extraction failed track=%s", track_id, exc_info=True)
         
         return {
             "video_id": track_id,

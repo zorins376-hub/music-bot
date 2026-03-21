@@ -100,6 +100,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
     if (dragIndex === null) return;
 
     const onMove = (e: TouchEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) return;
       e.preventDefault();
       const touchY = e.touches[0].clientY;
       setDragY(touchY);
@@ -141,7 +142,14 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
     document.addEventListener("touchend", onEnd);
     document.addEventListener("touchcancel", onEnd);
 
+    const safetyTimeout = setTimeout(() => {
+      setDragIndex(null);
+      setOverIndex(null);
+      setDragY(0);
+    }, 10000);
+
     return () => {
+      clearTimeout(safetyTimeout);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onEnd);
       document.removeEventListener("touchcancel", onEnd);
@@ -206,6 +214,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
           {onClearQueue && (
             <button
               onClick={() => { haptic("medium"); onClearQueue(); }}
+              aria-label="Clear queue"
               style={{
                 padding: "3px 10px", borderRadius: 10, border: "none",
                 background: isTequila ? "rgba(229,57,53,0.2)" : "rgba(229,57,53,0.15)",
@@ -252,8 +261,8 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
           )}
           {/* Delete button (revealed on swipe) */}
           <div
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(e as unknown as Event, t, i); }}
-            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(e as unknown as Event, t, i); }}
+            data-no-synth-tap="true"
+            onClick={(e) => { e.stopPropagation(); handleRemove(e as unknown as Event, t, i); }}
             style={{
               position: "absolute",
               right: 0,
@@ -271,6 +280,7 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
               transition: "opacity 0.2s",
               zIndex: 50,
             }}
+            aria-label="Remove track"
           >
             <IconTrash size={24} color="#fff" />
           </div>
@@ -279,6 +289,8 @@ export function TrackList({ tracks, currentIndex, onPlay, onReorder, onRemove, o
             onTouchStart={(e) => handleTouchStart(e as unknown as TouchEvent, i)}
             onTouchMove={(e) => handleTouchMove(e as unknown as TouchEvent, i)}
             onClick={() => dragIndex === null && swipedIndex !== i && onPlay(t)}
+            role="button"
+            aria-label={`Play ${t.title} by ${t.artist}`}
             style={{
               display: "flex",
               alignItems: "center",

@@ -409,7 +409,7 @@ async def index_spotify_popular() -> int:
                 except Exception:
                     continue
         except Exception:
-            pass
+            logger.debug("spotify new releases crawl failed", exc_info=True)
 
         # 2. Featured playlists (popular tracks with full metadata)
         try:
@@ -431,7 +431,7 @@ async def index_spotify_popular() -> int:
                 except Exception:
                     continue
         except Exception:
-            pass
+            logger.debug("spotify featured playlists crawl failed", exc_info=True)
 
         # 3. Top 50 playlists (global & Russia)
         _TOP_PLAYLISTS = [

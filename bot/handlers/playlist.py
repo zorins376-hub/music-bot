@@ -210,18 +210,18 @@ async def create_playlist_name(message: Message, state: FSMContext) -> None:
             from bot.services.supabase_mirror import mirror_playlist_create
             mirror_playlist_create(pl.id, user.id, name)
         except Exception:
-            pass
+            logger.debug("mirror_playlist_create failed pl=%s", pl.id, exc_info=True)
     await state.clear()
     try:
         from bot.services.achievements import check_and_award_badges
         await check_and_award_badges(user.id, "playlist_create")
     except Exception:
-        pass
+        logger.debug("check_and_award_badges failed user=%s", user.id, exc_info=True)
     try:
         from bot.services.leaderboard import add_xp, XP_PLAYLIST_CREATE
         await add_xp(user.id, XP_PLAYLIST_CREATE)
     except Exception:
-        pass
+        logger.debug("add_xp failed user=%s", user.id, exc_info=True)
     await message.answer(
         t(user.language, "pl_created", name=name),
         parse_mode="HTML",
@@ -301,7 +301,7 @@ async def cb_delete_exec(callback: CallbackQuery, callback_data: PlCb) -> None:
             from bot.services.supabase_mirror import mirror_playlist_delete
             mirror_playlist_delete(pl.id)
         except Exception:
-            pass
+            logger.debug("mirror_playlist_delete failed pl=%s", pl.id, exc_info=True)
     await callback.answer(t(user.language, "pl_deleted"))
     await _show_playlists(callback.message, user.id, user.language, edit=True)
 
@@ -327,7 +327,7 @@ async def cb_remove_track(callback: CallbackQuery, callback_data: PlCb) -> None:
                     from bot.services.supabase_mirror import mirror_playlist_track_remove
                     mirror_playlist_track_remove(pt_id)
                 except Exception:
-                    pass
+                    logger.debug("mirror_playlist_track_remove failed pt=%s", pt_id, exc_info=True)
     await callback.answer(t(user.language, "pl_track_removed"))
     # Refresh view using server-side playlist_id
     cb2 = PlCb(act="view", id=playlist_id)
@@ -395,7 +395,7 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
             try:
                 await cache.set_file_id(source_id, fid, bitrate)
             except Exception:
-                pass
+                logger.debug("cache.set_file_id failed source=%s", source_id, exc_info=True)
             async with async_session() as session:
                 await session.execute(
                     update(Track).where(Track.id == track.id).values(file_id=fid)
@@ -612,7 +612,7 @@ async def cb_add_to_playlist(callback: CallbackQuery, callback_data: AddToPlCb) 
             from bot.services.supabase_mirror import mirror_playlist_track_add
             mirror_playlist_track_add(pt.id, pl.id, callback_data.tid, cnt)
         except Exception:
-            pass
+            logger.debug("mirror_playlist_track_add failed pt=%s", pt.id, exc_info=True)
     await callback.answer(t(user.language, "pl_track_added", name=pl.name), show_alert=True)
     await callback.message.delete()
 

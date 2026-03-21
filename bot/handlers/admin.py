@@ -3,6 +3,7 @@ import json
 import logging
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -540,7 +541,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             await message.answer("⚠️ Слишком много команд. Подожди минуту.")
             return
     except Exception:
-        pass
+        logger.debug("admin rate limit check failed", exc_info=True)
 
     user = await get_or_create_user(message.from_user)
     lang = user.language
@@ -954,9 +955,17 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 @router.callback_query(lambda c: c.data == "action:admin")
 async def handle_admin_panel(callback: CallbackQuery) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer()
+        try:
+            await callback.answer()
+        except TelegramBadRequest as e:
+            if "query is too old" not in str(e).lower():
+                raise
         return
-    await callback.answer()
+    try:
+        await callback.answer()
+    except TelegramBadRequest as e:
+        if "query is too old" not in str(e).lower():
+            raise
     try:
         await callback.message.edit_text(
             "<b>◆ Админ-панель</b>\n\nВыбери действие:",
@@ -1193,7 +1202,7 @@ async def handle_grant_premium(callback: CallbackQuery, callback_data: AdmUserCb
     try:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        pass
+        logger.debug("edit premium grant list failed", exc_info=True)
 
 
 @router.callback_query(AdmUserCb.filter(F.act == "unprem"))
@@ -1212,7 +1221,7 @@ async def handle_revoke_premium(callback: CallbackQuery, callback_data: AdmUserC
     try:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        pass
+        logger.debug("edit premium revoke list failed", exc_info=True)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("adm:set:"))
@@ -1237,7 +1246,7 @@ async def handle_adm_set(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        pass
+        logger.debug("edit settings text failed", exc_info=True)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("adm:"))
@@ -1450,7 +1459,7 @@ async def handle_track_list_page(callback: CallbackQuery, callback_data: AdmTrac
     try:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        pass
+        logger.debug("edit tracks list page failed", exc_info=True)
 
 
 @router.callback_query(AdmTrackCb.filter(F.act == "del"))
@@ -1470,7 +1479,7 @@ async def handle_track_delete(callback: CallbackQuery, callback_data: AdmTrackCb
     try:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        pass
+        logger.debug("edit tracks list after delete failed", exc_info=True)
 
 
 async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, label: str) -> None:
@@ -1544,7 +1553,7 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
             try:
                 await bot.delete_message(admin_msg.from_user.id, fwd.message_id)
             except Exception:
-                pass
+                logger.debug("delete forwarded message failed msg=%s", fwd.message_id, exc_info=True)
 
             await asyncio.sleep(0.1)  # rate limit
 
@@ -1561,7 +1570,7 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
                     f"♪ Аудио: {saved} · Пропущено: {skipped} · Ошибок: {errors}",
                 )
             except Exception:
-                pass
+                logger.debug("edit channel load progress failed", exc_info=True)
 
     if saved == 0 and msg_id <= max_consecutive_fails:
         await status.edit_text(

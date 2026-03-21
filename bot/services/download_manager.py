@@ -86,7 +86,7 @@ class DownloadManager:
             try:
                 future.exception()
             except Exception:
-                pass
+                logger.debug("future exception retrieval failed", exc_info=True)
             raise
         finally:
             async with self._lock:

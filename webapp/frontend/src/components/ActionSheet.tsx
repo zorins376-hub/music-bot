@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import type { JSX } from "preact";
 import type { Track } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
@@ -9,7 +10,7 @@ import {
 export interface ActionSheetAction {
   id: string;
   label: string;
-  icon: any;
+  icon: JSX.Element;
   color?: string;
   danger?: boolean;
 }
@@ -59,10 +60,19 @@ export function ActionSheet({
   useEffect(() => {
     if (visible) {
       setAnimState("enter");
-    } else if (animState === "enter" || animState === "idle") {
-      // already hidden
+      return;
     }
+
+    // When parent forces visible=false, always transition out so the full-screen
+    // backdrop cannot remain mounted and block taps.
+    setAnimState((prev) => (prev === "idle" ? "idle" : "exit"));
   }, [visible]);
+
+  useEffect(() => {
+    if (animState !== "exit") return;
+    const t = setTimeout(() => setAnimState("idle"), 200);
+    return () => clearTimeout(t);
+  }, [animState]);
 
   const handleClose = useCallback(() => {
     haptic("light");

@@ -298,31 +298,31 @@ async def perform_search(query: str, limit: int = 10) -> list[dict]:
         from bot.services.yandex_provider import search_yandex
         tasks.append(search_yandex(query, limit=limit))
     except Exception:
-        pass
+        logger.debug("yandex provider import failed", exc_info=True)
 
     try:
         from bot.services.spotify_provider import search_spotify
         tasks.append(search_spotify(query, limit=limit))
     except Exception:
-        pass
+        logger.debug("spotify provider import failed", exc_info=True)
 
     try:
         from bot.services.vk_provider import search_vk
         tasks.append(search_vk(query, limit=limit))
     except Exception:
-        pass
+        logger.debug("vk provider import failed", exc_info=True)
 
     try:
         from bot.services.deezer_provider import search_deezer
         tasks.append(search_deezer(query, limit=limit))
     except Exception:
-        pass
+        logger.debug("deezer provider import failed", exc_info=True)
 
     try:
         from bot.services.apple_provider import search_apple
         tasks.append(search_apple(query, limit=limit))
     except Exception:
-        pass
+        logger.debug("apple provider import failed", exc_info=True)
 
     results_lists = await asyncio.gather(*tasks, return_exceptions=True)
 

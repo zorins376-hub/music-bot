@@ -96,7 +96,7 @@ async def _process_import(message: Message, user, url: str) -> None:
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                logger.debug("Failed to update import progress message", exc_info=True)
 
     name, found_tracks, total = await import_playlist_tracks(url, source, progress_cb=_progress)
 

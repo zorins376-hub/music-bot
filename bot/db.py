@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from aiogram.types import User as TgUser
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,19 @@ from bot.models.admin_log import AdminLog
 from bot.models.favorite import FavoriteTrack
 from bot.models.track import ListeningHistory, Track
 from bot.models.user import User
+
+
+def _fire_and_log_task(coro, context: str) -> None:
+    task = asyncio.create_task(coro)
+
+    def _on_done(done: asyncio.Task) -> None:
+        if done.cancelled():
+            return
+        exc = done.exception()
+        if exc is not None:
+            logger.debug("Background task failed (%s): %s", context, exc)
+
+    task.add_done_callback(_on_done)
 
 
 def is_admin(user_id: int, username: str | None = None) -> bool:
@@ -52,77 +66,111 @@ async def load_admin_ids_from_redis() -> None:
 
 
 async def get_or_create_user(tg_user: TgUser) -> User:
-    admin = is_admin(tg_user.id, tg_user.username)
+    return await get_or_create_user_raw(tg_user.id, tg_user.username, tg_user.first_name)
+
+
+async def get_or_create_user_raw(
+    user_id: int, username: str | None, first_name: str | None = ""
+) -> User:
+    """Shared user upsert — used by both bot middleware and webapp API."""
+    from sqlalchemy.exc import IntegrityError
+
+    admin = is_admin(user_id, username)
     now = datetime.now(timezone.utc)
+    touch_interval = timedelta(seconds=60)
 
-    async with async_session() as session:
-        result = await session.execute(select(User).where(User.id == tg_user.id))
-        user = result.scalar_one_or_none()
+    for attempt in range(3):
+        try:
+            async with async_session() as session:
+                result = await session.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none()
 
-        if user is None:
-            user = User(
-                id=tg_user.id,
-                username=tg_user.username,
-                first_name=tg_user.first_name,
-                is_premium=admin,
-                is_admin=admin,
-            )
-            session.add(user)
-            await session.commit()
-            await session.refresh(user)
-            # Mirror new user to Supabase
-            try:
-                from bot.services.supabase_mirror import mirror_user
-                mirror_user(user.id, username=user.username, first_name=user.first_name,
-                            is_premium=user.is_premium, is_admin=user.is_admin)
-            except Exception:
-                pass
-        else:
-            # Calculate all updates in one single query
-            expired_premium = (
-                not admin
-                and user.is_premium
-                and user.premium_until is not None
-                and user.premium_until < now
-            )
-            update_values: dict = {
-                "username": tg_user.username,
-                "first_name": tg_user.first_name,
-                "last_active": now,
-            }
-            # Sync admin flag from config → DB
-            if admin and not user.is_admin:
-                update_values["is_admin"] = True
-            if not admin and user.is_admin:
-                update_values["is_admin"] = False
-            if admin and not user.is_premium:
-                update_values["is_premium"] = True
-            if expired_premium:
-                update_values["is_premium"] = False
+                if user is None:
+                    user = User(
+                        id=user_id,
+                        username=username,
+                        first_name=first_name,
+                        is_premium=admin,
+                        is_admin=admin,
+                    )
+                    session.add(user)
+                    try:
+                        await session.commit()
+                    except IntegrityError:
+                        await session.rollback()
+                        user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+                        if user is None:
+                            raise
+                        return user
+                    await session.refresh(user)
+                    # Mirror new user to Supabase
+                    try:
+                        from bot.services.supabase_mirror import mirror_user
+                        mirror_user(user.id, username=user.username, first_name=user.first_name,
+                                    is_premium=user.is_premium, is_admin=user.is_admin)
+                    except Exception:
+                        logger.debug("mirror_user failed for new user %s", user.id, exc_info=True)
+                else:
+                    changed = False
+                    if user.username != username:
+                        user.username = username
+                        changed = True
+                    if user.first_name != first_name:
+                        user.first_name = first_name
+                        changed = True
+                    if user.is_admin != admin:
+                        user.is_admin = admin
+                        changed = True
 
-            await session.execute(
-                update(User).where(User.id == tg_user.id).values(**update_values)
-            )
-            await session.commit()
-            # Mirror user update to Supabase
-            try:
-                from bot.services.supabase_mirror import mirror_user
-                mirror_user(tg_user.id, username=tg_user.username, first_name=tg_user.first_name,
-                            is_premium=update_values.get("is_premium", user.is_premium),
-                            is_admin=update_values.get("is_admin", user.is_admin))
-            except Exception:
-                pass
+                    if user.last_active is None or (now - user.last_active) >= touch_interval:
+                        user.last_active = now
+                        changed = True
 
-            # Reflect changes on the in-memory object
-            if "is_premium" in update_values:
-                user.is_premium = update_values["is_premium"]
-            if "is_admin" in update_values:
-                user.is_admin = update_values["is_admin"]
+                    expired_premium = (
+                        not admin
+                        and user.is_premium
+                        and user.premium_until is not None
+                        and user.premium_until < now
+                    )
+                    if admin and not user.is_premium:
+                        user.is_premium = True
+                        changed = True
+                    if expired_premium:
+                        user.is_premium = False
+                        changed = True
 
-        # Keep in-memory list in sync for fast checks elsewhere
-        if user.is_admin and tg_user.id not in settings.ADMIN_IDS:
-            settings.ADMIN_IDS.append(tg_user.id)
-            await persist_admin_id(tg_user.id)
+                    if changed:
+                        try:
+                            await session.commit()
+                        except Exception:
+                            await session.rollback()
+                            raise
+                    # Mirror user update to Supabase
+                    try:
+                        from bot.services.supabase_mirror import mirror_user
+                        mirror_user(user_id, username=username, first_name=first_name,
+                                    is_premium=user.is_premium, is_admin=user.is_admin)
+                    except Exception:
+                        logger.debug("mirror_user failed for updated user %s", user_id, exc_info=True)
+
+                # Keep in-memory list in sync for fast checks elsewhere
+                if user.is_admin and user_id not in settings.ADMIN_IDS:
+                    settings.ADMIN_IDS.append(user_id)
+                    await persist_admin_id(user_id)
+
+                return user
+        except IntegrityError:
+            if attempt < 2:
+                continue
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if attempt < 2:
+                await asyncio.sleep(0.2 * (attempt + 1))
+                continue
+            logger.error("get_or_create_user_raw failed after 3 attempts: %s", exc)
+            raise
 
         return user
 
@@ -170,7 +218,7 @@ async def record_listening_event(
                     listen_duration=listen_duration,
                 )
             except Exception:
-                pass
+                logger.debug("mirror_listening_event failed for user %s", user_id, exc_info=True)
         # Mirror event to Supabase AI (fire-and-forget)
         try:
             from bot.config import settings as _s
@@ -195,7 +243,7 @@ async def record_listening_event(
                                 "source": t.source,
                             }
                 if track_info.get("source_id"):
-                    asyncio.create_task(
+                    _fire_and_log_task(
                         supabase_ai.ingest_event(
                             event=action,
                             user_id=user_id,
@@ -203,24 +251,25 @@ async def record_listening_event(
                             listen_duration=listen_duration,
                             source=source,
                             query=query,
-                        )
+                        ),
+                        context=f"supabase_ai.ingest_event user={user_id} action={action}",
                     )
         except Exception:
-            pass
+            logger.debug("Supabase AI ingest scheduling failed for user %s", user_id, exc_info=True)
         # Check badges on play events (fire-and-forget)
         if action == "play":
             try:
                 from bot.services.achievements import check_and_award_badges
                 await check_and_award_badges(user_id, "play")
             except Exception:
-                pass
+                logger.debug("check_and_award_badges failed for user %s", user_id, exc_info=True)
             # XP + streak update
             try:
                 from bot.services.leaderboard import add_xp, XP_PLAY
                 await add_xp(user_id, XP_PLAY)
                 await _update_streak_and_xp(user_id, XP_PLAY)
             except Exception:
-                pass
+                logger.debug("XP update failed for user %s", user_id, exc_info=True)
             # Auto-update profile every 10 plays
             try:
                 play_count = await _get_user_play_count(user_id)
@@ -228,7 +277,7 @@ async def record_listening_event(
                     from recommender.profile_updater import trigger_profile_update
                     trigger_profile_update(user_id)
             except Exception:
-                pass
+                logger.debug("profile update trigger failed for user %s", user_id, exc_info=True)
     except Exception as e:
         logger.warning("record_listening_event failed for user %s: %s", user_id, e)
 
@@ -374,7 +423,7 @@ async def upsert_track(
                 cover_url=track.cover_url, album=track.album,
             )
         except Exception:
-            pass
+            logger.debug("mirror_track failed for track %s", track.id, exc_info=True)
         return track
 
 
@@ -549,7 +598,7 @@ async def add_favorite_track(user_id: int, track_id: int) -> bool:
             from bot.services.supabase_mirror import mirror_favorite_add
             mirror_favorite_add(fav.id, user_id, track_id)
         except Exception:
-            pass
+            logger.debug("mirror_favorite_add failed for user %s track %s", user_id, track_id, exc_info=True)
         return True
 
 
@@ -572,7 +621,7 @@ async def remove_favorite_track(user_id: int, track_id: int) -> bool:
             from bot.services.supabase_mirror import mirror_favorite_remove
             mirror_favorite_remove(user_id, track_id)
         except Exception:
-            pass
+            logger.debug("mirror_favorite_remove failed for user %s track %s", user_id, track_id, exc_info=True)
         return True
 
 

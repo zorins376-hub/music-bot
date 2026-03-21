@@ -14,6 +14,7 @@ interface Props {
   currentTrack?: Track | null;
   onPlayTrack: (track: Track) => void;
   onBroadcastAdvance?: () => Promise<void>;
+  isAdmin?: boolean;
   accentColor?: string;
   themeId?: string;
 }
@@ -37,6 +38,7 @@ function toPlayerTrack(track: BroadcastTrack): Track {
 export const LiveRadioView = memo(function LiveRadioView({
   userId,
   onPlayTrack,
+  isAdmin = false,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
 }: Props) {
@@ -70,7 +72,7 @@ export const LiveRadioView = memo(function LiveRadioView({
       ]);
       setBroadcast(data);
       // Load available channels if DJ
-      if (data.is_dj) {
+      if (data.is_dj || isAdmin) {
         fetchBroadcastChannels().then(setChannels).catch(() => {});
       }
     } catch {
@@ -80,7 +82,7 @@ export const LiveRadioView = memo(function LiveRadioView({
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   const scheduleRefresh = useCallback((delay = 300) => {
     if (refreshTimer.current) {
@@ -198,7 +200,7 @@ export const LiveRadioView = memo(function LiveRadioView({
       }
       reconnectTimer.current = window.setTimeout(connectSSE, 3000);
     };
-  }, [onPlayTrack, scheduleRefresh]);
+  }, [isAdmin, onPlayTrack, scheduleRefresh]);
 
   useEffect(() => {
     loadState();
@@ -348,7 +350,7 @@ export const LiveRadioView = memo(function LiveRadioView({
     );
   }
 
-  const isDJ = broadcast?.is_dj ?? false;
+  const isDJ = Boolean(isAdmin || broadcast?.is_dj);
   const isLive = broadcast?.is_live ?? false;
   const currentIdx = broadcast?.current_idx ?? 0;
   const tracks = broadcast?.tracks ?? [];
@@ -756,3 +758,9 @@ export const LiveRadioView = memo(function LiveRadioView({
     </div>
   );
 });
+
+
+
+
+
+

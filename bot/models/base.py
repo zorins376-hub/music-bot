@@ -85,7 +85,7 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
             try:
                 await conn.execute(_text("ROLLBACK TO SAVEPOINT mig"))
             except Exception:
-                pass
+                _logger.debug("rollback to savepoint failed", exc_info=True)
             return False
 
     last_exc: BaseException | None = None
@@ -168,9 +168,15 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                             await _run_migration(conn, stmt)
                     # Regular btree indexes (don't need pg_trgm)
                     for stmt in (
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_source_id ON tracks (source_id)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_file_id ON tracks (file_id)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_genre ON tracks (genre)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_release_year ON tracks (release_year)",
                         "CREATE INDEX IF NOT EXISTS ix_tracks_artist ON tracks (artist)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_downloads ON tracks (downloads DESC)",
+                        "CREATE INDEX IF NOT EXISTS ix_tracks_created_at ON tracks (created_at DESC)",
+                        "CREATE INDEX IF NOT EXISTS ix_lh_user_action_created ON listening_history (user_id, action, created_at DESC)",
+                        "CREATE INDEX IF NOT EXISTS ix_users_created_at ON users (created_at DESC)",
                     ):
                         await _run_migration(conn, stmt)
             return

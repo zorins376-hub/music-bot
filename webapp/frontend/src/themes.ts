@@ -194,3 +194,31 @@ export function themeColors(theme: Theme, accentColor?: string): ThemeColors {
     isTequila,
   };
 }
+
+/** Semantic colors that don't change with theme */
+export const semanticColors = {
+  error: "#f44336",
+  errorBg: "rgba(244, 67, 54, 0.1)",
+  success: "#81c784",
+  successBg: "rgba(76, 175, 80, 0.15)",
+  liveRed: "#ff3232",
+  livePulse: "#ff4444",
+  warning: "#ffb300",
+  white: "#fff",
+} as const;
+
+/** Apply the active theme as CSS custom properties on :root.
+ *  Components can then use var(--theme-bg), var(--theme-accent), etc.  */
+export function applyThemeCSSVars(theme: Theme): void {
+  const s = document.documentElement.style;
+  s.setProperty("--theme-bg", theme.bgColor);
+  s.setProperty("--theme-bg-secondary", theme.secondaryBg);
+  s.setProperty("--theme-text", theme.textColor);
+  s.setProperty("--theme-hint", theme.hintColor);
+  s.setProperty("--theme-accent", theme.accent);
+  s.setProperty("--theme-accent-alpha", theme.accentAlpha);
+  s.setProperty("--theme-glass-bg", theme.glassBg);
+  s.setProperty("--theme-nav-inactive", theme.navInactiveBg);
+  s.setProperty("--theme-vis-start", theme.visualizerGradient[0]);
+  s.setProperty("--theme-vis-end", theme.visualizerGradient[1]);
+}

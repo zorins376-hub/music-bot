@@ -36,7 +36,7 @@ async def get_lyrics(artist: str, title: str) -> dict | None:
             data = json.loads(cached)
             return data if data.get("lines") else None
     except Exception:
-        pass
+        logger.debug("lyrics cache get failed", exc_info=True)
 
     # No Genius token — can't fetch
     if not settings.GENIUS_TOKEN:
@@ -51,7 +51,7 @@ async def get_lyrics(artist: str, title: str) -> dict | None:
             json.dumps(result or {}, ensure_ascii=False),
         )
     except Exception:
-        pass
+        logger.debug("lyrics cache set failed", exc_info=True)
 
     return result
 

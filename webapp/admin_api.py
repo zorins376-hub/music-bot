@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select, case, and_, desc
@@ -63,12 +63,66 @@ import hmac
 import json
 import time as _time
 
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
-_SESSION_SECRET = os.environ.get("ADMIN_SESSION_SECRET", hashlib.sha256(
-    (ADMIN_USERNAME + ADMIN_PASSWORD + "salt-music-bot").encode()
-).hexdigest())
+ADMIN_USERNAME = (os.environ.get("ADMIN_USERNAME") or "").strip()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
+_SESSION_SECRET = (os.environ.get("ADMIN_SESSION_SECRET") or "").strip()
+
+if not ADMIN_USERNAME or not ADMIN_PASSWORD or not _SESSION_SECRET:
+    raise RuntimeError(
+        "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET must be set"
+    )
+
 _SESSION_TTL = 86400 * 7  # 7 days
+_LOGIN_WINDOW_SECONDS = 300
+_LOGIN_MAX_ATTEMPTS = 5
+_login_failures: dict[str, list[float]] = {}
+_login_lock_until: dict[str, float] = {}
+
+
+def _login_client_key(request: Request) -> str:
+    return (request.client.host if request.client else "unknown").strip().lower() or "unknown"
+
+
+def _prune_attempts(now_ts: float, key: str) -> None:
+    recent = [
+        ts for ts in _login_failures.get(key, [])
+        if now_ts - ts <= _LOGIN_WINDOW_SECONDS
+    ]
+    if recent:
+        _login_failures[key] = recent
+    else:
+        _login_failures.pop(key, None)
+
+
+def _check_login_rate_limit(request: Request) -> None:
+    now_ts = _time.time()
+    key = _login_client_key(request)
+    lock_until = _login_lock_until.get(key)
+    if lock_until and lock_until > now_ts:
+        retry_after = max(1, int(lock_until - now_ts))
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many login attempts. Retry in {retry_after}s",
+        )
+    if lock_until and lock_until <= now_ts:
+        _login_lock_until.pop(key, None)
+    _prune_attempts(now_ts, key)
+
+
+def _record_login_failure(request: Request) -> None:
+    now_ts = _time.time()
+    key = _login_client_key(request)
+    _prune_attempts(now_ts, key)
+    attempts = _login_failures.setdefault(key, [])
+    attempts.append(now_ts)
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        _login_lock_until[key] = now_ts + _LOGIN_WINDOW_SECONDS
+
+
+def _clear_login_failures(request: Request) -> None:
+    key = _login_client_key(request)
+    _login_failures.pop(key, None)
+    _login_lock_until.pop(key, None)
 
 
 def _make_session_token(username: str) -> str:
@@ -102,11 +156,16 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-async def admin_login(body: LoginRequest):
+async def admin_login(body: LoginRequest, request: Request):
     """Authenticate admin and return session token."""
-    if body.username == ADMIN_USERNAME and body.password == ADMIN_PASSWORD:
+    _check_login_rate_limit(request)
+
+    if hmac.compare_digest(body.username, ADMIN_USERNAME) and hmac.compare_digest(body.password, ADMIN_PASSWORD):
+        _clear_login_failures(request)
         token = _make_session_token(body.username)
         return {"ok": True, "token": token}
+
+    _record_login_failure(request)
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 

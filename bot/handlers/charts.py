@@ -470,7 +470,7 @@ def _parse_rusradio_html_fallback(html: str) -> list[dict]:
                     a = item.get("byArtist", {})
                     _add(a.get("name", "") if isinstance(a, dict) else str(a), item.get("name", ""))
         except Exception:
-            pass
+            logger.debug("JSON-LD music parse failed", exc_info=True)
     if tracks:
         return tracks
 
@@ -599,7 +599,7 @@ async def _fetch_europaplus_site() -> list[dict]:
                                 tracks.append({"title": str(title), "artist": str(artist),
                                                "query": f"{artist} - {title}"})
             except Exception:
-                pass
+                logger.debug("chart JSON block parse failed", exc_info=True)
         if tracks:
             return tracks
 
@@ -1006,7 +1006,7 @@ async def handle_chart_page(callback: CallbackQuery, callback_data: ChartCb) -> 
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            logger.debug("edit chart error text failed", exc_info=True)
         return
 
     # Store tracks in Redis for download callbacks
@@ -1028,7 +1028,7 @@ async def handle_chart_page(callback: CallbackQuery, callback_data: ChartCb) -> 
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        logger.debug("edit chart page text failed", exc_info=True)
 
 
 @router.callback_query(ChartDl.filter())
@@ -1158,7 +1158,7 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
                     reply_markup=_bulk_kb(job_id),
                 )
             except Exception:
-                pass
+                logger.debug("edit bulk import progress failed", exc_info=True)
 
     _chart_cancel_jobs.discard(job_id)
 
@@ -1209,7 +1209,7 @@ async def handle_chart_bulk(callback: CallbackQuery, callback_data: ChartBulk) -
                 reply_markup=resume_kb,
             )
         except Exception:
-            pass
+            logger.debug("edit cancel status failed", exc_info=True)
         return
 
     added = await _append_to_chart_playlist(user.id, playlist_name, imported_track_ids)
@@ -1351,7 +1351,7 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
                     reply_markup=_bulk_kb(job_id),
                 )
             except Exception:
-                pass
+                logger.debug("edit resume import progress failed", exc_info=True)
 
     _chart_cancel_jobs.discard(job_id)
 
@@ -1407,7 +1407,7 @@ async def handle_chart_bulk_resume(callback: CallbackQuery, callback_data: Chart
     try:
         await cache.redis.delete(f"chart:resume:{callback_data.token}")
     except Exception:
-        pass
+        logger.debug("delete resume token failed", exc_info=True)
 
     await status.edit_text(
         "✅ Импорт чарта завершён\n\n"

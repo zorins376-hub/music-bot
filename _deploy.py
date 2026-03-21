@@ -74,7 +74,7 @@ def main():
     out, _ = ssh_exec(client, "test -f /root/music-bot/.env && echo ENV_EXISTS || echo NO_ENV")
     if "NO_ENV" in out:
         print("\n⚠️  No .env file found! Copying from deploy template...")
-        ssh_exec(client, "cp /root/music-bot/deploy/.env.vps /root/music-bot/.env 2>/dev/null || cp /root/music-bot/.env.example /root/music-bot/.env")
+        ssh_exec(client, "cp /root/music-bot/deploy/.env.vps.local /root/music-bot/.env 2>/dev/null || cp /root/music-bot/.env.example /root/music-bot/.env")
         print("⚠️  You need to edit /root/music-bot/.env with your tokens!")
     
     # 9. Build and start

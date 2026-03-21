@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import type { JSX } from "preact";
 import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, type Track, type SmartPlaylist } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar, IconHeart, IconMoon, IconDiscover, IconChart } from "./Icons";
+
+type ThemeColors = ReturnType<typeof themeColors>;
 
 interface Props {
   userId: number;
@@ -15,6 +18,92 @@ interface Props {
 const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
+
+function SectionHeading({ icon, title, tc }: { icon: JSX.Element; title: string; tc: ThemeColors }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+      {icon}
+      <span style={{
+        fontSize: 11, fontWeight: 700, color: tc.hintColor,
+        textTransform: "uppercase", letterSpacing: 2,
+      }}>{title}</span>
+    </div>
+  );
+}
+
+function HorizontalCards({
+  tracks,
+  loading,
+  error,
+  tc,
+  onTrackClick,
+}: {
+  tracks: Track[];
+  loading: boolean;
+  error: boolean;
+  tc: ThemeColors;
+  onTrackClick: (track: Track) => void;
+}) {
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: 24 }}>
+        <IconSpinner size={22} color={tc.hintColor} />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
+        Не удалось загрузить
+      </div>
+    );
+  }
+  if (tracks.length === 0) {
+    return (
+      <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
+        Нет данных
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      display: "flex", gap: 12, overflowX: "auto",
+      padding: "8px 0", scrollbarWidth: "none",
+      WebkitOverflowScrolling: "touch",
+    }}>
+      {tracks.map(t => (
+        <div key={t.video_id} onClick={() => onTrackClick(t)} style={{
+          minWidth: 130, maxWidth: 130, cursor: "pointer",
+          borderRadius: 16, overflow: "hidden",
+          background: tc.cardBg,
+          border: tc.cardBorder,
+          transition: "transform 0.15s ease",
+        }}>
+          <div style={{
+            width: 130, height: 130, overflow: "hidden",
+            background: tc.coverPlaceholderBg,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {t.cover_url
+              ? <img src={t.cover_url} alt="" style={{ width: 130, height: 130, objectFit: "cover", display: "block" }} />
+              : <IconMusicNote size={32} color={tc.hintColor} />
+            }
+          </div>
+          <div style={{ padding: "8px 10px" }}>
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: tc.textColor,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>{t.title}</div>
+            <div style={{
+              fontSize: 10, color: tc.hintColor,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>{t.artist}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function ForYouView({
   userId,
@@ -176,80 +265,6 @@ export function ForYouView({
       onPlayTrack(tracks[0]);
     }
   }, [onPlayAll, onPlayTrack]);
-
-  // --- Section heading ---
-  const SectionHeading = ({ icon, title }: { icon: preact.ComponentChild; title: string }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-      {icon}
-      <span style={{
-        fontSize: 11, fontWeight: 700, color: tc.hintColor,
-        textTransform: "uppercase", letterSpacing: 2,
-      }}>{title}</span>
-    </div>
-  );
-
-  // --- Horizontal card scroller ---
-  const HorizontalCards = ({ tracks, loading, error }: { tracks: Track[]; loading: boolean; error: boolean }) => {
-    if (loading) {
-      return (
-        <div style={{ textAlign: "center", padding: 24 }}>
-          <IconSpinner size={22} color={tc.hintColor} />
-        </div>
-      );
-    }
-    if (error) {
-      return (
-        <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
-          Не удалось загрузить
-        </div>
-      );
-    }
-    if (tracks.length === 0) {
-      return (
-        <div style={{ textAlign: "center", color: tc.hintColor, padding: 20, fontSize: 12 }}>
-          Нет данных
-        </div>
-      );
-    }
-    return (
-      <div style={{
-        display: "flex", gap: 12, overflowX: "auto",
-        padding: "8px 0", scrollbarWidth: "none",
-        WebkitOverflowScrolling: "touch",
-      }}>
-        {tracks.map(t => (
-          <div key={t.video_id} onClick={() => handlePlayTrack(t)} style={{
-            minWidth: 130, maxWidth: 130, cursor: "pointer",
-            borderRadius: 16, overflow: "hidden",
-            background: tc.cardBg,
-            border: tc.cardBorder,
-            transition: "transform 0.15s ease",
-          }}>
-            <div style={{
-              width: 130, height: 130, overflow: "hidden",
-              background: tc.coverPlaceholderBg,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              {t.cover_url
-                ? <img src={t.cover_url} alt="" style={{ width: 130, height: 130, objectFit: "cover", display: "block" }} />
-                : <IconMusicNote size={32} color={tc.hintColor} />
-              }
-            </div>
-            <div style={{ padding: "8px 10px" }}>
-              <div style={{
-                fontSize: 12, fontWeight: 600, color: tc.textColor,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>{t.title}</div>
-              <div style={{
-                fontSize: 10, color: tc.hintColor,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>{t.artist}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
 
   return (
     <div
@@ -414,7 +429,7 @@ export function ForYouView({
         backdropFilter: "blur(16px)",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-          <SectionHeading icon={<IconWave size={16} color={tc.highlight} />} title="Волна" />
+          <SectionHeading icon={<IconWave size={16} color={tc.highlight} />} title="Волна" tc={tc} />
           {waveTracks.length > 0 && (
             <button onClick={() => handlePlayAll(waveTracks)} style={{
               padding: "5px 12px", borderRadius: 12, border: "none",
@@ -427,7 +442,7 @@ export function ForYouView({
             </button>
           )}
         </div>
-        <HorizontalCards tracks={waveTracks} loading={waveLoading} error={waveError} />
+        <HorizontalCards tracks={waveTracks} loading={waveLoading} error={waveError} tc={tc} onTrackClick={handlePlayTrack} />
       </div>
 
       {/* ===== Trending Section ===== */}
@@ -436,7 +451,7 @@ export function ForYouView({
         background: tc.cardBg, border: tc.cardBorder,
         backdropFilter: "blur(16px)",
       }}>
-        <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="В тренде" />
+        <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="В тренде" tc={tc} />
 
         {trendingLoading ? (
           <div style={{ textAlign: "center", padding: 24 }}>
@@ -505,14 +520,14 @@ export function ForYouView({
           background: tc.cardBg, border: tc.cardBorder,
           backdropFilter: "blur(16px)",
         }}>
-          <SectionHeading icon={<IconSimilar size={16} color={tc.highlight} />} title="Похожее" />
+          <SectionHeading icon={<IconSimilar size={16} color={tc.highlight} />} title="Похожее" tc={tc} />
           <div style={{
             fontSize: 13, color: tc.textColor, marginBottom: 10, marginTop: -4,
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>
             Похожее на <span style={{ fontWeight: 600, color: tc.highlight }}>{currentTrack.title}</span>
           </div>
-          <HorizontalCards tracks={similarTracks} loading={similarLoading} error={similarError} />
+          <HorizontalCards tracks={similarTracks} loading={similarLoading} error={similarError} tc={tc} onTrackClick={handlePlayTrack} />
         </div>
       )}
 
@@ -522,7 +537,7 @@ export function ForYouView({
         background: tc.cardBg, border: tc.cardBorder,
         backdropFilter: "blur(16px)",
       }}>
-        <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="AI Плейлист" />
+        <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="AI Плейлист" tc={tc} />
 
         <div style={{ display: "flex", gap: 8, marginBottom: aiTracks.length > 0 || aiError ? 14 : 0 }}>
           <input
@@ -618,7 +633,7 @@ export function ForYouView({
       {/* ===== Smart Playlists Section ===== */}
       {smartPlaylists.length > 0 && (
         <div style={{ marginTop: 24 }}>
-          <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="Smart Playlists" />
+          <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="Smart Playlists" tc={tc} />
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {smartPlaylists.map((sp) => {
               const isExpanded = smartExpanded === sp.id;

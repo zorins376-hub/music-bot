@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 import json
 import secrets
@@ -19,6 +20,7 @@ from bot.services.daily_mix import get_or_build_daily_mix
 from bot.services.share_links import create_share_link, resolve_share_link
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 MAX_PLAYLISTS = 20
 MAX_TRACKS_PER_PLAYLIST = 50
@@ -164,7 +166,7 @@ async def cmd_dj(message: Message) -> None:
         if fav_vibe == "tts_off":
             tts_enabled = False
     except Exception:
-        pass
+        logger.debug("Failed to read fav_vibe for user_id=%s", user.id, exc_info=True)
 
     # Generate and send DJ voice intro
     if tts_enabled:
@@ -179,7 +181,7 @@ async def cmd_dj(message: Message) -> None:
                     caption="🎙 AI DJ",
                 )
         except Exception:
-            pass
+            logger.debug("Failed to send DJ intro for user_id=%s", user.id, exc_info=True)
 
     await send_daily_mix(message, user.id, lang)
 
@@ -207,7 +209,7 @@ async def cmd_dj(message: Message) -> None:
                     )
                     await asyncio.sleep(0.3)
         except Exception:
-            pass
+            logger.debug("Failed to send DJ transition comments for user_id=%s", user.id, exc_info=True)
 
 
 @router.callback_query(lambda c: c.data == "action:mix")
@@ -235,7 +237,7 @@ async def cb_dj(callback: CallbackQuery) -> None:
         if fav_vibe == "tts_off":
             tts_enabled = False
     except Exception:
-        pass
+        logger.debug("Failed to read fav_vibe in callback for user_id=%s", user.id, exc_info=True)
 
     if tts_enabled:
         try:
@@ -249,7 +251,7 @@ async def cb_dj(callback: CallbackQuery) -> None:
                     caption="🎙 AI DJ",
                 )
         except Exception:
-            pass
+            logger.debug("Failed to send DJ intro in callback for user_id=%s", user.id, exc_info=True)
 
     await send_daily_mix(callback.message, user.id, lang)
 
@@ -276,7 +278,7 @@ async def cb_dj(callback: CallbackQuery) -> None:
                     )
                     await asyncio.sleep(0.3)
         except Exception:
-            pass
+            logger.debug("Failed to send DJ transition comments in callback for user_id=%s", user.id, exc_info=True)
 
 
 @router.callback_query(MixCb.filter())

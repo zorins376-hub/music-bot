@@ -93,7 +93,7 @@ def _cleanup(*paths: Path | None) -> None:
             try:
                 p.unlink()
             except Exception:
-                pass
+                logger.debug("Failed to cleanup temp file %s", p, exc_info=True)
 
 
 async def _recognize_and_search(message: Message, file_id: str, suffix: str) -> None:
@@ -159,7 +159,7 @@ async def _recognize_and_search(message: Message, file_id: str, suffix: str) -> 
         try:
             await status.edit_text(t(lang, "shazam_error"))
         except Exception:
-            pass
+            logger.debug("Failed to edit shazam error status for user_id=%s", user.id, exc_info=True)
     finally:
         _cleanup(input_path, wav_path)
 

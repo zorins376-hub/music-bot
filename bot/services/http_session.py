@@ -3,8 +3,11 @@
 VPS-optimized: larger connection pool, keepalive tuning, better timeouts.
 """
 
+import logging
 import aiohttp
 from bot.config import settings
+
+logger = logging.getLogger(__name__)
 
 _session: aiohttp.ClientSession | None = None
 
@@ -16,14 +19,17 @@ def _make_connector():
         if proxy_url.startswith("socks"):
             try:
                 from aiohttp_socks import ProxyConnector
+                logger.info("Using SOCKS5 proxy: %s", proxy_url.split("@")[-1])
                 return ProxyConnector.from_url(
                     proxy_url,
                     limit=settings.HTTP_POOL_CONNECTIONS,
                     keepalive_timeout=settings.HTTP_POOL_KEEPALIVE,
                 )
             except ImportError:
-                pass
+                logger.warning("aiohttp_socks not installed, falling back to direct TCP")
     # VPS-optimized TCP connector
+    logger.debug("Creating TCP connector: pool=%d, keepalive=%ds",
+                 settings.HTTP_POOL_CONNECTIONS, settings.HTTP_POOL_KEEPALIVE)
     return aiohttp.TCPConnector(
         limit=settings.HTTP_POOL_CONNECTIONS,
         limit_per_host=100,  # max connections per single host
@@ -47,6 +53,7 @@ def get_session() -> aiohttp.ClientSession:
     """Return the shared session, creating it lazily if needed."""
     global _session
     if _session is None or _session.closed:
+        logger.info("Creating new shared HTTP session")
         _session = aiohttp.ClientSession(
             connector=_make_connector(),
             timeout=_make_timeout(),
@@ -58,5 +65,6 @@ async def close_session() -> None:
     """Close the shared session (call on shutdown)."""
     global _session
     if _session and not _session.closed:
+        logger.info("Closing shared HTTP session")
         await _session.close()
         _session = None

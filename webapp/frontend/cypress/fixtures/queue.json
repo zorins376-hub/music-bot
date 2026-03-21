@@ -1,0 +1,16 @@
+[
+  {
+    "video_id": "track1",
+    "title": "First Track",
+    "artist": "Artist One",
+    "duration": 200,
+    "duration_fmt": "3:20"
+  },
+  {
+    "video_id": "track2",
+    "title": "Second Track",
+    "artist": "Artist Two",
+    "duration": 180,
+    "duration_fmt": "3:00"
+  }
+]

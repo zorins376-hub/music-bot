@@ -1,0 +1,15 @@
+.git
+node_modules
+webapp/frontend/node_modules
+webapp/frontend/dist
+downloads
+logs
+__pycache__
+*.pyc
+.venv
+.env.local
+debug_out.txt
+cookies_b64.txt
+temp_supa
+supabase-ai
+docs/reports

@@ -1,4 +1,6 @@
 // IndexedDB Offline Cache for audio streams
+import { getInitData } from "./api";
+
 const DB_NAME = "music_cache";
 const DB_VERSION = 1;
 const STORE_NAME = "tracks";
@@ -199,7 +201,7 @@ export async function prefetchTracks(videoIds: string[]): Promise<void> {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+        "X-Telegram-Init-Data": getInitData(),
       },
       body: JSON.stringify({ video_ids: filtered }),
     });

@@ -42,8 +42,8 @@ fi
 
 echo "=== [5/6] Creating .env file ==="
 if [ ! -f "$REPO_DIR/.env" ]; then
-    cp "$REPO_DIR/deploy/.env.production" "$REPO_DIR/.env"
-    echo "Created .env from template — EDIT IT with your tokens!"
+    cp "$REPO_DIR/deploy/.env.production.local" "$REPO_DIR/.env" 2>/dev/null || cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"
+    echo "Created .env from local template/fallback — EDIT IT with your tokens!"
 else
     echo ".env already exists, skipping"
 fi

@@ -3,6 +3,7 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -15,6 +16,17 @@ from bot.utils import fmt_duration as _utils_fmt_duration
 
 logger = logging.getLogger(__name__)
 
+
+class _YtdlpSilentLogger:
+    """Suppress yt-dlp's own stderr output; we handle errors ourselves."""
+    def debug(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+    def info(self, msg): pass
+
+
+_ytdlp_logger = _YtdlpSilentLogger()
+
 # ── Permanent failure cache (age-restricted, removed, etc.) ──────────
 _PERMANENT_FAILURES: dict[str, float] = {}
 _PERM_FAIL_TTL = 86400  # 24 hours
@@ -25,6 +37,18 @@ _PERM_FAIL_PATTERNS = [
     "Video unavailable",
     "has been removed",
     "account associated with this video has been terminated",
+    "Requested format is not available",
+]
+
+_EXPECTED_RESTRICTION_PATTERNS = [
+    "Sign in to confirm your age",
+    "Video unavailable",
+    "not available in your country",
+    "This video is private",
+    "This video is not available",
+    "has been removed",
+    "Requested format is not available",
+    "does not look like a Netscape format cookies file",
 ]
 
 
@@ -51,6 +75,11 @@ def _check_permanent_failure(video_id: str, error: Exception) -> None:
             return
 
 
+def _is_expected_restriction_error(error: Exception) -> bool:
+    msg = str(error)
+    return any(pat in msg for pat in _EXPECTED_RESTRICTION_PATTERNS)
+
+
 # ── Staging helpers (shared by download_manager and providers) ──────────
 
 def stage_path_for(dest: Path, suffix: str = ".part") -> Path:
@@ -73,7 +102,7 @@ def cleanup_staged_files(staged: Path | None) -> None:
     try:
         staged.unlink(missing_ok=True)
     except Exception:
-        pass
+        logger.debug("cleanup_staged_files failed path=%s", staged, exc_info=True)
 
 # Dedicated thread pool for yt-dlp I/O operations
 _ytdl_pool = ThreadPoolExecutor(max_workers=settings.YTDL_WORKERS, thread_name_prefix="ytdl")
@@ -120,14 +149,39 @@ def _base_opts() -> dict:
     # Enable JS runtimes for signature solving
     # Use deno (single static binary) with explicit path for container reliability
     opts["js_runtimes"] = {"deno": {"path": "/usr/local/bin/deno"}, "node": {}}
-    if _COOKIES_PATH.exists():
-        opts["cookiefile"] = str(_COOKIES_PATH)
     # Proxy rotation
     from bot.services.proxy_pool import proxy_pool
     proxy = proxy_pool.get_next()
     if proxy:
         opts["proxy"] = proxy
     return opts
+
+
+def _prepare_cookiefile() -> tuple[str | None, Path | None]:
+    """Create an isolated cookie file copy for a single yt-dlp call.
+
+    Returns (cookie_path, temp_copy_path). If temp_copy_path is not None,
+    caller must remove it in a finally block.
+    """
+    if not _COOKIES_PATH.exists():
+        return None, None
+
+    tid = threading.current_thread().ident or 0
+    temp_cookie = _COOKIES_PATH.parent / f".cookies_t{tid}_{uuid.uuid4().hex}.txt"
+    try:
+        shutil.copy2(_COOKIES_PATH, temp_cookie)
+        return str(temp_cookie), temp_cookie
+    except OSError:
+        return str(_COOKIES_PATH), None
+
+
+def _cleanup_temp_cookie(temp_cookie: Path | None) -> None:
+    if temp_cookie is None:
+        return
+    try:
+        temp_cookie.unlink(missing_ok=True)
+    except Exception:
+        logger.debug("Failed to remove temporary cookie copy %s", temp_cookie, exc_info=True)
 
 # Spotify URL regex
 _SPOTIFY_RE = re.compile(
@@ -175,13 +229,17 @@ def _resolve_youtube_sync(video_id: str) -> dict | None:
     if _is_permanently_failed(video_id):
         return None
     url = f"https://www.youtube.com/watch?v={video_id}"
+    cookiefile, temp_cookie = _prepare_cookiefile()
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
+        "logger": _ytdlp_logger,
         "skip_download": True,
         "socket_timeout": 15,
         **_base_opts(),
     }
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -204,17 +262,24 @@ def _resolve_youtube_sync(video_id: str) -> dict | None:
             }
     except Exception as e:
         _check_permanent_failure(video_id, e)
-        logger.error("YouTube resolve sync error for %s: %s", video_id, e)
+        if _is_expected_restriction_error(e):
+            logger.warning("YouTube resolve unavailable for %s: %s", video_id, e)
+        else:
+            logger.error("YouTube resolve sync error for %s: %s", video_id, e)
         return None
+    finally:
+        _cleanup_temp_cookie(temp_cookie)
 
 
 def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
     if _is_permanently_failed(video_id):
         return None
     url = f"https://www.youtube.com/watch?v={video_id}"
+    cookiefile, temp_cookie = _prepare_cookiefile()
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
+        "logger": _ytdlp_logger,
         "skip_download": True,
         "socket_timeout": 10,
         "format": "bestaudio[ext=m4a]/bestaudio/best",
@@ -222,6 +287,8 @@ def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
         "no_check_certificates": True,
         **_base_opts(),
     }
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -249,8 +316,13 @@ def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
             return best_audio_url
     except Exception as e:
         _check_permanent_failure(video_id, e)
-        logger.error("YouTube audio URL resolve sync error for %s: %s", video_id, e)
+        if _is_expected_restriction_error(e):
+            logger.warning("YouTube audio URL resolve unavailable for %s: %s", video_id, e)
+        else:
+            logger.error("YouTube audio URL resolve sync error for %s: %s", video_id, e)
         return None
+    finally:
+        _cleanup_temp_cookie(temp_cookie)
 
 # Junk to strip from YouTube titles
 _TITLE_JUNK_RE = re.compile(
@@ -345,7 +417,7 @@ def _extract_year(entry: dict) -> str | None:
 def _extract_spotify_meta(url: str) -> str | None:
     """Extract artist — title from Spotify URL via yt-dlp (no API key needed)."""
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "logger": _ytdlp_logger}) as ydl:
             info = ydl.extract_info(url, download=False)
             if info:
                 artist = info.get("artist") or info.get("uploader") or ""
@@ -373,6 +445,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "extract_flat": "in_playlist",
         "quiet": True,
         "no_warnings": True,
+        "logger": _ytdlp_logger,
         "default_search": search_prefix,
         "socket_timeout": 15,
         "ignore_no_formats_error": True,
@@ -470,6 +543,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
         "writethumbnail": True,
         "quiet": True,
         "no_warnings": True,
+        "logger": _ytdlp_logger,
         "socket_timeout": 30,
         "concurrent_fragment_downloads": settings.YTDL_CONCURRENT_FRAGMENTS,
         "progress_hooks": [_hook],
@@ -483,8 +557,11 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
             ydl.download([url])
     except Exception as e:
         _check_permanent_failure(video_id, e)
-        logger.error("Download failed for %s: %s", video_id, e)
-        _list_formats_debug(video_id)
+        if _is_expected_restriction_error(e):
+            logger.warning("Download unavailable for %s: %s", video_id, e)
+        else:
+            logger.error("Download failed for %s: %s", video_id, e)
+            _list_formats_debug(video_id)
         raise
 
     mp3_path = output_dir / f"{file_stem}.mp3"
@@ -530,6 +607,7 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
         "postprocessors": [{"key": "FFmpegMetadata"}],
         "quiet": True,
         "no_warnings": True,
+        "logger": _ytdlp_logger,
         "socket_timeout": 30,
         "concurrent_fragment_downloads": settings.YTDL_CONCURRENT_FRAGMENTS,
         **_base_opts(),
@@ -541,7 +619,11 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:
-        logger.error("Video download failed for %s: %s", video_id, e)
+        _check_permanent_failure(video_id, e)
+        if _is_expected_restriction_error(e):
+            logger.warning("Video download unavailable for %s: %s", video_id, e)
+        else:
+            logger.error("Video download failed for %s: %s", video_id, e)
         raise
 
     mp4_path = output_dir / f"{video_id}_v{quality}.mp4"
@@ -569,4 +651,4 @@ def cleanup_file(path: Path) -> None:
             thumb = path.with_suffix(ext)
             thumb.unlink(missing_ok=True)
     except Exception:
-        pass
+        logger.debug("cleanup_file failed path=%s", path, exc_info=True)

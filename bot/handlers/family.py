@@ -435,7 +435,7 @@ async def handle_family_kick(callback: CallbackQuery) -> None:
     try:
         await callback.bot.send_message(target_id, t("ru", "family_you_were_kicked"))
     except Exception:
-        pass
+        logger.debug("Failed to notify kicked family member user_id=%s", target_id, exc_info=True)
 
 
 # ── Payment handlers ─────────────────────────────────────────────────────

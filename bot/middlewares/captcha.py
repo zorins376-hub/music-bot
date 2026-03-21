@@ -6,12 +6,15 @@ messages/callbacks until the user answers correctly.
 Verified status is stored in the database permanently.
 """
 
+import logging
 import random
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import update
+
+logger = logging.getLogger(__name__)
 
 from bot.db import get_or_create_user
 from bot.i18n import t
@@ -74,7 +77,7 @@ class CaptchaMiddleware(BaseMiddleware):
                 if not await cache.redis.exists(_challenge_key(tg_user.id)):
                     await _send_challenge(event, tg_user.id, db_user.language)
             except Exception:
-                pass
+                logger.debug("captcha start check failed user=%s", tg_user.id, exc_info=True)
             return
 
         # Платёж нельзя блокировать — деньги уже списаны
@@ -92,7 +95,7 @@ class CaptchaMiddleware(BaseMiddleware):
                 )
                 return
         except Exception:
-            pass
+            logger.debug("captcha block check failed user=%s", tg_user.id, exc_info=True)
 
         # Is there a pending challenge?
         try:
@@ -116,12 +119,12 @@ class CaptchaMiddleware(BaseMiddleware):
                     )
                     await session.commit()
             except Exception:
-                pass
+                logger.debug("captcha pass DB update failed user=%s", tg_user.id, exc_info=True)
             try:
                 await cache.redis.delete(_challenge_key(tg_user.id))
                 await cache.redis.delete(_fails_key(tg_user.id))
             except Exception:
-                pass
+                logger.debug("captcha redis cleanup failed user=%s", tg_user.id, exc_info=True)
             await event.answer(t(db_user.language, "captcha_ok"), parse_mode="HTML")
             # Send welcome message to new users
             await event.answer(WELCOME_MESSAGE, parse_mode="HTML")
@@ -147,7 +150,7 @@ class CaptchaMiddleware(BaseMiddleware):
                     )
                     return
             except Exception:
-                pass
+                logger.debug("captcha fail tracking failed user=%s", tg_user.id, exc_info=True)
             await event.answer(t(db_user.language, "captcha_fail"), parse_mode="HTML")
             return
 
@@ -161,7 +164,7 @@ async def _send_challenge(event: Message, user_id: int, lang: str) -> None:
         await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, answer)
         await cache.redis.delete(_fails_key(user_id))
     except Exception:
-        pass
+        logger.debug("captcha challenge redis set failed user=%s", user_id, exc_info=True)
     await event.answer(
         t(lang, "captcha_prompt", a=a, b=b, c=c), parse_mode="HTML"
     )

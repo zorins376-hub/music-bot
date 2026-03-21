@@ -58,7 +58,7 @@ async def _get_redis():
         if r:
             return r
     except Exception:
-        pass
+        logger.debug("_get_redis failed", exc_info=True)
     return None
 
 
@@ -68,7 +68,7 @@ async def _is_done(namespace: str, entity_id: str) -> bool:
         try:
             return await r.sismember(f"crawler:done:{namespace}", entity_id)
         except Exception:
-            pass
+            logger.debug("_is_done redis check failed ns=%s", namespace, exc_info=True)
     return entity_id in _mem_done.get(namespace, set())
 
 
@@ -79,7 +79,7 @@ async def _mark_done(namespace: str, entity_id: str) -> None:
             await r.sadd(f"crawler:done:{namespace}", entity_id)
             return
         except Exception:
-            pass
+            logger.debug("_mark_done redis set failed ns=%s", namespace, exc_info=True)
     _mem_done.setdefault(namespace, set()).add(entity_id)
 
 
@@ -93,7 +93,7 @@ async def _enqueue(namespace: str, entity_id: str) -> None:
             await r.sadd(f"crawler:queue:{namespace}", entity_id)
             return
         except Exception:
-            pass
+            logger.debug("_enqueue redis set failed ns=%s", namespace, exc_info=True)
     q = _mem_queue.setdefault(namespace, [])
     if entity_id not in q:
         q.append(entity_id)
@@ -112,7 +112,7 @@ async def _dequeue_batch(namespace: str, count: int = 10) -> list[str]:
                         batch.append(item)
             return batch
         except Exception:
-            pass
+            logger.debug("_dequeue_batch redis failed ns=%s", namespace, exc_info=True)
     q = _mem_queue.get(namespace, [])
     while q and len(batch) < count:
         item = q.pop(0)
@@ -127,7 +127,7 @@ async def _queue_size(namespace: str) -> int:
         try:
             return await r.scard(f"crawler:queue:{namespace}")
         except Exception:
-            pass
+            logger.debug("_queue_size redis failed ns=%s", namespace, exc_info=True)
     return len(_mem_queue.get(namespace, []))
 
 
@@ -137,7 +137,7 @@ async def _done_count(namespace: str) -> int:
         try:
             return await r.scard(f"crawler:done:{namespace}")
         except Exception:
-            pass
+            logger.debug("_done_count redis failed ns=%s", namespace, exc_info=True)
     return len(_mem_done.get(namespace, set()))
 
 
@@ -290,7 +290,7 @@ async def _crawl_yandex_artist(client, artist_id: str) -> int:
                 if sim_id:
                     await _enqueue("ym:artists", sim_id)
         except Exception:
-            pass
+            logger.debug("yandex similar artists fetch failed artist=%s", artist_id, exc_info=True)
 
     except Exception as e:
         logger.debug("Yandex artist %s crawl error: %s", artist_id, e)
@@ -362,7 +362,7 @@ async def deep_crawl_spotify() -> int:
                 if offset > 200:  # Spotify typically has <200 categories
                     break
         except Exception:
-            pass
+            logger.debug("spotify categories discovery failed", exc_info=True)
 
         return tracks, discovered_artists
 
@@ -419,10 +419,10 @@ async def deep_crawl_spotify() -> int:
                     if ra_id:
                         new_artists.append(ra_id)
             except Exception:
-                pass
+                logger.debug("spotify related artists fetch failed", exc_info=True)
 
         except Exception:
-            pass
+            logger.debug("spotify artist crawl failed artist=%s", artist_id, exc_info=True)
 
         return tracks, new_artists
 

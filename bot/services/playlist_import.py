@@ -387,7 +387,7 @@ async def import_playlist_tracks(
                 if asyncio.iscoroutine(result):
                     await result
             except Exception:
-                pass
+                logger.debug("import progress callback failed", exc_info=True)
 
         await asyncio.sleep(0.2)
 

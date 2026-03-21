@@ -117,7 +117,7 @@ async def _safe_edit(msg, text: str) -> None:
     try:
         await msg.edit_text(text)
     except Exception:
-        pass
+        logger.debug("safe_edit failed", exc_info=True)
 
 
 def _download_lock_key(user_id: int, track_id: str) -> str:
@@ -143,7 +143,7 @@ async def _release_download_lock(user_id: int, track_id: str) -> None:
         key = _download_lock_key(user_id, track_id)
         await cache.redis.delete(key)
     except Exception:
-        pass
+        logger.debug("release_download_lock failed user=%s", user_id, exc_info=True)
 
 
 def _smart_bitrate(source: str | None, duration: int | None, default_br: int) -> int:
@@ -182,7 +182,7 @@ async def _schedule_group_cleanup(bot, session_id: str) -> None:
             try:
                 await bot.delete_message(info["chat_id"], mid)
             except Exception:
-                pass
+                logger.debug("group cleanup delete msg=%s failed", mid, exc_info=True)
 
 
 async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> None:
@@ -192,7 +192,7 @@ async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> N
     try:
         await results_msg.delete()
     except Exception:
-        pass
+        logger.debug("cleanup group search results delete failed", exc_info=True)
     if not info:
         return
     # Delete the original user message
@@ -200,7 +200,7 @@ async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> N
         try:
             await bot.delete_message(info["chat_id"], info["user_msg_id"])
         except Exception:
-            pass
+            logger.debug("cleanup group user msg delete failed", exc_info=True)
 
 
 # TrackCallback, FeedbackCallback, AddToPlCb imported from bot.callbacks
@@ -656,7 +656,7 @@ async def _delete_msgs(bot, chat_id: int, msg_ids: list[int]) -> None:
             try:
                 await bot.delete_message(chat_id, mid)
             except Exception:
-                pass
+                logger.debug("delete_msgs mid=%s failed", mid, exc_info=True)
 
 
 # fmt_duration imported from bot.utils
@@ -1021,7 +1021,7 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
             if u_dl:
                 await check_referral_activation(user_id, u_dl.request_count)
     except Exception:
-        pass
+        logger.debug("check_referral_activation failed user=%s", user_id, exc_info=True)
     # Auto-update user taste profile every 10 listens
     try:
         from bot.models.base import async_session as _async_session
@@ -1036,13 +1036,13 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
                     try:
                         await supabase_ai.update_profile(user_id)
                     except Exception:
-                        pass
+                        logger.debug("supabase_ai.update_profile failed user=%s", user_id, exc_info=True)
                 else:
                     from recommender.ai_dj import update_user_profile
                     try:
                         await update_user_profile(user_id)
                     except Exception:
-                        pass
+                        logger.debug("update_user_profile failed user=%s", user_id, exc_info=True)
     except Exception as e:
         logger.warning("_post_download: profile update failed: %s", e)
     return track.id
@@ -1161,7 +1161,7 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
             from bot.services.leaderboard import add_xp, XP_SHARE
             await add_xp(user.id, XP_SHARE)
         except Exception:
-            pass
+            logger.debug("add_xp share failed user=%s", user.id, exc_info=True)
         bot_me = await callback.bot.me()
         link = f"https://t.me/{bot_me.username}?start=tr_{share_id}"
         await callback.answer()
@@ -1456,7 +1456,7 @@ async def handle_similar(callback: CallbackQuery, callback_data: SimilarCb) -> N
             ym = await search_yandex(query, limit=5)
             results.extend(ym)
         except Exception:
-            pass
+            logger.debug("search_yandex fallback failed query=%s", query, exc_info=True)
 
     if not results:
         await callback.message.answer(t(lang, "similar_not_found"))

@@ -165,7 +165,7 @@ async def _send_release_radar(bot) -> None:
             try:
                 await cache.store_search(session_id, notify_tracks)
             except Exception:
-                pass
+                logger.debug("radar store_search failed", exc_info=True)
 
             lines.append("")
             lines.append(t(lang, "radar_notify_footer"))
@@ -221,7 +221,7 @@ async def _send_release_radar(bot) -> None:
                 sent_count += 1
                 await asyncio.sleep(0.05)
             except Exception:
-                pass
+                logger.debug("radar send_message failed user=%s", user.id, exc_info=True)
 
         logger.info("Release radar sent to %d users", sent_count)
 

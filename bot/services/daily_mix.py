@@ -1,5 +1,8 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import func, select
 
@@ -35,7 +38,7 @@ async def get_or_build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
             if isinstance(data, list) and data:
                 return data[:limit]
     except Exception:
-        pass
+        logger.debug("daily_mix cache get failed user=%s", user_id, exc_info=True)
 
     tracks = await _load_daily_mix_from_db(user_id, today_date, limit=limit)
     if not tracks:
@@ -49,7 +52,7 @@ async def get_or_build_daily_mix(user_id: int, limit: int = 25) -> list[dict]:
         ttl = max(60, int((next_day - now).total_seconds()))
         await cache.redis.setex(key, ttl, json.dumps(tracks, ensure_ascii=False))
     except Exception:
-        pass
+        logger.debug("daily_mix cache set failed user=%s", user_id, exc_info=True)
 
     return tracks
 

@@ -1,10 +1,100 @@
 const API_BASE = "/api";
 
+// Parse initData from URL hash fragment (fallback if Telegram SDK not loaded)
+function getInitDataFromHash(): string {
+  const hash = window.location.hash;
+  if (!hash.includes("tgWebAppData=")) return "";
+  const match = hash.match(/tgWebAppData=([^&]+)/);
+  if (!match) return "";
+  return decodeURIComponent(match[1]);
+}
+
+// Get initData from Telegram SDK or URL hash
+export function getInitData(): string {
+  // Try Telegram SDK first
+  const sdkData = window.Telegram?.WebApp?.initData;
+  if (sdkData) return sdkData;
+  // Fallback to URL hash parsing
+  return getInitDataFromHash();
+}
+
+// Parse initDataUnsafe from initData string or URL hash
+export function getInitDataUnsafe(): { 
+  user?: { id: number; first_name?: string; username?: string; language_code?: string; is_premium?: boolean };
+  start_param?: string;
+} | undefined {
+  // Try SDK first
+  if (window.Telegram?.WebApp?.initDataUnsafe) {
+    return window.Telegram.WebApp.initDataUnsafe;
+  }
+  // Fallback: parse from initData string
+  const initData = getInitData();
+  if (!initData) return undefined;
+  try {
+    const params = new URLSearchParams(initData);
+    const result: { user?: { id: number; first_name?: string; username?: string; language_code?: string; is_premium?: boolean }; start_param?: string } = {};
+    const userStr = params.get("user");
+    if (userStr) {
+      result.user = JSON.parse(userStr);
+    }
+    const startParam = params.get("start_param");
+    if (startParam) {
+      result.start_param = startParam;
+    }
+    if (result.user || result.start_param) return result;
+  } catch {}
+  return undefined;
+}
+
+// Debug: log Telegram SDK state on first call
+let _debugLogged = false;
 function getHeaders(): Record<string, string> {
+  const initData = getInitData();
+  if (!_debugLogged) {
+    _debugLogged = true;
+    const debugInfo = {
+      telegram: typeof window.Telegram,
+      webApp: typeof window.Telegram?.WebApp,
+      initDataLen: initData.length,
+      initDataUnsafe: window.Telegram?.WebApp?.initDataUnsafe,
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+    };
+    console.log("[TMA_DEBUG]", debugInfo);
+    // Send debug info to server
+    fetch("/api/debug-auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(debugInfo),
+    }).catch(() => {});
+  }
   return {
     "Content-Type": "application/json",
-    "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+    "X-Telegram-Init-Data": initData,
   };
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await response.json().catch(() => ({} as Record<string, unknown>));
+      const msg =
+        (typeof data.detail === "string" && data.detail) ||
+        (typeof data.error === "string" && data.error) ||
+        (typeof data.message === "string" && data.message) ||
+        "";
+      if (msg) return msg;
+    }
+    const text = await response.text().catch(() => "");
+    if (text) return text;
+  } catch {}
+  return fallback;
+}
+
+async function throwApiError(response: Response, fallback: string): Promise<never> {
+  const msg = await readErrorMessage(response, fallback);
+  throw new Error(msg);
 }
 
 // ── Resilient fetch with timeout + retry ────────────────────────────────
@@ -109,10 +199,7 @@ export interface UserProfile {
 
 export async function fetchPlayerState(userId: number): Promise<PlayerState> {
   const r = await fetchWithRetry(`${API_BASE}/player/state/${userId}`, { headers: getHeaders(), retries: 2 });
-  if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(`State ${r.status}: ${text || r.statusText}`);
-  }
+  if (!r.ok) await throwApiError(r, `State ${r.status}: ${r.statusText}`);
   return r.json();
 }
 
@@ -133,22 +220,19 @@ export async function sendAction(action: string, trackId?: string, seekPos?: num
     body: JSON.stringify(body),
     retries: 1,
   });
-  if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(`${r.status}: ${text || r.statusText}`);
-  }
+  if (!r.ok) await throwApiError(r, `${r.status}: ${r.statusText}`);
   return r.json();
 }
 
 export async function fetchPlaylists(userId: number): Promise<Playlist[]> {
   const r = await fetch(`${API_BASE}/playlists/${userId}`, { headers: getHeaders() });
-  if (!r.ok) throw new Error("Failed to fetch playlists");
+  if (!r.ok) await throwApiError(r, "Failed to fetch playlists");
   return r.json();
 }
 
 export async function fetchUserProfile(): Promise<UserProfile> {
   const r = await fetch(`${API_BASE}/user/me`, { headers: getHeaders() });
-  if (!r.ok) throw new Error("Failed to fetch user profile");
+  if (!r.ok) await throwApiError(r, "Failed to fetch user profile");
   return r.json();
 }
 
@@ -158,16 +242,13 @@ export async function updateUserAudioSettings(quality: string): Promise<UserProf
     headers: getHeaders(),
     body: JSON.stringify({ quality }),
   });
-  if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(text || "Failed to update audio settings");
-  }
+  if (!r.ok) await throwApiError(r, "Failed to update audio settings");
   return r.json();
 }
 
 export async function fetchPlaylistTracks(playlistId: number): Promise<Track[]> {
   const r = await fetch(`${API_BASE}/playlist/${playlistId}/tracks`, { headers: getHeaders() });
-  if (!r.ok) throw new Error("Failed to fetch tracks");
+  if (!r.ok) await throwApiError(r, "Failed to fetch tracks");
   return r.json();
 }
 
@@ -176,7 +257,7 @@ export async function playPlaylist(playlistId: number): Promise<PlayerState> {
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to play playlist");
+  if (!r.ok) await throwApiError(r, "Failed to play playlist");
   return r.json();
 }
 
@@ -196,7 +277,7 @@ export async function searchTracks(query: string, limit = 10, signal?: AbortSign
 }
 
 export function getStreamUrl(videoId: string): string {
-  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  const initData = encodeURIComponent(getInitData());
   return `${API_BASE}/stream/${videoId}?token=${initData}`;
 }
 
@@ -205,7 +286,7 @@ export async function toggleFavorite(videoId: string): Promise<boolean> {
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to toggle favorite");
+  if (!r.ok) await throwApiError(r, "Failed to toggle favorite");
   const data = await r.json();
   return data.liked;
 }
@@ -223,7 +304,7 @@ export async function reorderQueue(fromIndex: number, toIndex: number): Promise<
     headers: getHeaders(),
     body: JSON.stringify({ from_index: fromIndex, to_index: toIndex }),
   });
-  if (!r.ok) throw new Error("Failed to reorder");
+  if (!r.ok) await throwApiError(r, "Failed to reorder");
   return r.json();
 }
 
@@ -266,7 +347,7 @@ export async function createPlaylist(name: string): Promise<Playlist> {
     headers: getHeaders(),
     body: JSON.stringify({ name }),
   });
-  if (!r.ok) throw new Error("Failed to create playlist");
+  if (!r.ok) await throwApiError(r, "Failed to create playlist");
   return r.json();
 }
 
@@ -283,7 +364,7 @@ export async function addTrackToPlaylist(playlistId: number, track: Track): Prom
       cover_url: track.cover_url,
     }),
   });
-  if (!r.ok) throw new Error("Failed to add track");
+  if (!r.ok) await throwApiError(r, "Failed to add track");
   return r.json();
 }
 
@@ -317,7 +398,7 @@ export async function ingestEvent(
   listenDuration?: number,
   source: string = "wave",
 ): Promise<void> {
-  fetch(`${API_BASE}/ingest`, {
+  fireAndForget(fetch(`${API_BASE}/ingest`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({
@@ -332,7 +413,7 @@ export async function ingestEvent(
       listen_duration: listenDuration,
       source,
     }),
-  }).catch(() => {}); // fire-and-forget
+  }), "ingestEvent");
 }
 
 export async function sendFeedback(
@@ -340,11 +421,16 @@ export async function sendFeedback(
   sourceId: string,
   context: string = "player",
 ): Promise<void> {
-  fetch(`${API_BASE}/feedback`, {
+  fireAndForget(fetch(`${API_BASE}/feedback`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({ feedback, source_id: sourceId, context }),
-  }).catch(() => {});
+  }), "sendFeedback");
+}
+function fireAndForget(promise: Promise<unknown>, label: string): void {
+  promise.catch((error) => {
+    console.warn(`[fire-and-forget] ${label} failed`, error);
+  });
 }
 
 export async function fetchSimilar(videoId: string, limit = 10): Promise<Track[]> {
@@ -398,7 +484,7 @@ export interface UserStats {
 
 export async function fetchUserStats(userId: number): Promise<UserStats> {
   const r = await fetchWithRetry(`${API_BASE}/stats/${userId}`, { headers: getHeaders(), retries: 1 });
-  if (!r.ok) throw new Error("Failed to fetch stats");
+  if (!r.ok) await throwApiError(r, "Failed to fetch stats");
   return r.json();
 }
 
@@ -421,7 +507,7 @@ export interface LeaderboardData {
 
 export async function fetchLeaderboard(period: "weekly" | "alltime" = "weekly"): Promise<LeaderboardData> {
   const r = await fetchWithRetry(`${API_BASE}/leaderboard/${period}`, { headers: getHeaders(), retries: 1 });
-  if (!r.ok) throw new Error("Failed to fetch leaderboard");
+  if (!r.ok) await throwApiError(r, "Failed to fetch leaderboard");
   return r.json();
 }
 
@@ -443,14 +529,14 @@ export interface ChallengesData {
 
 export async function fetchChallenges(userId: number): Promise<ChallengesData> {
   const r = await fetchWithRetry(`${API_BASE}/challenges/${userId}`, { headers: getHeaders(), retries: 1 });
-  if (!r.ok) throw new Error("Failed to fetch challenges");
+  if (!r.ok) await throwApiError(r, "Failed to fetch challenges");
   return r.json();
 }
 
 // ── Story Cards ─────────────────────────────────────────────────────────
 
 export function getStoryCardUrl(videoId: string): string {
-  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  const initData = encodeURIComponent(getInitData());
   return `${API_BASE}/story-card/${videoId}?token=${initData}`;
 }
 
@@ -481,7 +567,7 @@ export async function startBattle(): Promise<BattleData> {
     headers: getHeaders(),
     retries: 1,
   });
-  if (!r.ok) throw new Error("Failed to start battle");
+  if (!r.ok) await throwApiError(r, "Failed to start battle");
   return r.json();
 }
 
@@ -497,7 +583,7 @@ export async function submitBattleScore(correct: number, total: number): Promise
     headers: getHeaders(),
     body: JSON.stringify({ correct, total }),
   });
-  if (!r.ok) throw new Error("Failed to submit score");
+  if (!r.ok) await throwApiError(r, "Failed to submit score");
   return r.json();
 }
 
@@ -538,7 +624,7 @@ export async function enableCollab(playlistId: number): Promise<{ invite_code: s
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to enable collab");
+  if (!r.ok) await throwApiError(r, "Failed to enable collab");
   return r.json();
 }
 
@@ -547,7 +633,7 @@ export async function joinCollab(code: string): Promise<{ playlist_id: number }>
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to join collab");
+  if (!r.ok) await throwApiError(r, "Failed to join collab");
   return r.json();
 }
 
@@ -558,10 +644,11 @@ export async function fetchCollabInfo(playlistId: number): Promise<CollabInfo> {
 }
 
 export async function disableCollab(playlistId: number): Promise<void> {
-  await fetch(`${API_BASE}/playlist/${playlistId}/collab/disable`, {
+  const r = await fetch(`${API_BASE}/playlist/${playlistId}/collab/disable`, {
     method: "POST",
     headers: getHeaders(),
   });
+  if (!r.ok) await throwApiError(r, "Failed to disable collab");
 }
 
 // ── Radio Mode ───────────────────────────────────────────────────────
@@ -598,12 +685,20 @@ export interface WrappedData {
   streak_days: number;
   member_since: string | null;
   error?: string;
+  detail?: string;
 }
 
 export async function fetchWrapped(): Promise<WrappedData> {
   const r = await fetchWithRetry(`${API_BASE}/wrapped`, { headers: getHeaders(), retries: 1, timeout: 10000 });
-  if (!r.ok) throw new Error("Failed to fetch wrapped");
-  return r.json();
+  const data = await r.json().catch(() => ({} as WrappedData));
+  if (!r.ok) {
+    const msg = (typeof data.detail === "string" && data.detail) || (typeof data.error === "string" && data.error) || "Failed to fetch wrapped";
+    throw new Error(msg);
+  }
+  if (!data.error && typeof data.detail === "string" && data.detail) {
+    data.error = data.detail;
+  }
+  return data;
 }
 
 // ── Smart Playlists (auto-generated) ──────────────────────────────────
@@ -720,13 +815,13 @@ export async function createParty(name = "Party"): Promise<Party> {
     headers: getHeaders(),
     body: JSON.stringify({ name }),
   });
-  if (!r.ok) throw new Error("Failed to create party");
+  if (!r.ok) await throwApiError(r, "Failed to create party");
   return r.json();
 }
 
 export async function fetchParty(code: string): Promise<Party> {
   const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}`, { headers: getHeaders() });
-  if (!r.ok) throw new Error("Party not found");
+  if (!r.ok) await throwApiError(r, "Party not found");
   return r.json();
 }
 
@@ -744,10 +839,7 @@ export async function addPartyTrack(code: string, track: Track): Promise<Party> 
       cover_url: track.cover_url,
     }),
   });
-  if (!r.ok) {
-    const detail = await r.text().catch(() => "");
-    throw new Error(`${r.status}: ${detail}`);
-  }
+  if (!r.ok) await throwApiError(r, `Failed to add party track (${r.status})`);
   return r.json();
 }
 
@@ -763,7 +855,7 @@ export async function skipPartyTrack(code: string): Promise<Party> {
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to skip");
+  if (!r.ok) await throwApiError(r, "Failed to skip");
   return r.json();
 }
 
@@ -779,7 +871,7 @@ export async function playNextPartyTrack(code: string, videoId: string): Promise
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to move track to play next");
+  if (!r.ok) await throwApiError(r, "Failed to move track to play next");
   return r.json();
 }
 
@@ -789,7 +881,7 @@ export async function reorderPartyTrack(code: string, fromPosition: number, toPo
     headers: getHeaders(),
     body: JSON.stringify({ from_position: fromPosition, to_position: toPosition }),
   });
-  if (!r.ok) throw new Error("Failed to reorder party tracks");
+  if (!r.ok) await throwApiError(r, "Failed to reorder party tracks");
   return r.json();
 }
 
@@ -799,7 +891,7 @@ export async function updatePartyMemberRole(code: string, memberUserId: number, 
     headers: getHeaders(),
     body: JSON.stringify({ role }),
   });
-  if (!r.ok) throw new Error("Failed to update member role");
+  if (!r.ok) await throwApiError(r, "Failed to update member role");
   return r.json();
 }
 
@@ -809,7 +901,7 @@ export async function syncPartyPlayback(code: string, action: "play" | "pause" |
     headers: getHeaders(),
     body: JSON.stringify({ action, track_position: trackPosition, seek_position: seekPosition }),
   });
-  if (!r.ok) throw new Error("Failed to sync playback");
+  if (!r.ok) await throwApiError(r, "Failed to sync playback");
   return r.json();
 }
 
@@ -818,7 +910,7 @@ export async function savePartyAsPlaylist(code: string): Promise<Playlist> {
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to save party as playlist");
+  if (!r.ok) await throwApiError(r, "Failed to save party as playlist");
   return r.json();
 }
 
@@ -828,7 +920,7 @@ export async function sendPartyChat(code: string, message: string): Promise<Part
     headers: getHeaders(),
     body: JSON.stringify({ message }),
   });
-  if (!r.ok) throw new Error("Failed to send party chat");
+  if (!r.ok) await throwApiError(r, "Failed to send party chat");
   return r.json();
 }
 
@@ -837,7 +929,7 @@ export async function deletePartyChatMessage(code: string, messageId: number): P
     method: "DELETE",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to delete party chat message");
+  if (!r.ok) await throwApiError(r, "Failed to delete party chat message");
   return r.json();
 }
 
@@ -846,7 +938,7 @@ export async function clearPartyChat(code: string): Promise<Party> {
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to clear party chat");
+  if (!r.ok) await throwApiError(r, "Failed to clear party chat");
   return r.json();
 }
 
@@ -856,7 +948,7 @@ export async function reactToPartyTrack(code: string, emoji: string): Promise<Pa
     headers: getHeaders(),
     body: JSON.stringify({ emoji }),
   });
-  if (!r.ok) throw new Error("Failed to react");
+  if (!r.ok) await throwApiError(r, "Failed to react");
   return r.json();
 }
 
@@ -865,13 +957,13 @@ export async function runPartyAutoDj(code: string, limit = 5): Promise<Party> {
     method: "POST",
     headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to run Auto-DJ");
+  if (!r.ok) await throwApiError(r, "Failed to run Auto-DJ");
   return r.json();
 }
 
 export async function fetchPartyRecap(code: string): Promise<PartyRecap> {
   const r = await fetch(`${API_BASE}/party/${encodeURIComponent(code)}/recap`, { headers: getHeaders() });
-  if (!r.ok) throw new Error("Failed to fetch recap");
+  if (!r.ok) await throwApiError(r, "Failed to fetch recap");
   return r.json();
 }
 
@@ -882,7 +974,7 @@ export async function fetchMyParties(): Promise<Party[]> {
 }
 
 export function partyEventsUrl(code: string): string {
-  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  const initData = encodeURIComponent(getInitData());
   return `${API_BASE}/party/${encodeURIComponent(code)}/events?token=${initData}`;
 }
 
@@ -916,7 +1008,7 @@ export interface Broadcast {
 
 export async function fetchBroadcast(): Promise<Broadcast> {
   const r = await fetchWithRetry(`${API_BASE}/broadcast`, { headers: getHeaders(), retries: 1 });
-  if (!r.ok) throw new Error("Failed to fetch broadcast");
+  if (!r.ok) await throwApiError(r, "Failed to fetch broadcast");
   return r.json();
 }
 
@@ -925,7 +1017,7 @@ export async function startBroadcast(channel = "tequila", limit = 30): Promise<B
     method: "POST", headers: getHeaders(),
     body: JSON.stringify({ channel, limit }),
   });
-  if (!r.ok) throw new Error("Failed to start broadcast");
+  if (!r.ok) await throwApiError(r, "Failed to start broadcast");
   return r.json();
 }
 
@@ -938,7 +1030,7 @@ export async function loadBroadcastChannel(channel: string, limit = 30): Promise
     method: "POST", headers: getHeaders(),
     body: JSON.stringify({ channel, limit }),
   });
-  if (!r.ok) throw new Error("Failed to load channel");
+  if (!r.ok) await throwApiError(r, "Failed to load channel");
   return r.json();
 }
 
@@ -947,7 +1039,7 @@ export async function addBroadcastTrack(track: Track): Promise<Broadcast> {
     method: "POST", headers: getHeaders(),
     body: JSON.stringify(track),
   });
-  if (!r.ok) throw new Error("Failed to add track");
+  if (!r.ok) await throwApiError(r, "Failed to add track");
   return r.json();
 }
 
@@ -962,7 +1054,7 @@ export async function reorderBroadcast(fromPos: number, toPos: number): Promise<
     method: "POST", headers: getHeaders(),
     body: JSON.stringify({ from_position: fromPos, to_position: toPos }),
   });
-  if (!r.ok) throw new Error("Failed to reorder");
+  if (!r.ok) await throwApiError(r, "Failed to reorder");
   return r.json();
 }
 
@@ -970,7 +1062,7 @@ export async function skipBroadcast(): Promise<Broadcast> {
   const r = await fetchWithRetry(`${API_BASE}/broadcast/skip`, {
     method: "POST", headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to skip");
+  if (!r.ok) await throwApiError(r, "Failed to skip");
   return r.json();
 }
 
@@ -981,7 +1073,7 @@ export async function syncBroadcastPlayback(action: string, seekPos = 0, current
     method: "POST", headers: getHeaders(),
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error("Failed to sync playback");
+  if (!r.ok) await throwApiError(r, "Failed to sync playback");
   return r.json();
 }
 
@@ -989,7 +1081,7 @@ export async function advanceBroadcast(): Promise<Broadcast> {
   const r = await fetchWithRetry(`${API_BASE}/broadcast/advance`, {
     method: "POST", headers: getHeaders(),
   });
-  if (!r.ok) throw new Error("Failed to advance");
+  if (!r.ok) await throwApiError(r, "Failed to advance");
   return r.json();
 }
 
@@ -1010,11 +1102,11 @@ export async function importBroadcastChannel(channelRef: string, label?: string)
     method: "POST", headers: getHeaders(),
     body: JSON.stringify({ channel_ref: channelRef, label: label || "" }),
   });
-  if (!r.ok) throw new Error("Failed to import channel");
+  if (!r.ok) await throwApiError(r, "Failed to import channel");
   return r.json();
 }
 
 export function broadcastEventsUrl(): string {
-  const initData = encodeURIComponent(window.Telegram?.WebApp?.initData || "");
+  const initData = encodeURIComponent(getInitData());
   return `${API_BASE}/broadcast/events?token=${initData}`;
 }

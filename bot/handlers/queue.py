@@ -5,6 +5,7 @@ Commands: /queue, /next
 Callback buttons: ⏭ Next, 🔀 Shuffle, ❌ Clear
 """
 import json
+import logging
 import random
 
 from aiogram import Router
@@ -18,6 +19,7 @@ from bot.services.cache import cache
 from bot.utils import fmt_duration
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 _MAX_QUEUE = 50
 _QUEUE_TTL = 7200  # 2 hours
@@ -42,7 +44,7 @@ async def _set_queue(user_id: int, items: list[dict]) -> None:
             json.dumps(items, ensure_ascii=False),
         )
     except Exception:
-        pass
+        logger.debug("Failed to persist queue for user_id=%s", user_id, exc_info=True)
 
 
 async def add_to_queue(user_id: int, track: dict, lang: str = "ru") -> str:

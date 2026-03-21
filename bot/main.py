@@ -1,14 +1,21 @@
 import asyncio
 import logging
+import os
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, ErrorEvent
 
 from bot.config import settings as app_settings
+
+# Initialize structured logging before other imports
+os.environ.setdefault("STRUCTLOG_LAZY_INIT", "1")  # We'll configure manually
+from bot.logging_config import configure_logging, get_logger
+configure_logging()
 
 if app_settings.SENTRY_DSN:
     import sentry_sdk
@@ -37,19 +44,30 @@ from bot.services.cache import cache
 _LOG_DIR = Path("/app/logs") if Path("/app").exists() else Path("logs")
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        TimedRotatingFileHandler(
-            _LOG_DIR / "bot.log", when="D", backupCount=30, encoding="utf-8"
-        ),
-    ],
+# Add file handler for persistent logs in addition to structlog's stdout
+_file_handler = TimedRotatingFileHandler(
+    _LOG_DIR / "bot.log", when="D", backupCount=30, encoding="utf-8"
 )
-logger = logging.getLogger(__name__)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger().addHandler(_file_handler)
+
+logger = get_logger(__name__)
 
 _DL_DIR = Path("/app/downloads") if Path("/app").exists() else Path("downloads")
+
+
+def _fire_task(coro: asyncio.coroutines) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+
+    def _log_task_failure(done: asyncio.Task) -> None:
+        if done.cancelled():
+            return
+        exc = done.exception()
+        if exc:
+            logger.exception("Background task failed", exc_info=exc)
+
+    task.add_done_callback(_log_task_failure)
+    return task
 
 
 def _cleanup_stale_downloads(max_age_sec: int = 3600) -> None:
@@ -66,7 +84,7 @@ def _cleanup_stale_downloads(max_age_sec: int = 3600) -> None:
                     f.unlink()
                     removed += 1
             except Exception:
-                pass
+                logger.debug("cleanup stale download failed file=%s", f, exc_info=True)
     if removed:
         logger.info("Cleaned up %d stale download(s)", removed)
 
@@ -92,7 +110,7 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.proxy_pool import proxy_pool, start_proxy_health_scheduler
     proxy_pool.load_from_config()
     if proxy_pool.size:
-        asyncio.create_task(start_proxy_health_scheduler())
+        _fire_task(start_proxy_health_scheduler())
 
     if app_settings.METRICS_PORT:
         from bot.services.metrics import start_metrics_server
@@ -117,10 +135,6 @@ async def on_startup(bot: Bot) -> None:
     # Chart track prefetcher — downloads all chart tracks to local cache
     from bot.services.chart_prefetcher import start_prefetch_scheduler
     await start_prefetch_scheduler()
-
-    # Deep crawler — runs on separate VPS, not here
-    # from bot.services.deep_crawler import start_deep_crawler
-    # await start_deep_crawler()
 
     # Weekly recap scheduler (Monday 10:00 UTC)
     from bot.services.weekly_recap import start_weekly_recap_scheduler
@@ -188,37 +202,47 @@ async def on_startup(bot: Bot) -> None:
 
 
 async def on_shutdown(bot: Bot) -> None:
-    if app_settings.USE_WEBHOOK:
-        await bot.delete_webhook()
-    await cache.close()
+    async def _do_shutdown():
+        if app_settings.USE_WEBHOOK:
+            await bot.delete_webhook()
+        await cache.close()
 
-    # Close shared aiohttp session
-    from bot.services.http_session import close_session
-    await close_session()
+        # Close shared aiohttp session
+        from bot.services.http_session import close_session
+        await close_session()
 
-    # Close Supabase AI session
-    if app_settings.SUPABASE_AI_ENABLED:
-        from bot.services.supabase_ai import close as close_supabase
-        await close_supabase()
+        # Close Supabase AI session
+        if app_settings.SUPABASE_AI_ENABLED:
+            from bot.services.supabase_ai import close as close_supabase
+            await close_supabase()
 
-    # Close Supabase mirror session
+        # Close Supabase mirror session
+        try:
+            from bot.services.supabase_mirror import close as close_mirror
+            await close_mirror()
+        except Exception:
+            logger.debug("close supabase mirror failed", exc_info=True)
+
+        # Gracefully shutdown thread pools
+        from bot.services.downloader import _ytdl_pool
+        from bot.services.vk_provider import _vk_pool
+        _ytdl_pool.shutdown(wait=False)
+        _vk_pool.shutdown(wait=False)
+
     try:
-        from bot.services.supabase_mirror import close as close_mirror
-        await close_mirror()
-    except Exception:
-        pass
-
-    # Gracefully shutdown thread pools
-    from bot.services.downloader import _ytdl_pool
-    from bot.services.vk_provider import _vk_pool
-    _ytdl_pool.shutdown(wait=False)
-    _vk_pool.shutdown(wait=False)
+        await asyncio.wait_for(_do_shutdown(), timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("Shutdown timed out after 10s — forcing exit")
 
     logger.info("Bot stopped")
 
 
 async def _global_error_handler(event: ErrorEvent) -> bool:
     """Catch-all: log every unhandled handler exception and reply to the user."""
+    if isinstance(event.exception, TelegramBadRequest) and "query is too old" in str(event.exception).lower():
+        logger.warning("Ignoring stale callback query %s", event.update.update_id)
+        return True
+
     logger.exception(
         "Unhandled error on update %s: %s", event.update.update_id, event.exception
     )
@@ -231,7 +255,7 @@ async def _global_error_handler(event: ErrorEvent) -> bool:
                 "\u26a0\ufe0f \u041e\u0448\u0438\u0431\u043a\u0430. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u0441\u043d\u043e\u0432\u0430.", show_alert=True
             )
     except Exception:
-        pass
+        logger.debug("error handler reply failed", exc_info=True)
     return True
 
 
@@ -283,7 +307,7 @@ async def _broadcast_welcome(bot: Bot) -> None:
                         )
                         await session.commit()
                 except Exception:
-                    pass
+                    logger.debug("mark welcome_sent failed user=%s", user_id, exc_info=True)
             # Rate limit: 30 msgs/sec max for Telegram
             await asyncio.sleep(0.05)
 

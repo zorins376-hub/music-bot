@@ -40,7 +40,7 @@ async def _set_cached(cache_key: str, data: bytes) -> None:
         from bot.services.cache import cache
         await cache.redis.set(cache_key, data, ex=_CACHE_TTL)
     except Exception:
-        pass
+        logger.debug("tts cache set failed", exc_info=True)
 
 
 async def _synthesize_edge(text: str, voice: str) -> bytes | None:

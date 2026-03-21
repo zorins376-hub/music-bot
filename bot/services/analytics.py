@@ -21,18 +21,18 @@ async def track_event(user_id: int, event: str, **props) -> None:
     try:
         logger.info("analytics_event %s", json.dumps(payload, ensure_ascii=False))
     except Exception:
-        pass
+        logger.debug("analytics log failed", exc_info=True)
 
     try:
         await _export_event(payload)
     except Exception:
-        pass
+        logger.debug("analytics export failed", exc_info=True)
 
     try:
         await cache.redis.lpush("analytics:events", json.dumps(payload, ensure_ascii=False))
         await cache.redis.ltrim("analytics:events", 0, 9999)
     except Exception:
-        pass
+        logger.debug("analytics redis push failed", exc_info=True)
 
 
 async def _export_event(payload: dict) -> bool:

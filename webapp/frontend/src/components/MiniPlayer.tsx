@@ -56,6 +56,7 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed 
 
   return (
     <div
+      data-no-synth-tap="true"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onClick={onExpand}
@@ -142,6 +143,7 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed 
       {/* Like button */}
       <button
         onClick={handleLike}
+        aria-label={isLiked ? "Remove from favorites" : "Add to favorites"}
         style={{
           background: "none",
           border: "none",
@@ -167,6 +169,7 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed 
           haptic("medium");
           onAction(state.is_playing ? "pause" : "play");
         }}
+        aria-label={state.is_playing ? "Pause" : "Play"}
         style={{
           background: isTequila ? "linear-gradient(135deg, #ff6d00, #ffa726)" : accentColor,
           border: "none",
@@ -196,6 +199,7 @@ export function MiniPlayer({ state, accentColor, themeId = "blackroom", elapsed 
           haptic("light");
           onAction("next");
         }}
+        aria-label="Next track"
         style={{
           background: "none",
           border: "none",

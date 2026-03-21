@@ -13,7 +13,7 @@ class DailyMix(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     mix_date: Mapped[date] = mapped_column(Date, index=True)
     title: Mapped[str] = mapped_column(String(120), default="Daily Mix")
     source: Mapped[str] = mapped_column(String(20), default="daily_mix")
@@ -32,7 +32,7 @@ class DailyMixTrack(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     mix_id: Mapped[int] = mapped_column(Integer, ForeignKey("daily_mixes.id", ondelete="CASCADE"), index=True)
-    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracks.id"), index=True)
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), index=True)
     position: Mapped[int] = mapped_column(Integer)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

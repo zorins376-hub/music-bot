@@ -1,27 +1,32 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import type { JSX } from "preact";
+import { lazy, Suspense } from "preact/compat";
 import { Player } from "./components/Player";
 import { TrackList } from "./components/TrackList";
-import { PlaylistView } from "./components/PlaylistView";
-import { PartyView } from "./components/PartyView";
-import { ChartsView } from "./components/ChartsView";
 import { SearchBar } from "./components/SearchBar";
-import { LyricsView } from "./components/LyricsView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { SpectrumVisualizer } from "./components/SpectrumVisualizer";
 import { IconCrown, IconShield, IconMoon, IconLime, IconSunrise, IconMusicNote, IconMusic, IconPlaySmall, IconDiamond, IconSearch, IconSpectrum, IconChart, IconPlus, IconSpinner, IconParty, IconRocket, IconHeadphones, IconHome, IconChat, IconRobot, IconFire, IconTV, IconStage, IconClipboard, IconLink, IconBell, IconMic, IconDiscover, IconUser, IconStar, IconBroadcast, IconThemeBlackroom, IconThemeTequila, IconThemeNeon, IconThemeMidnight, IconThemeEmerald } from "./components/Icons";
-import { ForYouView } from "./components/ForYouView";
-import { ProfileView } from "./components/ProfileView";
-import { LeaderboardView } from "./components/LeaderboardView";
-import { BattleView } from "./components/BattleView";
-import { ActivityFeedView } from "./components/ActivityFeedView";
-import { WrappedView } from "./components/WrappedView";
-import { SleepSoundsView } from "./components/SleepSoundsView";
-import { LiveRadioView } from "./components/LiveRadioView";
 import { ActionSheet } from "./components/ActionSheet";
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { ViewErrorBoundary } from "./components/ViewErrorBoundary";
+
+// Lazy-loaded views (code-split into separate chunks)
+const PlaylistView = lazy(() => import("./components/PlaylistView").then(m => ({ default: m.PlaylistView })));
+const PartyView = lazy(() => import("./components/PartyView").then(m => ({ default: m.PartyView })));
+const ChartsView = lazy(() => import("./components/ChartsView").then(m => ({ default: m.ChartsView })));
+const LyricsView = lazy(() => import("./components/LyricsView").then(m => ({ default: m.LyricsView })));
+const ForYouView = lazy(() => import("./components/ForYouView").then(m => ({ default: m.ForYouView })));
+const ProfileView = lazy(() => import("./components/ProfileView").then(m => ({ default: m.ProfileView })));
+const LeaderboardView = lazy(() => import("./components/LeaderboardView").then(m => ({ default: m.LeaderboardView })));
+const BattleView = lazy(() => import("./components/BattleView").then(m => ({ default: m.BattleView })));
+const ActivityFeedView = lazy(() => import("./components/ActivityFeedView").then(m => ({ default: m.ActivityFeedView })));
+const WrappedView = lazy(() => import("./components/WrappedView").then(m => ({ default: m.WrappedView })));
+const SleepSoundsView = lazy(() => import("./components/SleepSoundsView").then(m => ({ default: m.SleepSoundsView })));
+const LiveRadioView = lazy(() => import("./components/LiveRadioView").then(m => ({ default: m.LiveRadioView })));
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractTopColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
-import { themes, getThemeById, getSavedThemeId, saveThemeId, type Theme } from "./themes";
+import { themes, getThemeById, getSavedThemeId, saveThemeId, applyThemeCSSVars, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
 
 type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep" | "broadcast";
@@ -91,9 +96,9 @@ function dbToGain(value: number): number {
 }
 
 // ── Luxury Audio: WaveShaper curve generators ──
-const LINEAR_CURVE = new Float32Array([-1, 1]) as Float32Array<ArrayBuffer>;
+const LINEAR_CURVE = new Float32Array([-1, 1]);
 
-function createTapeCurve(samples = 8192): Float32Array<ArrayBuffer> {
+function createTapeCurve(samples = 8192): Float32Array {
   const curve = new Float32Array(samples);
   const k = 0.8; // gentler saturation — subtle warmth without harsh harmonics
   const norm = Math.tanh(k);
@@ -101,10 +106,10 @@ function createTapeCurve(samples = 8192): Float32Array<ArrayBuffer> {
     const x = (2 * i) / (samples - 1) - 1;
     curve[i] = Math.tanh(k * x) / norm;
   }
-  return curve as Float32Array<ArrayBuffer>;
+  return curve;
 }
 
-function createSoftClipCurve(samples = 8192): Float32Array<ArrayBuffer> {
+function createSoftClipCurve(samples = 8192): Float32Array {
   const curve = new Float32Array(samples);
   const ceil = 0.933; // -0.6 dBFS — extra headroom for inter-sample peaks
   for (let i = 0; i < samples; i++) {
@@ -116,7 +121,7 @@ function createSoftClipCurve(samples = 8192): Float32Array<ArrayBuffer> {
       curve[i] = (x > 0 ? 1 : -1) * (ceil + (1 - ceil) * (over / (1 + over)));
     }
   }
-  return curve as Float32Array<ArrayBuffer>;
+  return curve;
 }
 
 // ── Virtual Room: algorithmically generated impulse responses ──
@@ -159,7 +164,8 @@ function getSavedEqPreset(): EqPreset {
 }
 
 export function App() {
-  const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  const initDataUnsafe = getInitDataUnsafe();
+  const user = initDataUnsafe?.user;
   const userId = user?.id ?? 0;
 
   const [view, setView] = useState<View>("foryou");
@@ -190,6 +196,9 @@ export function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [eqPreset, setEqPreset] = useState<EqPreset>(() => getSavedEqPreset());
   const navCarouselRef = useRef<HTMLElement | null>(null);
+  const navTouchStartXRef = useRef(0);
+  const navTouchStartYRef = useRef(0);
+  const navTouchMovedRef = useRef(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -248,6 +257,7 @@ export function App() {
   const subsonicFilterRef = useRef<BiquadFilterNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
   const loudnessGainRef = useRef<GainNode | null>(null);
+  const bufferingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tapeWarmthRef = useRef<WaveShaperNode | null>(null);
   const airBandRef = useRef<BiquadFilterNode | null>(null);
   const softClipRef = useRef<WaveShaperNode | null>(null);
@@ -282,6 +292,35 @@ export function App() {
     const delta = (buttonRect.left - navRect.left) - (navRect.width / 2 - buttonRect.width / 2);
     nav.scrollTo({ left: nav.scrollLeft + delta, behavior: "smooth" });
   }, [view]);
+
+  const activateView = useCallback((nextView: View) => {
+    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {}
+    setView(nextView);
+  }, []);
+
+  const handleNavTouchStart = useCallback((event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    navTouchStartXRef.current = touch.clientX;
+    navTouchStartYRef.current = touch.clientY;
+    navTouchMovedRef.current = false;
+  }, []);
+
+  const handleNavTouchMove = useCallback((event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    const deltaX = Math.abs(touch.clientX - navTouchStartXRef.current);
+    const deltaY = Math.abs(touch.clientY - navTouchStartYRef.current);
+    if (deltaX > 8 || deltaY > 8) {
+      navTouchMovedRef.current = true;
+    }
+  }, []);
+
+  const handleNavTouchEnd = useCallback(() => {
+    window.setTimeout(() => {
+      navTouchMovedRef.current = false;
+    }, 0);
+  }, []);
   const loudnessTimerRef = useRef<number | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -353,11 +392,36 @@ export function App() {
     audio.addEventListener("ratechange", updatePositionState);
 
     // Buffering detection
-    audio.addEventListener("waiting", () => setBuffering(true));
-    audio.addEventListener("playing", () => setBuffering(false));
-    audio.addEventListener("canplay", () => setBuffering(false));
+    audio.addEventListener("waiting", () => {
+      setBuffering(true);
+      // Auto-reset buffering state after 10s to prevent infinite spinner
+      if (bufferingTimeoutRef.current) clearTimeout(bufferingTimeoutRef.current);
+      bufferingTimeoutRef.current = setTimeout(() => {
+        console.warn("Buffering timeout — forcing spinner to stop");
+        setBuffering(false);
+        bufferingTimeoutRef.current = null;
+      }, 10000);
+    });
+    audio.addEventListener("playing", () => {
+      setBuffering(false);
+      if (bufferingTimeoutRef.current) {
+        clearTimeout(bufferingTimeoutRef.current);
+        bufferingTimeoutRef.current = null;
+      }
+    });
+    audio.addEventListener("canplay", () => {
+      setBuffering(false);
+      if (bufferingTimeoutRef.current) {
+        clearTimeout(bufferingTimeoutRef.current);
+        bufferingTimeoutRef.current = null;
+      }
+    });
     audio.addEventListener("error", () => {
       setBuffering(false);
+      if (bufferingTimeoutRef.current) {
+        clearTimeout(bufferingTimeoutRef.current);
+        bufferingTimeoutRef.current = null;
+      }
       // Only auto-skip if user was actually playing — prevents ghost state on cold start
       const s = stateRef.current;
       if (s.is_playing && s.current_track) {
@@ -408,14 +472,15 @@ export function App() {
       const t = Math.floor(audio.currentTime);
       elapsedRef.current = t;
       setElapsed(t);
+      const s = stateRef.current;
 
       // Aggressive pre-fetch: start caching next tracks at 70% playback
       if (audio.duration && audio.currentTime / audio.duration >= 0.7) {
         const nextIds: string[] = [];
         for (let i = 1; i <= 2; i++) {
-          const idx = (state.position + i) % state.queue.length;
-          if (state.queue.length > 1 && state.queue[idx]?.video_id) {
-            nextIds.push(state.queue[idx].video_id);
+          const idx = (s.position + i) % s.queue.length;
+          if (s.queue.length > 1 && s.queue[idx]?.video_id) {
+            nextIds.push(s.queue[idx].video_id);
           }
         }
         if (nextIds.length) prefetchTracks(nextIds);
@@ -425,9 +490,8 @@ export function App() {
       // Works in party mode (always 5s) OR regular mode (user-configurable duration)
       const remaining = audio.duration ? audio.duration - audio.currentTime : Infinity;
       const cfDur = viewRef.current === "party" ? 5 : crossfadeDurationRef.current;
-      const shouldCrossfade = stateRef.current.queue.length > 1 && cfDur > 0;
+      const shouldCrossfade = s.queue.length > 1 && cfDur > 0;
       if (shouldCrossfade && remaining <= cfDur && remaining > 0.5 && audio.duration > cfDur * 2 && !djCrossfadeActiveRef.current) {
-        const s = stateRef.current;
         const nextIdx = (s.position + 1) % s.queue.length;
         const nextTrack = s.queue[nextIdx];
         if (nextTrack && nextTrack.video_id !== s.current_track?.video_id) {
@@ -471,9 +535,9 @@ export function App() {
 
       // Gapless: preload next track 30 seconds before end
       if (audio.duration && audio.duration - audio.currentTime < 30 && audio.duration > 35) {
-        const nextIdx = (state.position + 1) % state.queue.length;
-        if (state.queue.length > 1 && preloadRef.current) {
-          const nextTrack = state.queue[nextIdx];
+        const nextIdx = (s.position + 1) % s.queue.length;
+        if (s.queue.length > 1 && preloadRef.current) {
+          const nextTrack = s.queue[nextIdx];
           const nextSrc = getStreamUrl(nextTrack.video_id);
           if (preloadRef.current.src !== nextSrc) {
             preloadRef.current.src = nextSrc;
@@ -581,7 +645,7 @@ export function App() {
 
       // ── Tape Saturation (WaveShaperNode) — warm analog character ──
       const tapeSat = ctx.createWaveShaper();
-      tapeSat.curve = LINEAR_CURVE as Float32Array<ArrayBuffer>;
+      tapeSat.curve = LINEAR_CURVE;
       tapeSat.oversample = "2x"; // oversample prevents aliasing crackle from waveshaper
       tapeWarmthRef.current = tapeSat;
 
@@ -618,7 +682,7 @@ export function App() {
 
       // ── Soft Clipper — true peak limiter at -0.5dBFS ──
       const clipper = ctx.createWaveShaper();
-      clipper.curve = LINEAR_CURVE as Float32Array<ArrayBuffer>;
+      clipper.curve = LINEAR_CURVE;
       clipper.oversample = "2x";
       softClipRef.current = clipper;
 
@@ -831,9 +895,9 @@ export function App() {
           pannerRef.current.pan.setValueAtTime(panValue, t2);
         }
         // Restore luxury audio states
-        if (tapeWarmthRef.current) tapeWarmthRef.current.curve = (tapeWarmth ? createTapeCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
+        if (tapeWarmthRef.current) tapeWarmthRef.current.curve = tapeWarmth ? createTapeCurve() : LINEAR_CURVE;
         if (airBandRef.current) airBandRef.current.gain.value = airBand ? 2 : 0;
-        if (softClipRef.current) softClipRef.current.curve = (softClip ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
+        if (softClipRef.current) softClipRef.current.curve = softClip ? createSoftClipCurve() : LINEAR_CURVE;
         // Night mode, reverb, karaoke nodes stay connected and retain their params through bypass
       }
       const t2 = ctx.currentTime;
@@ -932,6 +996,7 @@ export function App() {
     const loadAudio = async () => {
       if (currentTrackIdRef.current === track.video_id) return;
       currentTrackIdRef.current = track.video_id;
+      if (bufferingTimeoutRef.current) clearTimeout(bufferingTimeoutRef.current);
       setBuffering(true);
 
       // Resume AudioContext if suspended (required on mobile after user gesture)
@@ -1084,6 +1149,7 @@ export function App() {
   useEffect(() => {
     document.body.style.background = theme.bgColor;
     document.body.style.color = theme.textColor;
+    applyThemeCSSVars(theme);
   }, [theme]);
 
   const switchTheme = useCallback(() => {
@@ -1124,6 +1190,9 @@ export function App() {
   }, [state.current_track?.cover_url, theme]);
 
   useEffect(() => {
+    // Notify Telegram that WebApp is ready & expand to full height
+    try { window.Telegram?.WebApp?.ready?.(); window.Telegram?.WebApp?.expand?.(); } catch {}
+
     if (userId) {
       fetchUserProfile().then(setUserProfile).catch(() => {});
       fetchPlayerState(userId).then((s) => {
@@ -1134,7 +1203,7 @@ export function App() {
       }).catch(() => {});
     }
     // Handle deep link from share: startapp=play_VIDEOID
-    const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    const startParam = initDataUnsafe?.start_param;
     if (startParam && startParam.startsWith("play_")) {
       const videoId = startParam.slice(5);
       if (videoId) {
@@ -1264,6 +1333,7 @@ export function App() {
         if (act === "play") {
           // Show buffering spinner immediately if switching to a new track
           if (trackId && trackId !== currentTrackIdRef.current) {
+            if (bufferingTimeoutRef.current) clearTimeout(bufferingTimeoutRef.current);
             setBuffering(true);
           }
           ensureEqualizerGraph();
@@ -1372,7 +1442,7 @@ export function App() {
   const handleTapeWarmth = useCallback((on: boolean) => {
     setTapeWarmth(on);
     const node = tapeWarmthRef.current;
-    if (node) node.curve = (on ? createTapeCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
+    if (node) node.curve = on ? createTapeCurve() : LINEAR_CURVE;
   }, []);
 
   const handleAirBand = useCallback((on: boolean) => {
@@ -1404,7 +1474,7 @@ export function App() {
   const handleSoftClip = useCallback((on: boolean) => {
     setSoftClip(on);
     const node = softClipRef.current;
-    if (node) node.curve = (on ? createSoftClipCurve() : LINEAR_CURVE) as Float32Array<ArrayBuffer>;
+    if (node) node.curve = on ? createSoftClipCurve() : LINEAR_CURVE;
   }, []);
 
   // ── Night Mode toggle ──
@@ -1699,6 +1769,7 @@ export function App() {
       <div style={{
         position: "relative",
         marginBottom: isTequila ? 4 : 12,
+        zIndex: 10,
       }}>
         <div style={{
           pointerEvents: "none",
@@ -1707,7 +1778,7 @@ export function App() {
           top: 0,
           bottom: 0,
           width: 22,
-          zIndex: 2,
+          zIndex: 1,
           borderRadius: 22,
           background: `linear-gradient(90deg, ${theme.bgColor}, transparent)`,
         }} />
@@ -1718,7 +1789,7 @@ export function App() {
           top: 0,
           bottom: 0,
           width: 22,
-          zIndex: 2,
+          zIndex: 1,
           borderRadius: 22,
           background: `linear-gradient(270deg, ${theme.bgColor}, transparent)`,
         }} />
@@ -1750,6 +1821,9 @@ export function App() {
             : `0 10px 30px rgba(0,0,0,0.22), inset 0 1px 0 ${theme.accentAlpha}`,
           maxWidth: "100%",
           margin: "0 auto",
+          position: "relative",
+          zIndex: 2,
+          touchAction: "pan-x",
         }}>
           {(["player", "foryou", "playlists", "party", "broadcast", "charts", "leaderboard", "battle", "feed", "wrapped", "sleep", "search", "profile"] as View[]).map((v) => {
             const isActive = view === v;
@@ -1759,7 +1833,7 @@ export function App() {
                 key={v}
                 data-view={v}
                 className={`luxury-tab${isActive ? " is-active" : ""}${isParty ? " is-party" : ""}`}
-                onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView(v); }}
+                onClick={() => activateView(v)}
                 style={{
                   padding: isTequila ? "9px 14px" : "9px 15px",
                   borderRadius: 18,
@@ -1932,6 +2006,7 @@ export function App() {
 
       {/* Views */}
       {view === "player" && (
+        <ViewErrorBoundary viewName="Player" fallbackColor={theme.hintColor}>
         <>
           <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
 
@@ -2055,11 +2130,13 @@ export function App() {
             />
           )}
         </>
+        </ViewErrorBoundary>
       )}
 
-      {view === "playlists" && <PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayPlaylist={async (playlistId) => { setBuffering(true); try { const s = await playPlaylist(playlistId); setState(s); setView("player"); } catch (e) { console.error("Play playlist error:", e); } }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} />}
+      {view === "playlists" && <Suspense fallback={null}><ViewErrorBoundary viewName="Playlists" fallbackColor={theme.hintColor}><PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayPlaylist={async (playlistId) => { setBuffering(true); try { const s = await playPlaylist(playlistId); setState(s); setView("player"); } catch (e) { console.error("Play playlist error:", e); } }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} /></ViewErrorBoundary></Suspense>}
 
       {view === "party" && (
+        <Suspense fallback={null}><ViewErrorBoundary viewName="Party" fallbackColor={theme.hintColor}>
         userProfile?.is_admin ? (
           <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} onPlaybackAction={(playbackAction, track, position) => {
             if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
@@ -2297,30 +2374,31 @@ export function App() {
             </div>
           </div>
         )
+        </ViewErrorBoundary></Suspense>
       )}
 
-      {view === "foryou" && <ForYouView userId={userId} currentTrack={state.current_track} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "foryou" && <Suspense fallback={null}><ViewErrorBoundary viewName="For You" fallbackColor={theme.hintColor}><ForYouView userId={userId} currentTrack={state.current_track} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); setView("player"); }} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
 
-      {view === "charts" && <ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "charts" && <Suspense fallback={null}><ViewErrorBoundary viewName="Charts" fallbackColor={theme.hintColor}><ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
 
       {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
 
-      {view === "leaderboard" && <LeaderboardView userId={userId} accentColor={accentColor} themeId={theme.id} />}
+      {view === "leaderboard" && <Suspense fallback={null}><LeaderboardView userId={userId} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
-      {view === "battle" && <BattleView userId={userId} accentColor={accentColor} themeId={theme.id} />}
+      {view === "battle" && <Suspense fallback={null}><BattleView userId={userId} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
-      {view === "feed" && <ActivityFeedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
+      {view === "feed" && <Suspense fallback={null}><ActivityFeedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
-      {view === "wrapped" && <WrappedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
+      {view === "wrapped" && <Suspense fallback={null}><WrappedView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
-      {view === "sleep" && <SleepSoundsView accentColor={accentColor} themeId={theme.id} />}
+      {view === "sleep" && <Suspense fallback={null}><SleepSoundsView accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
-      {view === "broadcast" && <LiveRadioView userId={userId} onPlayTrack={handleBroadcastPlayTrack} accentColor={accentColor} themeId={theme.id} />}
+      {view === "broadcast" && <Suspense fallback={null}><ViewErrorBoundary viewName="Broadcast" fallbackColor={theme.hintColor}><LiveRadioView userId={userId} onPlayTrack={handleBroadcastPlayTrack} isAdmin={Boolean(userProfile?.is_admin)} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
 
-      {view === "profile" && <ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
+      {view === "profile" && <Suspense fallback={null}><ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
       {view === "lyrics" && lyricsTrackId && (
-        <LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} />
+        <Suspense fallback={null}><LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} /></Suspense>
       )}
       </div>
 
@@ -2328,7 +2406,7 @@ export function App() {
       {showAddToPlaylist && state.current_track && (
         <div onClick={() => setShowAddToPlaylist(false)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div onClick={(e: any) => e.stopPropagation()}
+          <div onClick={(e: JSX.TargetedMouseEvent<HTMLDivElement>) => e.stopPropagation()}
             style={{
               width: "100%", maxWidth: 420, maxHeight: "60vh", overflowY: "auto", padding: "16px 16px 24px",
               borderRadius: "20px 20px 0 0",
@@ -2453,3 +2531,5 @@ export function App() {
     </div>
   );
 }
+
+

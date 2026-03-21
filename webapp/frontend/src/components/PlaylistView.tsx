@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import type { JSX } from "preact";
 import {
   fetchPlaylists, fetchPlaylistTracks, createPlaylist, deletePlaylist,
   renamePlaylist, removeTrackFromPlaylist, getStreamUrl,
@@ -12,7 +13,7 @@ import { getThemeById, themeColors } from "../themes";
 
 // ── Preset playlist covers ──
 // SVG icon renderers keyed by cover id
-const COVER_ICONS: Record<string, (size: number) => any> = {
+const COVER_ICONS: Record<string, (size: number) => JSX.Element> = {
   fire:   (s) => <IconFire size={s} color="#fff" />,
   chill:  (s) => <IconWave size={s} color="#fff" />,
   party:  (s) => <IconParty size={s} color="#fff" />,
@@ -166,8 +167,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
     haptic("medium");
     try {
       const result = await createPlaylist(name);
-      if (newCover && result && typeof result === "object" && "id" in result) {
-        setPlaylistCover((result as any).id, newCover);
+      if (newCover) {
+        setPlaylistCover(result.id, newCover);
       }
       setNewName("");
       setNewCover(null);
@@ -282,8 +283,9 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
           >Удалить</button>
         )}
         <div
-          onTouchStart={(e: any) => onTouchStart(e)}
-          onTouchEnd={(e: any) => onTouchEnd(e, t.video_id)}
+          data-no-synth-tap="true"
+          onTouchStart={(e) => onTouchStart(e as unknown as TouchEvent)}
+          onTouchEnd={(e) => onTouchEnd(e as unknown as TouchEvent, t.video_id)}
           onClick={() => { if (!swiped) { haptic("light"); onPlayTrack(t); } else setSwipedTrackId(null); }}
           style={{
             display: "flex", alignItems: "center", padding: "10px 12px",
@@ -523,8 +525,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
         <div style={{ marginBottom: 12, padding: 12, borderRadius: 16, background: tc.cardBg, border: tc.cardBorder }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <input type="text" placeholder="Название плейлиста" maxLength={100} value={newName}
-              onInput={(e: any) => setNewName(e.target.value)}
-              onKeyDown={(e: any) => { if (e.key === "Enter") handleCreate(); }}
+              onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
               style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px solid ${tc.accentBorderAlpha}`, background: "transparent", color: tc.textColor, fontSize: 14, outline: "none" }} />
             <button onClick={handleCreate} style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>OK</button>
             <button onClick={() => { setShowCreate(false); setNewName(""); setNewCover(null); }} style={{ padding: "8px 12px", borderRadius: 10, border: tc.cardBorder, background: "transparent", color: tc.hintColor, fontSize: 13, cursor: "pointer" }}><IconClose size={14} /></button>
@@ -550,8 +552,8 @@ export function PlaylistView({ userId, onPlayTrack, onPlayAll, onPlayPlaylist, a
               ) : editingId === p.id ? (
                 <div style={{ display: "flex", gap: 8, padding: 12, borderRadius: 14, background: tc.cardBg, border: tc.cardBorder }}>
                   <input type="text" maxLength={100} value={editName}
-                    onInput={(e: any) => setEditName(e.target.value)}
-                    onKeyDown={(e: any) => { if (e.key === "Enter") handleRename(p.id); }}
+                    onInput={(e) => setEditName((e.target as HTMLInputElement).value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleRename(p.id); }}
                     style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px solid ${tc.accentBorderAlpha}`, background: "transparent", color: tc.textColor, fontSize: 14, outline: "none" }} />
                   <button onClick={() => handleRename(p.id)} style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: accentColor, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{"✓"}</button>
                   <button onClick={() => setEditingId(null)} style={{ padding: "8px 10px", borderRadius: 10, border: tc.cardBorder, background: "transparent", color: tc.hintColor, fontSize: 12, cursor: "pointer" }}><IconClose size={14} /></button>

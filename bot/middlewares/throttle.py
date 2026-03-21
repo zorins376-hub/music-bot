@@ -1,7 +1,10 @@
+import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message
+
+logger = logging.getLogger(__name__)
 
 # Защита от флуда: 1 сообщение в секунду на пользователя
 _FLOOD_WINDOW = 1  # секунды
@@ -33,7 +36,7 @@ class ThrottleMiddleware(BaseMiddleware):
             if db_user.is_premium:
                 return await handler(event, data)
         except Exception:
-            pass
+            logger.debug("premium check failed user=%s", user.id, exc_info=True)
 
         try:
             flood_key = f"flood:{user.id}"
@@ -42,5 +45,5 @@ class ThrottleMiddleware(BaseMiddleware):
                 return
             await cache.redis.setex(flood_key, _FLOOD_WINDOW, "1")
         except Exception:
-            pass  # Redis unavailable → let request through
+            logger.debug("flood check failed user=%s", user.id, exc_info=True)
         return await handler(event, data)

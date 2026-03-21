@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "name": "My Favorites",
+    "track_count": 5
+  },
+  {
+    "id": 2,
+    "name": "Chill Vibes",
+    "track_count": 12
+  }
+]

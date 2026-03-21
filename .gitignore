@@ -16,3 +16,7 @@ test_cookie_output.txt
 .claude/
 .vscode/
 nifty-growing-starlight.md
+deploy/.env*
+!deploy/.env*.example
+node_modules/
+webapp/frontend/node_modules/

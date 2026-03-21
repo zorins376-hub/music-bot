@@ -16,21 +16,43 @@ voice_chat.py — Pyrogram + pytgcalls стример для BLACK ROOM NIGHT CH
 import asyncio
 import json
 import logging
+import time
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 # Voting: {group_id: {"likes": set(user_ids), "dislikes": set(user_ids)}}
 _votes: dict[int, dict[str, set[int]]] = defaultdict(lambda: {"likes": set(), "dislikes": set()})
+_vote_last_seen: dict[int, float] = {}
 _SKIP_THRESHOLD = 3  # number of 👎 to auto-skip
+_VOTE_TTL_SECONDS = 60 * 60 * 6
+
+
+def _touch_vote_activity(group_id: int) -> None:
+    _vote_last_seen[group_id] = time.monotonic()
+
+
+def _prune_stale_votes(now: float | None = None) -> None:
+    ts = now if now is not None else time.monotonic()
+    stale_groups = [
+        gid
+        for gid, last_seen in _vote_last_seen.items()
+        if ts - last_seen > _VOTE_TTL_SECONDS
+    ]
+    for gid in stale_groups:
+        _vote_last_seen.pop(gid, None)
+        _votes.pop(gid, None)
 
 
 def _reset_votes(group_id: int) -> None:
     _votes[group_id] = {"likes": set(), "dislikes": set()}
+    _touch_vote_activity(group_id)
 
 
 async def vote(group_id: int, user_id: int, vote_type: str, skip_cb=None) -> dict:
     """Register a vote. Returns current tally. Calls skip_cb() if threshold met."""
+    _prune_stale_votes()
+    _touch_vote_activity(group_id)
     v = _votes[group_id]
     if vote_type == "like":
         v["likes"].add(user_id)
@@ -46,6 +68,21 @@ async def vote(group_id: int, user_id: int, vote_type: str, skip_cb=None) -> dic
         await skip_cb()
 
     return tally
+
+
+def _spawn_task(coro: asyncio.coroutines, *, task_name: str) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+
+    def _done_callback(done_task: asyncio.Task) -> None:
+        try:
+            done_task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Background task '%s' failed", task_name)
+
+    task.add_done_callback(_done_callback)
+    return task
 
 
 async def _sync_current_track_state(cache, track: dict | None, previous_channel: str | None) -> str | None:
@@ -95,23 +132,47 @@ async def _handle_radio_command(command: str, *, group_id: int, tgcalls, play_ne
 
 
 async def _listen_for_radio_commands(pubsub, *, group_id: int, tgcalls, play_next, clear_current_track, cache) -> None:
+    async def _dispatch_message(message: dict) -> None:
+        if message.get("type") != "message":
+            return
+
+        payload = message.get("data")
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8", errors="ignore")
+
+        await _handle_radio_command(
+            str(payload or ""),
+            group_id=group_id,
+            tgcalls=tgcalls,
+            play_next=play_next,
+            clear_current_track=clear_current_track,
+            cache=cache,
+        )
+
     try:
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
+        get_message = getattr(pubsub, "get_message", None)
+        ping = getattr(pubsub, "ping", None)
+        if callable(get_message):
+            last_ping = time.monotonic()
+            while True:
+                # Heartbeat timeout guards against stuck pubsub connections.
+                message = await asyncio.wait_for(
+                    get_message(ignore_subscribe_messages=False, timeout=1.0),
+                    timeout=35.0,
+                )
+                if message:
+                    await _dispatch_message(message)
 
-            payload = message.get("data")
-            if isinstance(payload, bytes):
-                payload = payload.decode("utf-8", errors="ignore")
-
-            await _handle_radio_command(
-                str(payload or ""),
-                group_id=group_id,
-                tgcalls=tgcalls,
-                play_next=play_next,
-                clear_current_track=clear_current_track,
-                cache=cache,
-            )
+                now = time.monotonic()
+                if now - last_ping >= 30.0 and callable(ping):
+                    maybe_awaitable = ping()
+                    if asyncio.iscoroutine(maybe_awaitable):
+                        await maybe_awaitable
+                    last_ping = now
+        else:
+            async for message in pubsub.listen():
+                await _dispatch_message(message)
+                _touch_vote_activity(group_id)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -134,6 +195,7 @@ async def _run_radio_command_listener(
     cache,
     reconnect_delay: float = 1.0,
 ) -> None:
+    attempt = 0
     while True:
         try:
             pubsub = redis.pubsub()
@@ -146,12 +208,15 @@ async def _run_radio_command_listener(
                 clear_current_track=clear_current_track,
                 cache=cache,
             )
+            attempt = 0
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Radio command listener setup failed for group %s", group_id)
+            attempt += 1
 
-        await asyncio.sleep(reconnect_delay)
+        delay = min(30.0, reconnect_delay * (2 ** min(attempt, 5)))
+        await asyncio.sleep(delay)
 
 
 async def _run_group(app, tgcalls, group_id: int, cache, *, consume_radio_commands: bool = False) -> None:
@@ -255,7 +320,7 @@ async def _run_group(app, tgcalls, group_id: int, cache, *, consume_radio_comman
         current_channel = await _sync_current_track_state(cache, None, current_channel)
 
     if consume_radio_commands:
-        asyncio.create_task(
+        _spawn_task(
             _run_radio_command_listener(
                 cache.redis,
                 group_id=group_id,
@@ -264,7 +329,8 @@ async def _run_group(app, tgcalls, group_id: int, cache, *, consume_radio_comman
                 clear_current_track=clear_current_track,
                 cache=cache,
                 reconnect_delay=1.0,
-            )
+            ),
+            task_name=f"radio-command-listener-group-{group_id}",
         )
 
     await play_next()
@@ -394,7 +460,7 @@ async def _run_groups(app, tgcalls, group_ids: list[int], cache, *, consume_radi
                     if callable(leave_call):
                         await leave_call(target_group_id)
 
-        asyncio.create_task(
+        _spawn_task(
             _run_radio_command_listener(
                 cache.redis,
                 group_id=group_ids[0],
@@ -403,7 +469,8 @@ async def _run_groups(app, tgcalls, group_ids: list[int], cache, *, consume_radi
                 clear_current_track=clear_current_track,
                 cache=cache,
                 reconnect_delay=1.0,
-            )
+            ),
+            task_name=f"radio-command-listener-groups-{group_ids[0]}",
         )
 
     await play_next()

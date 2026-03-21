@@ -110,13 +110,12 @@ function playStartupWhoosh() {
 
 if (bootLoader) {
   playStartupWhoosh();
+  bootLoader.style.pointerEvents = "none"; // immediately unblock clicks
+  bootLoader.classList.add("is-exiting");
   window.setTimeout(() => {
-    bootLoader.classList.add("is-exiting");
-    window.setTimeout(() => {
-      bootLoader.classList.add("is-hidden");
-      window.setTimeout(() => bootLoader.remove(), 100);
-    }, 920);
-  }, 4000);
+    bootLoader.classList.add("is-hidden");
+    window.setTimeout(() => bootLoader.remove(), 100);
+  }, 920);
 }
 
 // Render app AFTER boot-loader exit is scheduled
