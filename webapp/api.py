@@ -376,7 +376,7 @@ class _RateLimiter:
 
 _action_limiter = _RateLimiter(rate=3.0, burst=15)  # player actions
 _search_limiter = _RateLimiter(rate=1.5, burst=8)    # search
-_stream_limiter = _RateLimiter(rate=2.0, burst=6)    # stream downloads
+_stream_limiter = _RateLimiter(rate=4.0, burst=15)    # stream downloads
 
 @app.get("/health")
 async def health():
