@@ -34,7 +34,7 @@ def _get_vk_audio():
         return None
     try:
         import vk_api
-        from vk_api import VkAudio
+        from vk_api.audio import VkAudio
         session = vk_api.VkApi(token=settings.VK_TOKEN)
         _vk_audio = VkAudio(session)
         logger.info("VK Music provider initialised")
