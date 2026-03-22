@@ -2,7 +2,7 @@ import { memo } from "preact/compat";
 import { useState, useEffect, useRef } from "preact/hooks";
 import { Component } from "preact";
 import type { Track } from "../api";
-import { fetchFavoritesList, fetchChallenges, type ChallengesData } from "../api";
+import { fetchFavoritesList, fetchChallenges, getInitData, type ChallengesData } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import {
   IconCrown, IconFire, IconMusicNote, IconChart, IconPlaySmall,
@@ -218,7 +218,7 @@ export const ProfileView = memo(function ProfileView({
     fetch(`/api/stats/${userId}`, {
       headers: {
         "Content-Type": "application/json",
-        "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+        "X-Telegram-Init-Data": getInitData(),
       },
       signal: ctrl.signal,
     })
@@ -326,7 +326,7 @@ export const ProfileView = memo(function ProfileView({
     fetch(`/api/stats/${userId}`, {
       headers: {
         "Content-Type": "application/json",
-        "X-Telegram-Init-Data": window.Telegram?.WebApp?.initData || "",
+        "X-Telegram-Init-Data": getInitData(),
       },
       signal: ctrl.signal,
     })
