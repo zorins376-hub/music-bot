@@ -50,7 +50,13 @@ def _is_valid_mp3(path: Path) -> bool:
 
 
 def _select_bitrate(pref: str | None, premium: bool) -> int:
-    """Map stored quality preference to bitrate for yt-dlp pipeline."""
+    """Map stored quality preference to bitrate for yt-dlp pipeline.
+
+    When CACHE_CHANNEL_ID is set, always download at 320kbps
+    so cached files are max quality for all users.
+    """
+    if settings.CACHE_CHANNEL_ID:
+        return 320
     if pref == "auto" or not pref:
         return settings.DEFAULT_BITRATE
     if pref == "320" and premium:
