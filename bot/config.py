@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     FULLMOON_CHANNEL: str = ""
     BLACKROOM_GROUP_ID: Optional[int] = None
 
+    # ── Telegram CDN Cache Channel ─────────────────────────────────────
+    CACHE_CHANNEL_ID: Optional[int] = None  # Private channel ID for audio storage
+
     # ── YouTube cookies (base64-encoded Netscape cookies.txt) ────────────
     YT_COOKIES: Optional[str] = None
 

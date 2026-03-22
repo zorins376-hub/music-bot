@@ -532,6 +532,19 @@ async def stream_audio(
     if mp3_path.exists() and not _is_valid_mp3(mp3_path):
         logger.warning("Removing corrupt or invalid file %s", mp3_path)
         mp3_path.unlink()
+
+    # Telegram CDN fallback: restore from cache channel if file missing
+    if not mp3_path.exists():
+        try:
+            from bot.services.telegram_cache import get_file_id, download_from_cache
+            cached_fid = await get_file_id(video_id)
+            if cached_fid:
+                restored = await download_from_cache(cached_fid, mp3_path)
+                if restored:
+                    logger.info("Restored %s from Telegram CDN", video_id)
+        except Exception:
+            pass
+
     if not mp3_path.exists():
         try:
             # Determine source by prefix
@@ -676,6 +689,33 @@ async def stream_audio(
         except Exception as e:
             logger.error("Stream download failed for %s: %s", video_id, e)
             raise HTTPException(status_code=500, detail="Download failed")
+
+    # Upload to Telegram CDN cache (fire-and-forget, won't block streaming)
+    try:
+        from bot.services.telegram_cache import schedule_upload, get_file_id as _get_fid
+        # Only upload if not already cached
+        _existing_fid = await _get_fid(video_id)
+        if not _existing_fid and mp3_path.exists():
+            # Get track metadata for caption
+            _track_meta = None
+            try:
+                from bot.models.base import async_session as _as
+                from bot.models.track import Track as _Tr
+                from sqlalchemy import select as _sel
+                async with _as() as _s:
+                    _track_meta = (await _s.execute(
+                        _sel(_Tr.title, _Tr.artist, _Tr.duration).where(_Tr.source_id == video_id)
+                    )).first()
+            except Exception:
+                pass
+            schedule_upload(
+                mp3_path, video_id,
+                title=_track_meta[0] if _track_meta else None,
+                artist=_track_meta[1] if _track_meta else None,
+                duration=_track_meta[2] if _track_meta else None,
+            )
+    except Exception:
+        pass
 
     # Get file size for Range support
     file_size = mp3_path.stat().st_size

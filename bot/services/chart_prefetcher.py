@@ -90,6 +90,14 @@ async def prefetch_chart_tracks(
         async with semaphore:
             try:
                 await download_manager.download(video_id, bitrate=bitrate)
+                # Upload to Telegram CDN cache (fire-and-forget)
+                try:
+                    from bot.services.telegram_cache import schedule_upload
+                    dl_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+                    if dl_path.exists():
+                        schedule_upload(dl_path, video_id)
+                except Exception:
+                    pass
                 return True
             except Exception as e:
                 err_msg = str(e)
