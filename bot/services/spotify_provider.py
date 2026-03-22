@@ -65,6 +65,9 @@ def _track_to_dict(track: dict) -> dict | None:
         track_id = track.get("id") or ""
         if not track_id:
             return None
+        # Extract cover from album images (largest first)
+        images = (track.get("album") or {}).get("images") or []
+        cover_url = images[0]["url"] if images else None
         return {
             "video_id": f"sp_{track_id}",
             "spotify_id": track_id,
@@ -73,6 +76,7 @@ def _track_to_dict(track: dict) -> dict | None:
             "duration": dur_s,
             "duration_fmt": _fmt_dur(dur_ms),
             "source": "spotify",
+            "cover_url": cover_url,
             "yt_query": f"{artist} - {title}",
         }
     except Exception:

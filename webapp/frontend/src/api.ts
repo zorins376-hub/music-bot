@@ -409,6 +409,7 @@ export async function ingestEvent(
         artist: track.artist,
         duration: track.duration,
         source: track.source,
+        cover_url: track.cover_url,
       },
       listen_duration: listenDuration,
       source,

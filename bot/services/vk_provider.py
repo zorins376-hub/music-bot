@@ -65,6 +65,10 @@ def _search_vk_sync(query: str, limit: int) -> list[dict]:
                 continue
             if duration <= 0 or duration > settings.MAX_DURATION:
                 continue
+            # Extract cover from album thumb if available
+            album = tr.get("album") or {}
+            thumb = album.get("thumb") or {}
+            cover = thumb.get("photo_600") or thumb.get("photo_300") or thumb.get("photo_270") or None
             results.append({
                 "video_id": f"vk_{tr.get('owner_id')}_{tr.get('id')}",
                 "vk_url": url,
@@ -73,6 +77,7 @@ def _search_vk_sync(query: str, limit: int) -> list[dict]:
                 "duration": duration,
                 "duration_fmt": _fmt_dur(duration),
                 "source": "vk",
+                "cover_url": cover,
             })
             if len(results) >= limit:
                 break

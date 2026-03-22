@@ -1024,7 +1024,33 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
             _set_cached_cover(source_id, source, cover_url)
             return cover_url
         except Exception:
-            return None
+            pass
+
+    if normalized_source == "spotify" and source_id.startswith("sp_"):
+        try:
+            from bot.services.spotify_provider import _get_client
+            sp = _get_client()
+            if sp:
+                import asyncio
+                track = await asyncio.get_event_loop().run_in_executor(None, sp.track, source_id[3:])
+                images = (track.get("album") or {}).get("images") or [] if track else []
+                cover_url = images[0]["url"] if images else None
+                _set_cached_cover(source_id, source, cover_url)
+                if cover_url:
+                    return cover_url
+        except Exception:
+            pass
+
+    if normalized_source == "deezer" and source_id.startswith("dz_"):
+        try:
+            from bot.services.deezer_provider import fetch_deezer_track
+            track_meta = await fetch_deezer_track(int(source_id[3:]))
+            cover_url = track_meta.get("cover_url") if track_meta else None
+            _set_cached_cover(source_id, source, cover_url)
+            if cover_url:
+                return cover_url
+        except Exception:
+            pass
 
     _set_cached_cover(source_id, source, None)
     return None
@@ -1475,7 +1501,36 @@ class AiPlaylistRequest(BaseModel):
 
 @app.post("/api/ingest")
 async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_current_user)):
-    """Send a play/skip/like event to Supabase AI for learning user taste."""
+    """Send a play/skip/like event, upsert track in DB, record listening history."""
+    user_id = int(user.get("id", 0))
+    track_info = body.track or {}
+    source_id = track_info.get("source_id") or ""
+
+    # --- Upsert track & record listening history ---
+    track_db_id: int | None = None
+    try:
+        from bot.db import upsert_track, record_listening_event
+        if source_id:
+            db_track = await upsert_track(
+                source_id=source_id,
+                title=track_info.get("title"),
+                artist=track_info.get("artist"),
+                duration=int(track_info["duration"]) if track_info.get("duration") else None,
+                source=track_info.get("source", "youtube"),
+                cover_url=track_info.get("cover_url"),
+            )
+            track_db_id = db_track.id
+        await record_listening_event(
+            user_id=user_id,
+            track_id=track_db_id,
+            query=track_info.get("title"),
+            action=body.event,
+            source=body.source,
+            listen_duration=body.listen_duration,
+        )
+    except Exception:
+        pass  # DB errors should never block ingestion
+
     # --- Gamification: award XP for actions ---
     try:
         from bot.models.base import async_session
@@ -1490,12 +1545,10 @@ async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_curren
                 u = q.scalar()
                 if u:
                     u.xp = (u.xp or 0) + xp_gain
-                    # Level up every 100 XP
                     u.level = max(1, ((u.xp or 0) // 100) + 1)
-                    # Streak tracking
                     today = dt_date.today()
                     if u.last_play_date and u.last_play_date == today:
-                        pass  # same day
+                        pass
                     elif u.last_play_date and (today - u.last_play_date).days == 1:
                         u.streak_days = (u.streak_days or 0) + 1
                     elif u.last_play_date and (today - u.last_play_date).days > 1:
@@ -1503,7 +1556,6 @@ async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_curren
                     else:
                         u.streak_days = 1
                     u.last_play_date = today
-                    # Auto-badges
                     badges = list(u.badges or [])
                     if "first_listen" not in badges and body.event == "play":
                         badges.append("first_listen")
@@ -1516,14 +1568,14 @@ async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_curren
                     u.badges = badges
                     await session.commit()
     except Exception:
-        pass  # gamification errors should never block ingestion
+        pass
 
     if not settings.SUPABASE_AI_ENABLED:
-        return {"ok": False, "reason": "AI not enabled"}
+        return {"ok": True}
     from bot.services.supabase_ai import supabase_ai
     ok = await supabase_ai.ingest_event(
         event=body.event,
-        user_id=user["id"],
+        user_id=user_id,
         track=body.track,
         listen_duration=body.listen_duration,
         source=body.source,

@@ -1000,6 +1000,7 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
             file_id=file_id,
             source=track_info.get("source", "youtube"),
             channel="external",
+            cover_url=track_info.get("cover_url"),
         )
     except Exception as e:
         logger.warning("_post_download: upsert_track failed: %s", e)
