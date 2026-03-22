@@ -986,7 +986,7 @@ def _set_cached_cover(source_id: str, source: str | None, cover_url: str | None)
 _MISSING = object()
 
 
-async def _resolve_cover_url(source_id: str, source: str | None, current_cover: str | None = None) -> str | None:
+async def _resolve_cover_url(source_id: str, source: str | None, current_cover: str | None = None, title: str | None = None, artist: str | None = None) -> str | None:
     if current_cover:
         return current_cover
 
@@ -994,35 +994,37 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
     if cached_cover is not _MISSING:
         return cached_cover
 
-    # Check DB for cached cover_url
+    # Check DB for cached cover_url + grab title/artist if missing
+    db_title, db_artist = title, artist
     try:
         from sqlalchemy import select
         from bot.models.base import async_session as _as
         from bot.models.track import Track as _Track
         async with _as() as _sess:
             row = (await _sess.execute(
-                select(_Track.cover_url).where(_Track.source_id == source_id)
-            )).scalar_one_or_none()
+                select(_Track.cover_url, _Track.title, _Track.artist).where(_Track.source_id == source_id)
+            )).first()
             if row:
-                _set_cached_cover(source_id, source, row)
-                return row
+                if row[0]:
+                    _set_cached_cover(source_id, source, row[0])
+                    return row[0]
+                db_title = db_title or row[1]
+                db_artist = db_artist or row[2]
     except Exception:
         pass
 
     normalized_source = (source or "youtube").lower()
-    if normalized_source == "youtube" and source_id:
-        cover_url = f"https://i.ytimg.com/vi/{source_id}/hqdefault.jpg"
-        _set_cached_cover(source_id, source, cover_url)
-        return cover_url
 
+    # Source-specific resolvers
     if normalized_source == "yandex" and source_id.startswith("ym_"):
         try:
             from bot.services.yandex_provider import fetch_yandex_track
-
             track_meta = await fetch_yandex_track(int(source_id[3:]))
             cover_url = track_meta.get("cover_url") if track_meta else None
-            _set_cached_cover(source_id, source, cover_url)
-            return cover_url
+            if cover_url:
+                _set_cached_cover(source_id, source, cover_url)
+                await _persist_cover(source_id, cover_url)
+                return cover_url
         except Exception:
             pass
 
@@ -1035,8 +1037,9 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
                 track = await asyncio.get_event_loop().run_in_executor(None, sp.track, source_id[3:])
                 images = (track.get("album") or {}).get("images") or [] if track else []
                 cover_url = images[0]["url"] if images else None
-                _set_cached_cover(source_id, source, cover_url)
                 if cover_url:
+                    _set_cached_cover(source_id, source, cover_url)
+                    await _persist_cover(source_id, cover_url)
                     return cover_url
         except Exception:
             pass
@@ -1046,14 +1049,47 @@ async def _resolve_cover_url(source_id: str, source: str | None, current_cover: 
             from bot.services.deezer_provider import fetch_deezer_track
             track_meta = await fetch_deezer_track(int(source_id[3:]))
             cover_url = track_meta.get("cover_url") if track_meta else None
-            _set_cached_cover(source_id, source, cover_url)
             if cover_url:
+                _set_cached_cover(source_id, source, cover_url)
+                await _persist_cover(source_id, cover_url)
+                return cover_url
+        except Exception:
+            pass
+
+    # Universal fallback: search Deezer by artist+title (free API, high quality covers)
+    query = ""
+    if db_artist and db_title:
+        query = f"{db_artist} {db_title}"
+    elif db_title:
+        query = db_title
+    if query:
+        try:
+            from bot.services.deezer_provider import search_deezer
+            results = await search_deezer(query, limit=1)
+            if results and results[0].get("cover_url"):
+                cover_url = results[0]["cover_url"]
+                _set_cached_cover(source_id, source, cover_url)
+                await _persist_cover(source_id, cover_url)
                 return cover_url
         except Exception:
             pass
 
     _set_cached_cover(source_id, source, None)
     return None
+
+
+async def _persist_cover(source_id: str, cover_url: str) -> None:
+    """Save resolved cover_url to DB (fire-and-forget)."""
+    try:
+        from bot.models.track import Track as _T
+        from bot.models.base import async_session as _as
+        async with _as() as s:
+            await s.execute(
+                _T.__table__.update().where(_T.source_id == source_id).values(cover_url=cover_url)
+            )
+            await s.commit()
+    except Exception:
+        pass
 
 
 async def _resolve_cover_urls_for_tracks(tracks: list[TrackSchema]) -> dict[str, str | None]:
@@ -1911,23 +1947,19 @@ async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_us
         rows = q.all()
 
     feed = []
-    covers_to_resolve: list[tuple[int, str, str | None]] = []  # (index, source_id, source)
+    covers_to_resolve: list[tuple[int, str, str | None, str | None, str | None]] = []
     for row in rows:
         sid = row.source_id or ""
-        source = None
-        if sid.startswith("ym_"): source = "yandex"
-        elif sid.startswith("sp_"): source = "spotify"
-        elif sid.startswith("dz_"): source = "deezer"
-        elif sid.startswith("vk_"): source = "vk"
-        else: source = "youtube"
+        src = None
+        if sid.startswith("ym_"): src = "yandex"
+        elif sid.startswith("sp_"): src = "spotify"
+        elif sid.startswith("dz_"): src = "deezer"
+        elif sid.startswith("vk_"): src = "vk"
+        else: src = "youtube"
 
         cover = row.cover_url
         if not cover and sid:
-            # Try YouTube thumbnail as quick fallback
-            if source == "youtube":
-                cover = f"https://i.ytimg.com/vi/{sid}/hqdefault.jpg"
-            else:
-                covers_to_resolve.append((len(feed), sid, source))
+            covers_to_resolve.append((len(feed), sid, src, row.title, row.artist))
 
         feed.append({
             "user_id": row.user_id,
@@ -1939,28 +1971,17 @@ async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_us
             "played_at": row.created_at.isoformat() if row.created_at else None,
         })
 
-    # Resolve missing covers in background (best-effort, don't block)
+    # Resolve missing covers via Deezer search (best-effort)
     if covers_to_resolve:
         import asyncio
-        async def _resolve_one(idx: int, sid: str, src: str | None):
+        async def _resolve_one(idx: int, sid: str, src: str | None, title: str | None, artist: str | None):
             try:
-                url = await _resolve_cover_url(sid, src)
+                url = await _resolve_cover_url(sid, src, title=title, artist=artist)
                 if url:
                     feed[idx]["cover_url"] = url
-                    # Persist to DB for future requests
-                    try:
-                        from bot.models.track import Track as _T
-                        from bot.models.base import async_session as _as
-                        async with _as() as s:
-                            await s.execute(
-                                _T.__table__.update().where(_T.source_id == sid).values(cover_url=url)
-                            )
-                            await s.commit()
-                    except Exception:
-                        pass
             except Exception:
                 pass
-        await asyncio.gather(*[_resolve_one(i, s, src) for i, s, src in covers_to_resolve[:10]])
+        await asyncio.gather(*[_resolve_one(i, s, src, t, a) for i, s, src, t, a in covers_to_resolve[:15]])
 
     return {"feed": feed}
 
@@ -2640,16 +2661,25 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
                     .order_by(ListeningHistory.created_at.desc()).limit(20)
                 )
                 recent = []
+                _rc_to_resolve = []
                 for r in recent_q.all():
                     sid = r[0] or ""
                     cover = r[4]
-                    if not cover and sid and not sid.startswith(("ym_", "sp_", "dz_", "vk_", "am_")):
-                        cover = f"https://i.ytimg.com/vi/{sid}/hqdefault.jpg"
+                    if not cover and sid:
+                        _rc_to_resolve.append((len(recent), sid, r[1], r[2]))
                     recent.append({
                         "video_id": sid, "title": r[1], "artist": r[2],
                         "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
                         "cover_url": cover, "source": "db",
                     })
+                if _rc_to_resolve:
+                    import asyncio as _aio2
+                    async def _res_rc(idx, sid, title, artist):
+                        try:
+                            url = await _resolve_cover_url(sid, None, title=title, artist=artist)
+                            if url: recent[idx]["cover_url"] = url
+                        except Exception: pass
+                    await _aio2.gather(*[_res_rc(i, s, t, a) for i, s, t, a in _rc_to_resolve[:10]])
             except Exception:
                 pass
 
@@ -2957,16 +2987,25 @@ async def get_wrapped(user: dict = Depends(get_current_user)):
                 .order_by(func.count().desc()).limit(10)
             )
             top_tracks = []
+            _tt_to_resolve = []
             for r in top_tracks_q.all():
                 sid = r[0] or ""
                 cover = r[3]
-                if not cover and sid and not sid.startswith(("ym_", "sp_", "dz_", "vk_", "am_")):
-                    cover = f"https://i.ytimg.com/vi/{sid}/hqdefault.jpg"
+                if not cover and sid:
+                    _tt_to_resolve.append((len(top_tracks), sid, r[1], r[2]))
                 top_tracks.append({
                     "video_id": sid, "title": r[1], "artist": r[2], "cover_url": cover,
                     "duration": r[4] or 0, "duration_fmt": f"{(r[4] or 0)//60}:{(r[4] or 0)%60:02d}",
                     "play_count": r[5], "source": "db",
                 })
+            if _tt_to_resolve:
+                import asyncio as _aio
+                async def _res_tt(idx, sid, title, artist):
+                    try:
+                        url = await _resolve_cover_url(sid, None, title=title, artist=artist)
+                        if url: top_tracks[idx]["cover_url"] = url
+                    except Exception: pass
+                await _aio.gather(*[_res_tt(i, s, t, a) for i, s, t, a in _tt_to_resolve[:10]])
 
             # Listening by hour (24 buckets)
             hours_q = await session.execute(
