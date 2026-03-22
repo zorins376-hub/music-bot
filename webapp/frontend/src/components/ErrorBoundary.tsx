@@ -77,7 +77,7 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             Попробовать снова
           </button>
-          {process.env.NODE_ENV === "development" && this.state.error && (
+          {this.state.error && (
             <pre
               style={{
                 marginTop: "16px",
