@@ -122,9 +122,11 @@ export const ActivityFeedView = memo(function ActivityFeedView({
           padding: "10px 12px", borderRadius: 14, marginBottom: 6,
           background: isMe ? (tc.isTequila ? "rgba(255,143,0,0.06)" : `${accentColor}06`) : tc.cardBg,
           border: tc.cardBorder,
-          backdropFilter: "blur(16px)",
           cursor: "pointer",
-          transition: "all 0.15s ease",
+          transition: "transform 0.15s ease, opacity 0.15s ease",
+          transform: "translateZ(0)",
+          containIntrinsicSize: "auto 60px",
+          contentVisibility: "auto",
         }}
       >
         {/* User avatar */}

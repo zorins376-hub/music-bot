@@ -100,7 +100,7 @@ export const LeaderboardView = memo(function LeaderboardView({
       <div style={{
         padding: "16px", borderRadius: 16, marginBottom: 16,
         background: tc.cardBg, border: tc.cardBorder,
-        backdropFilter: "blur(16px)",
+        transform: "translateZ(0)",
         display: "flex", alignItems: "center", gap: 14,
       }}>
         <div style={{
@@ -160,7 +160,7 @@ export const LeaderboardView = memo(function LeaderboardView({
                 border: isMe
                   ? `1px solid ${tc.isTequila ? "rgba(255,213,79,0.25)" : `${accentColor}30`}`
                   : tc.cardBorder,
-                backdropFilter: "blur(16px)",
+                transform: "translateZ(0)",
                 transition: "all 0.2s ease",
               }}
             >
@@ -231,7 +231,7 @@ export const LeaderboardView = memo(function LeaderboardView({
                     border: ch.completed
                       ? `1px solid ${tc.isTequila ? "rgba(255,213,79,0.2)" : `${accentColor}25`}`
                       : tc.cardBorder,
-                    backdropFilter: "blur(16px)",
+                    transform: "translateZ(0)",
                     opacity: ch.completed ? 0.85 : 1,
                   }}
                 >

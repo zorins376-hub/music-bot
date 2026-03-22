@@ -737,7 +737,7 @@ export const ProfileView = memo(function ProfileView({
                 <div key={badgeId} style={{
                   padding: "12px 14px", borderRadius: 14,
                   background: tc.cardBg, border: tc.cardBorder,
-                  backdropFilter: "blur(16px)",
+                  transform: "translateZ(0)",
                 }}>
                   <div style={{
                     width: 32, height: 32, borderRadius: 10,
@@ -785,7 +785,7 @@ export const ProfileView = memo(function ProfileView({
                     ? (tc.isTequila ? "rgba(255,143,0,0.08)" : `${accentColor}08`)
                     : tc.cardBg,
                   border: tc.cardBorder,
-                  backdropFilter: "blur(16px)",
+                  transform: "translateZ(0)",
                 }}
               >
                 <div style={{ fontSize: 20, flexShrink: 0, filter: ch.completed ? "none" : "grayscale(0.3)" }}>

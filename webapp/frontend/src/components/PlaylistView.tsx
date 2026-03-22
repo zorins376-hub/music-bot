@@ -293,7 +293,7 @@ export const PlaylistView = memo(function PlaylistView({ userId, onPlayTrack, on
             background: tc.cardBg, border: tc.cardBorder, borderRadius: 14, cursor: "pointer",
             transition: "transform 0.25s ease",
             transform: swiped ? "translateX(-70px)" : "translateX(0)",
-            backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+            willChange: "transform",
           }}
         >
           <div style={{ width: 14, fontSize: 11, color: tc.hintColor, fontWeight: 600, marginRight: 8, textAlign: "center", flexShrink: 0 }}>{idx + 1}</div>
@@ -339,7 +339,7 @@ export const PlaylistView = memo(function PlaylistView({ userId, onPlayTrack, on
             style={{
               display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
               borderRadius: 14, background: tc.cardBg, border: tc.cardBorder, cursor: "pointer",
-              backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+              willChange: "transform",
             }}
           >
             {detailCover ? (

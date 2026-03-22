@@ -176,7 +176,7 @@ export const ChartsView = memo(function ChartsView({ userId, onPlayTrack, accent
               color: activeSource === s.id ? tc.highlight : tc.hintColor,
               fontSize: 12, fontWeight: activeSource === s.id ? 600 : 400,
               cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-              backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+              transform: "translateZ(0)",
             }}>
             {s.label}
           </button>
@@ -193,7 +193,7 @@ export const ChartsView = memo(function ChartsView({ userId, onPlayTrack, accent
             setShowSaveChart(true);
           }} style={{
             flex: 1, padding: "8px 14px", borderRadius: 12, border: tc.cardBorder,
-            background: tc.cardBg, backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+            background: tc.cardBg, transform: "translateZ(0)",
             color: tc.highlight, fontSize: 12, fontWeight: 600,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}>
@@ -205,7 +205,7 @@ export const ChartsView = memo(function ChartsView({ userId, onPlayTrack, accent
             fetchPlaylists(userId).then(setPlaylists).catch(() => setPlaylists([]));
           }} style={{
             padding: "8px 14px", borderRadius: 12, border: tc.cardBorder,
-            background: tc.cardBg, backdropFilter: tc.isTequila ? "blur(12px)" : undefined,
+            background: tc.cardBg, transform: "translateZ(0)",
             color: tc.highlight, fontSize: 12, fontWeight: 600,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}>

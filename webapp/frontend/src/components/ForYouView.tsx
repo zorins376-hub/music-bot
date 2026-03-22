@@ -331,7 +331,7 @@ export const ForYouView = memo(function ForYouView({
             marginBottom: 20, padding: 16, borderRadius: 22,
             background: tc.activeBg,
             border: `1px solid ${tc.accentBorderAlpha}`,
-            backdropFilter: "blur(16px)",
+            transform: "translateZ(0)",
             cursor: "pointer",
             display: "flex", alignItems: "center", gap: 14,
             boxShadow: tc.glowShadow,
@@ -645,7 +645,7 @@ export const ForYouView = memo(function ForYouView({
                 <div key={sp.id} style={{
                   borderRadius: 16, border: tc.cardBorder,
                   background: tc.cardBg, overflow: "hidden",
-                  backdropFilter: "blur(16px)",
+                  transform: "translateZ(0)",
                 }}>
                   <div
                     onClick={() => {
