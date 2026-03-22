@@ -1911,16 +1911,56 @@ async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_us
         rows = q.all()
 
     feed = []
+    covers_to_resolve: list[tuple[int, str, str | None]] = []  # (index, source_id, source)
     for row in rows:
+        sid = row.source_id or ""
+        source = None
+        if sid.startswith("ym_"): source = "yandex"
+        elif sid.startswith("sp_"): source = "spotify"
+        elif sid.startswith("dz_"): source = "deezer"
+        elif sid.startswith("vk_"): source = "vk"
+        else: source = "youtube"
+
+        cover = row.cover_url
+        if not cover and sid:
+            # Try YouTube thumbnail as quick fallback
+            if source == "youtube":
+                cover = f"https://i.ytimg.com/vi/{sid}/hqdefault.jpg"
+            else:
+                covers_to_resolve.append((len(feed), sid, source))
+
         feed.append({
             "user_id": row.user_id,
             "user_name": row.first_name or row.username or "User",
             "track_title": row.title,
             "track_artist": row.artist,
-            "video_id": row.source_id,
-            "cover_url": row.cover_url,
+            "video_id": sid,
+            "cover_url": cover,
             "played_at": row.created_at.isoformat() if row.created_at else None,
         })
+
+    # Resolve missing covers in background (best-effort, don't block)
+    if covers_to_resolve:
+        import asyncio
+        async def _resolve_one(idx: int, sid: str, src: str | None):
+            try:
+                url = await _resolve_cover_url(sid, src)
+                if url:
+                    feed[idx]["cover_url"] = url
+                    # Persist to DB for future requests
+                    try:
+                        from bot.models.track import Track as _T
+                        from bot.models.base import async_session as _as
+                        async with _as() as s:
+                            await s.execute(
+                                _T.__table__.update().where(_T.source_id == sid).values(cover_url=url)
+                            )
+                            await s.commit()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        await asyncio.gather(*[_resolve_one(i, s, src) for i, s, src in covers_to_resolve[:10]])
 
     return {"feed": feed}
 
@@ -2599,11 +2639,17 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
                     .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
                     .order_by(ListeningHistory.created_at.desc()).limit(20)
                 )
-                recent = [{
-                    "video_id": r[0], "title": r[1], "artist": r[2],
-                    "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
-                    "cover_url": r[4], "source": "db",
-                } for r in recent_q.all()]
+                recent = []
+                for r in recent_q.all():
+                    sid = r[0] or ""
+                    cover = r[4]
+                    if not cover and sid and not sid.startswith(("ym_", "sp_", "dz_", "vk_", "am_")):
+                        cover = f"https://i.ytimg.com/vi/{sid}/hqdefault.jpg"
+                    recent.append({
+                        "video_id": sid, "title": r[1], "artist": r[2],
+                        "duration": r[3] or 0, "duration_fmt": f"{(r[3] or 0) // 60}:{(r[3] or 0) % 60:02d}",
+                        "cover_url": cover, "source": "db",
+                    })
             except Exception:
                 pass
 
@@ -2910,11 +2956,17 @@ async def get_wrapped(user: dict = Depends(get_current_user)):
                 .group_by(TrackModel.source_id, TrackModel.title, TrackModel.artist, TrackModel.cover_url, TrackModel.duration)
                 .order_by(func.count().desc()).limit(10)
             )
-            top_tracks = [{
-                "video_id": r[0], "title": r[1], "artist": r[2], "cover_url": r[3],
-                "duration": r[4] or 0, "duration_fmt": f"{(r[4] or 0)//60}:{(r[4] or 0)%60:02d}",
-                "play_count": r[5], "source": "db",
-            } for r in top_tracks_q.all()]
+            top_tracks = []
+            for r in top_tracks_q.all():
+                sid = r[0] or ""
+                cover = r[3]
+                if not cover and sid and not sid.startswith(("ym_", "sp_", "dz_", "vk_", "am_")):
+                    cover = f"https://i.ytimg.com/vi/{sid}/hqdefault.jpg"
+                top_tracks.append({
+                    "video_id": sid, "title": r[1], "artist": r[2], "cover_url": cover,
+                    "duration": r[4] or 0, "duration_fmt": f"{(r[4] or 0)//60}:{(r[4] or 0)%60:02d}",
+                    "play_count": r[5], "source": "db",
+                })
 
             # Listening by hour (24 buckets)
             hours_q = await session.execute(

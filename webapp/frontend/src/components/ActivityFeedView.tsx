@@ -57,13 +57,20 @@ export const ActivityFeedView = memo(function ActivityFeedView({
 
   const handlePlay = useCallback((item: ActivityItem) => {
     haptic("light");
+    // Detect source from video_id prefix
+    const vid = item.video_id || "";
+    let src = "youtube";
+    if (vid.startsWith("ym_")) src = "yandex";
+    else if (vid.startsWith("sp_")) src = "spotify";
+    else if (vid.startsWith("dz_")) src = "deezer";
+    else if (vid.startsWith("vk_")) src = "vk";
     const track: Track = {
-      video_id: item.video_id,
+      video_id: vid,
       title: item.track_title,
       artist: item.track_artist,
       duration: 0,
       duration_fmt: "0:00",
-      source: "youtube",
+      source: src,
       cover_url: item.cover_url,
     };
     onPlayTrack(track);
