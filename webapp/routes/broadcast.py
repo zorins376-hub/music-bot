@@ -24,6 +24,7 @@ from webapp.deps import (
 router = APIRouter(tags=["broadcast"])
 
 # ── In-memory state ──────────────────────────────────────────────────────
+_MAX_BROADCAST_SUBSCRIBERS = 500
 _broadcast_subscribers: list[asyncio.Queue] = []
 
 # ── Redis keys ───────────────────────────────────────────────────────────
@@ -777,6 +778,9 @@ async def broadcast_events(
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid initData")
     await _get_or_create_webapp_user(user)
+
+    if len(_broadcast_subscribers) >= _MAX_BROADCAST_SUBSCRIBERS:
+        raise HTTPException(status_code=503, detail="Broadcast at capacity")
 
     queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
     _broadcast_subscribers.append(queue)

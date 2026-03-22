@@ -107,7 +107,7 @@ class _BoundedDict(dict):
 
 # ── In-memory stream URL cache (avoids repeated yt-dlp resolves) ─────────
 _stream_url_cache: dict[str, tuple[str, float]] = _BoundedDict(5000)
-_STREAM_URL_TTL = 18000  # 5 hours (YouTube URLs valid ~6h)
+_STREAM_URL_TTL = 10800  # 3 hours (YouTube URLs valid ~6h)
 _stream_url_inflight: dict[str, asyncio.Future[str | None]] = {}
 _stream_url_lock = asyncio.Lock()
 _stream_url_resolve_semaphore = asyncio.Semaphore(6)
@@ -447,13 +447,6 @@ async def get_me(user: dict = Depends(get_current_user)):
     )
 
 
-# Debug endpoint to diagnose Telegram SDK issues
-@app.post("/api/debug-auth")
-async def debug_auth(request: Request):
-    body = await request.json()
-    logger.warning("[DEBUG-AUTH] Client info: %s", body)
-    return {"ok": True}
-
 
 @app.post("/api/user/audio-settings", response_model=UserProfileSchema)
 async def update_audio_settings(body: UserAudioSettingsSchema, user: dict = Depends(get_current_user)):
@@ -573,7 +566,7 @@ async def stream_audio(
                     if result:
                         mp3_path = result
                     else:
-                        raise Exception("Deezer download returned None")
+                        raise HTTPException(status_code=502, detail="Deezer provider unavailable")
                 except Exception:
                     # Fallback: resolve metadata → search Yandex → YouTube
                     logger.info("Deezer download failed for %s, trying fallback", video_id)

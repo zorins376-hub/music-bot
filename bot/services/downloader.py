@@ -28,7 +28,20 @@ class _YtdlpSilentLogger:
 _ytdlp_logger = _YtdlpSilentLogger()
 
 # ── Permanent failure cache (age-restricted, removed, etc.) ──────────
-_PERMANENT_FAILURES: dict[str, float] = {}
+class _LRUFailureCache(dict):
+    """Dict with maxsize — evicts oldest entries when limit is reached."""
+    __slots__ = ("_maxsize",)
+    def __init__(self, maxsize: int = 10000):
+        super().__init__()
+        self._maxsize = maxsize
+    def __setitem__(self, key, value):
+        if len(self) >= self._maxsize and key not in self:
+            to_remove = max(1, self._maxsize // 10)
+            for k in list(self.keys())[:to_remove]:
+                dict.__delitem__(self, k)
+        super().__setitem__(key, value)
+
+_PERMANENT_FAILURES: dict[str, float] = _LRUFailureCache(10000)
 _PERM_FAIL_TTL = 86400  # 24 hours
 
 _PERM_FAIL_PATTERNS = [

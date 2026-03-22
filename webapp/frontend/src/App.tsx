@@ -394,7 +394,7 @@ export function App() {
     audio.addEventListener("ratechange", updatePositionState);
 
     // Buffering detection
-    audio.addEventListener("waiting", () => {
+    const onWaiting = () => {
       setBuffering(true);
       // Auto-reset buffering state after 10s to prevent infinite spinner
       if (bufferingTimeoutRef.current) clearTimeout(bufferingTimeoutRef.current);
@@ -403,22 +403,15 @@ export function App() {
         setBuffering(false);
         bufferingTimeoutRef.current = null;
       }, 10000);
-    });
-    audio.addEventListener("playing", () => {
+    };
+    const onBufferingClear = () => {
       setBuffering(false);
       if (bufferingTimeoutRef.current) {
         clearTimeout(bufferingTimeoutRef.current);
         bufferingTimeoutRef.current = null;
       }
-    });
-    audio.addEventListener("canplay", () => {
-      setBuffering(false);
-      if (bufferingTimeoutRef.current) {
-        clearTimeout(bufferingTimeoutRef.current);
-        bufferingTimeoutRef.current = null;
-      }
-    });
-    audio.addEventListener("error", () => {
+    };
+    const onError = () => {
       setBuffering(false);
       if (bufferingTimeoutRef.current) {
         clearTimeout(bufferingTimeoutRef.current);
@@ -431,7 +424,11 @@ export function App() {
         showToast(`Track unavailable, skipping...`, "warning", 2500);
         sendAction("next").then(setState).catch(() => {});
       }
-    });
+    };
+    audio.addEventListener("waiting", onWaiting);
+    audio.addEventListener("playing", onBufferingClear);
+    audio.addEventListener("canplay", onBufferingClear);
+    audio.addEventListener("error", onError);
 
     audio.addEventListener("ended", async () => {
       // DJ crossfade already handled the transition — skip double-advance
@@ -573,7 +570,19 @@ export function App() {
       }
     });
 
-    return () => { audio.pause(); audio.src = ""; preload.src = ""; };
+    return () => {
+      audio.removeEventListener("playing", updatePositionState);
+      audio.removeEventListener("pause", updatePositionState);
+      audio.removeEventListener("seeked", updatePositionState);
+      audio.removeEventListener("ratechange", updatePositionState);
+      audio.removeEventListener("waiting", onWaiting);
+      audio.removeEventListener("playing", onBufferingClear);
+      audio.removeEventListener("canplay", onBufferingClear);
+      audio.removeEventListener("error", onError);
+      audio.pause();
+      audio.src = "";
+      preload.src = "";
+    };
   }, []);
 
   const ensureEqualizerGraph = useCallback(() => {
@@ -1418,6 +1427,92 @@ export function App() {
     action("play", track.video_id, undefined, track);
   }, [action]);
 
+  // Stable callbacks for memo'd children
+  const handlePlayAllAndOpenPlayer = useCallback(async (tracks: Track[]) => {
+    for (const t of tracks) await action("add", t.video_id, undefined, t);
+    if (tracks.length) await action("play", tracks[0].video_id);
+    setView("player");
+  }, [action]);
+
+  const handleTrackPlay = useCallback((t: Track) => {
+    action("play", t.video_id);
+  }, [action]);
+
+  const handleTrackReorder = useCallback((fromIndex: number, toIndex: number) => {
+    reorderQueue(fromIndex, toIndex).then(setState).catch(() => {});
+  }, []);
+
+  const handleTrackRemove = useCallback((t: Track) => {
+    action("remove", t.video_id);
+  }, [action]);
+
+  const handleClearQueue = useCallback(() => {
+    action("clear");
+  }, [action]);
+
+  const handlePlayPlaylist = useCallback(async (playlistId: number) => {
+    setBuffering(true);
+    try {
+      const s = await playPlaylist(playlistId);
+      setState(s);
+      setView("player");
+    } catch (e) {
+      console.error("Play playlist error:", e);
+    }
+  }, []);
+
+  const handlePartyPlayTrack = useCallback((t: Track) => {
+    action("play", t.video_id, undefined, t);
+  }, [action]);
+
+  const handlePartyPlaybackAction = useCallback((playbackAction: string, track?: Track, position?: number) => {
+    if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
+    if (playbackAction === "pause") return action("pause");
+    if (playbackAction === "seek") return action("seek", undefined, position);
+  }, [action]);
+
+  const handleToggleSpectrum = useCallback(() => {
+    setShowSpectrum(v => !v);
+  }, []);
+
+  const handleSpectrumStyleChange = useCallback((s: "bars" | "wave" | "circle") => {
+    setSpectrumStyle(s);
+  }, []);
+
+  const handleAddToPlaylist = useCallback(() => {
+    if (state.current_track) {
+      setShowAddToPlaylist(true);
+      fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([]));
+    }
+  }, [state.current_track, userId]);
+
+  const handlePlayerPlayTrack = useCallback(async (t: Track) => {
+    await action("add", t.video_id, undefined, t);
+    await action("play", t.video_id);
+  }, [action]);
+
+  const handlePlayerPlayAll = useCallback(async (tracks: Track[]) => {
+    for (const t of tracks) await action("add", t.video_id, undefined, t);
+    if (tracks.length) await action("play", tracks[0].video_id);
+  }, [action]);
+
+  const handleLyricsBack = useCallback(() => {
+    setView("player");
+  }, []);
+
+  const handleActionSheetClose = useCallback(() => {
+    setActionSheetVisible(false);
+    setActionSheetTrack(null);
+  }, []);
+
+  const handleMiniPlayerAction = useCallback((act: string) => {
+    action(act);
+  }, [action]);
+
+  const handleMiniPlayerExpand = useCallback(() => {
+    setView("player");
+  }, []);
+
   // 3D Spatial Panner
   const handlePanChange = useCallback((value: number) => {
     setPanValue(value);
@@ -2029,7 +2124,7 @@ export function App() {
       {view === "player" && (
         <ViewErrorBoundary viewName="Player" fallbackColor={theme.hintColor}>
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={() => setShowSpectrum(v => !v)} spectrumStyle={spectrumStyle} onSpectrumStyleChange={(s: "bars" | "wave" | "circle") => setSpectrumStyle(s)} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={() => { if (state.current_track) { setShowAddToPlaylist(true); fetchPlaylists(userId).then(setA2pPlaylists).catch(() => setA2pPlaylists([])); } }} onPlayTrack={async (t) => { await action("add", t.video_id, undefined, t); await action("play", t.video_id); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); }} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={handleToggleSpectrum} spectrumStyle={spectrumStyle} onSpectrumStyleChange={handleSpectrumStyleChange} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={handleAddToPlaylist} onPlayTrack={handlePlayerPlayTrack} onPlayAll={handlePlayerPlayAll} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
@@ -2135,16 +2230,10 @@ export function App() {
             <TrackList
               tracks={state.queue}
               currentIndex={state.position}
-              onPlay={(t) => action("play", t.video_id)}
-              onReorder={(fromIndex, toIndex) => {
-                reorderQueue(fromIndex, toIndex).then(setState).catch(() => {});
-              }}
-              onRemove={(t) => {
-                action("remove", t.video_id);
-              }}
-              onClearQueue={() => {
-                action("clear");
-              }}
+              onPlay={handleTrackPlay}
+              onReorder={handleTrackReorder}
+              onRemove={handleTrackRemove}
+              onClearQueue={handleClearQueue}
               accentColor={accentColor}
               accentColorAlpha={accentColorAlpha}
               themeId={theme.id}
@@ -2154,16 +2243,12 @@ export function App() {
         </ViewErrorBoundary>
       )}
 
-      {view === "playlists" && <Suspense fallback={null}><ViewErrorBoundary viewName="Playlists" fallbackColor={theme.hintColor}><PlaylistView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayPlaylist={async (playlistId) => { setBuffering(true); try { const s = await playPlaylist(playlistId); setState(s); setView("player"); } catch (e) { console.error("Play playlist error:", e); } }} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} /></ViewErrorBoundary></Suspense>}
+      {view === "playlists" && <Suspense fallback={null}><ViewErrorBoundary viewName="Playlists" fallbackColor={theme.hintColor}><PlaylistView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} onPlayPlaylist={handlePlayPlaylist} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} /></ViewErrorBoundary></Suspense>}
 
       {view === "party" && (
         <Suspense fallback={null}><ViewErrorBoundary viewName="Party" fallbackColor={theme.hintColor}>
         userProfile?.is_admin ? (
-          <PartyView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); }} onPlaybackAction={(playbackAction, track, position) => {
-            if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
-            if (playbackAction === "pause") return action("pause");
-            if (playbackAction === "seek") return action("seek", undefined, position);
-          }} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />
+          <PartyView userId={userId} onPlayTrack={handlePartyPlayTrack} onPlaybackAction={handlePartyPlaybackAction} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />
         ) : (
           /* Coming Soon Banner for non-admins */
           <div style={{
@@ -2398,11 +2483,11 @@ export function App() {
         </ViewErrorBoundary></Suspense>
       )}
 
-      {view === "foryou" && <Suspense fallback={null}><ViewErrorBoundary viewName="For You" fallbackColor={theme.hintColor}><ForYouView userId={userId} currentTrack={state.current_track} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} onPlayAll={async (tracks) => { for (const t of tracks) await action("add", t.video_id, undefined, t); if (tracks.length) await action("play", tracks[0].video_id); setView("player"); }} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
+      {view === "foryou" && <Suspense fallback={null}><ViewErrorBoundary viewName="For You" fallbackColor={theme.hintColor}><ForYouView userId={userId} currentTrack={state.current_track} onPlayTrack={handlePlayAndOpenPlayer} onPlayAll={handlePlayAllAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
 
-      {view === "charts" && <Suspense fallback={null}><ViewErrorBoundary viewName="Charts" fallbackColor={theme.hintColor}><ChartsView userId={userId} onPlayTrack={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
+      {view === "charts" && <Suspense fallback={null}><ViewErrorBoundary viewName="Charts" fallbackColor={theme.hintColor}><ChartsView userId={userId} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
 
-      {view === "search" && <SearchBar onSelect={(t) => { action("play", t.video_id, undefined, t); setView("player"); }} accentColor={accentColor} themeId={theme.id} />}
+      {view === "search" && <SearchBar onSelect={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} />}
 
       {view === "leaderboard" && <Suspense fallback={null}><LeaderboardView userId={userId} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
@@ -2419,7 +2504,7 @@ export function App() {
       {view === "profile" && <Suspense fallback={null}><ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
       {view === "lyrics" && lyricsTrackId && (
-        <Suspense fallback={null}><LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={() => setView("player")} accentColor={accentColor} themeId={theme.id} /></Suspense>
+        <Suspense fallback={null}><LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={handleLyricsBack} accentColor={accentColor} themeId={theme.id} /></Suspense>
       )}
       </div>
 
@@ -2477,7 +2562,7 @@ export function App() {
       <ActionSheet
         track={actionSheetTrack}
         visible={actionSheetVisible}
-        onClose={() => { setActionSheetVisible(false); setActionSheetTrack(null); }}
+        onClose={handleActionSheetClose}
         accentColor={accentColor}
         themeId={theme.id}
         onAction={(actionId, t) => {
@@ -2534,8 +2619,8 @@ export function App() {
           themeId={theme.id}
           elapsed={elapsed}
           audioDuration={audioDuration}
-          onAction={(act) => action(act)}
-          onExpand={() => setView("player")}
+          onAction={handleMiniPlayerAction}
+          onExpand={handleMiniPlayerExpand}
         />
       )}
 

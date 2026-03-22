@@ -6,6 +6,7 @@ messages/callbacks until the user answers correctly.
 Verified status is stored in the database permanently.
 """
 
+import hashlib
 import logging
 import random
 from typing import Any, Awaitable, Callable
@@ -108,9 +109,10 @@ class CaptchaMiddleware(BaseMiddleware):
             await _send_challenge(event, tg_user.id, db_user.language)
             return
 
-        # Check the user's answer
+        # Check the user's answer (answer stored as SHA-256 hash)
         text = (event.text or "").strip()
-        if text == answer:
+        hashed_text = hashlib.sha256(text.encode()).hexdigest()
+        if hashed_text == answer:
             # Mark as passed permanently in DB
             try:
                 async with async_session() as session:
@@ -160,8 +162,9 @@ async def _send_challenge(event: Message, user_id: int, lang: str) -> None:
     b = random.randint(1, 9)
     c = random.randint(1, 9)
     answer = str(a * b + c)
+    hashed_answer = hashlib.sha256(answer.encode()).hexdigest()
     try:
-        await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, answer)
+        await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, hashed_answer)
         await cache.redis.delete(_fails_key(user_id))
     except Exception:
         logger.debug("captcha challenge redis set failed user=%s", user_id, exc_info=True)

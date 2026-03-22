@@ -1,5 +1,6 @@
 import { render } from "preact";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { initCache } from "./offlineCache";
 
 // Preconnect to API server for faster first request
@@ -120,7 +121,7 @@ if (bootLoader) {
 
 // Render app AFTER boot-loader exit is scheduled
 try {
-  render(<App />, document.getElementById("app")!);
+  render(<ErrorBoundary><App /></ErrorBoundary>, document.getElementById("app")!);
 } catch (e) {
   console.error("App render failed:", e);
 }

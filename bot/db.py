@@ -157,6 +157,7 @@ async def get_or_create_user_raw(
                 if user.is_admin and user_id not in settings.ADMIN_IDS:
                     settings.ADMIN_IDS.append(user_id)
                     await persist_admin_id(user_id)
+                    logger.info("Admin ID added at runtime: user_id=%s username=%s", user_id, username)
 
                 return user
         except IntegrityError:

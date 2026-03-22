@@ -409,7 +409,7 @@ async def get_system_stats(_: bool = Depends(verify_admin)):
 async def get_tracks(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    search: str = Query(None),
+    search: str = Query(None, max_length=200),
     source: str = Query(None),
     sort: str = Query("downloads"),  # downloads, created_at, title
     _: bool = Depends(verify_admin),
@@ -483,7 +483,7 @@ async def delete_track(track_id: int, _: bool = Depends(verify_admin)):
 async def get_users(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    search: str = Query(None),
+    search: str = Query(None, max_length=200),
     premium_only: bool = Query(False),
     banned_only: bool = Query(False),
     sort: str = Query("last_active"),  # last_active, created_at, request_count
