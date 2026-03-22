@@ -33,6 +33,32 @@ def _get_bot() -> Bot | None:
     return _bot
 
 
+def _read_id3_tags(mp3_path: Path) -> dict:
+    """Extract title/artist/duration from MP3 ID3 tags."""
+    try:
+        from mutagen.mp3 import MP3
+        from mutagen.id3 import ID3
+        audio = MP3(str(mp3_path))
+        tags = audio.tags or {}
+        title = str(tags.get("TIT2", "")).strip() or None
+        artist = str(tags.get("TPE1", "")).strip() or None
+        duration = int(audio.info.length) if audio.info else None
+        return {"title": title, "artist": artist, "duration": duration}
+    except Exception:
+        pass
+    try:
+        from mutagen import File
+        f = File(str(mp3_path), easy=True)
+        if f:
+            title = (f.get("title") or [None])[0]
+            artist = (f.get("artist") or [None])[0]
+            duration = int(f.info.length) if f and f.info else None
+            return {"title": title, "artist": artist, "duration": duration}
+    except Exception:
+        pass
+    return {}
+
+
 async def upload_to_cache(
     mp3_path: Path,
     source_id: str,
@@ -49,9 +75,21 @@ async def upload_to_cache(
     if not mp3_path.exists() or mp3_path.stat().st_size < 10 * 1024:
         return None
 
+    # Enrich metadata from ID3 tags if title/artist missing
+    if not title or not artist:
+        tags = _read_id3_tags(mp3_path)
+        title = title or tags.get("title")
+        artist = artist or tags.get("artist")
+        duration = duration or tags.get("duration")
+
+    # Skip tracks with no metadata at all
+    if not title and not artist:
+        logger.debug("Skipping %s — no metadata (title/artist unknown)", source_id)
+        return None
+
     async with _upload_semaphore:
         try:
-            caption = f"{artist} — {title}" if artist and title else (title or source_id)
+            caption = f"{artist} — {title}" if artist and title else (title or artist or source_id)
             msg = await bot.send_audio(
                 chat_id=settings.CACHE_CHANNEL_ID,
                 audio=FSInputFile(mp3_path),
@@ -62,8 +100,8 @@ async def upload_to_cache(
             )
             file_id = msg.audio.file_id if msg.audio else None
             if file_id:
-                # Save file_id to DB
-                await _save_file_id(source_id, file_id)
+                # Save file_id + enriched metadata to DB
+                await _save_file_id(source_id, file_id, title=title, artist=artist, duration=duration)
                 # Save to Redis cache too
                 try:
                     from bot.services.cache import cache
@@ -128,16 +166,30 @@ async def get_file_id(source_id: str) -> str | None:
     return None
 
 
-async def _save_file_id(source_id: str, file_id: str) -> None:
-    """Persist file_id to DB track record."""
+async def _save_file_id(source_id: str, file_id: str, title: str | None = None,
+                        artist: str | None = None, duration: int | None = None) -> None:
+    """Persist file_id and enriched metadata to DB track record."""
     try:
         from bot.models.base import async_session
         from bot.models.track import Track
         async with async_session() as session:
+            vals: dict = {"file_id": file_id}
+            # Also update missing metadata from ID3 tags
+            if title:
+                from sqlalchemy import select
+                row = (await session.execute(
+                    select(Track.title).where(Track.source_id == source_id)
+                )).scalar_one_or_none()
+                if not row:
+                    vals["title"] = title
+            if artist:
+                vals.setdefault("artist", artist) if not vals.get("title") else None
+            if duration:
+                vals["duration"] = duration
             await session.execute(
                 Track.__table__.update()
                 .where(Track.source_id == source_id)
-                .values(file_id=file_id)
+                .values(**vals)
             )
             await session.commit()
     except Exception as e:
