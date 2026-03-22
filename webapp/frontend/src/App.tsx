@@ -1874,7 +1874,7 @@ export function App() {
             onClick={(e) => { e.stopPropagation(); setLiveBannerDismissed(true); }}
             style={{
               position: "absolute", top: 4, right: 6,
-              fontSize: 14, color: tc.hint, cursor: "pointer",
+              fontSize: 14, color: theme.hintColor, cursor: "pointer",
               padding: "2px 4px", lineHeight: 1,
             }}
           >x</span>
