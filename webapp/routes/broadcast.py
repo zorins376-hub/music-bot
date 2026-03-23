@@ -174,7 +174,7 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
         from aiogram.enums import ParseMode
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
         if not settings.BOT_TOKEN:
             return
@@ -197,12 +197,13 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
                     f"Open the app to listen together"
                 )
                 rows = []
-                if settings.TMA_URL:
-                    broadcast_url = f"{settings.TMA_URL.rstrip('/')}?startapp=broadcast"
+                if settings.BOT_TOKEN:
+                    # Use deep link — works in channels, groups, and private chats
+                    bot_username = (await bot.get_me()).username
                     rows.append([
                         InlineKeyboardButton(
-                            text="Listen Live",
-                            web_app=WebAppInfo(url=broadcast_url),
+                            text="🔴 Listen Live",
+                            url=f"https://t.me/{bot_username}/app?startapp=broadcast",
                         ),
                     ])
                 kb = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
@@ -469,7 +470,7 @@ async def start_broadcast(request: Request, user: dict = Depends(get_current_use
     await r.hset(_BCAST_STATE_KEY, mapping={
         "dj_id": str(user["id"]),
         "dj_name": user.get("first_name", "DJ"),
-        "action": "idle",
+        "action": "play",
         "current_idx": "0",
         "seek_pos": "0",
         "started_at": now,

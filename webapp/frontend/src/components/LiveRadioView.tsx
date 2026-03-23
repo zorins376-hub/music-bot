@@ -126,6 +126,14 @@ export const LiveRadioView = memo(function LiveRadioView({
         const msg = JSON.parse(ev.data);
         if (msg.event === "connected" && msg.data) {
           setBroadcast(msg.data);
+          // Auto-play current track for listeners joining a live broadcast
+          if (msg.data.is_live && msg.data.tracks?.length > 0) {
+            const idx = msg.data.current_idx ?? 0;
+            const t = msg.data.tracks[idx];
+            if (t?.video_id) {
+              onPlayTrack(toPlayerTrack(t));
+            }
+          }
           return;
         }
         if (msg.event === "stopped") {
