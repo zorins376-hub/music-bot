@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # ── Каналы экосистемы (v1.1) ─────────────────────────────────────────
     TEQUILA_CHANNEL: str = ""
     FULLMOON_CHANNEL: str = ""
-    BLACKROOM_GROUP_ID: Optional[int] = None
+    BLACKROOM_GROUP_ID: Optional[str] = None
 
     # ── Telegram CDN Cache Channel ─────────────────────────────────────
     CACHE_CHANNEL_ID: Optional[int] = None  # Private channel ID for audio storage
