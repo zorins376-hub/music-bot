@@ -35,6 +35,7 @@ from bot.handlers import promote
 from bot.handlers import voice_chat
 from bot.handlers import family
 from bot.handlers import party
+from bot.handlers import chat_member
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
 from bot.middlewares.captcha import CaptchaMiddleware
@@ -377,6 +378,7 @@ def build_dispatcher() -> Dispatcher:
     dp.message.middleware(ThrottleMiddleware())
     dp.message.middleware(LoggingMiddleware())
 
+    dp.include_router(chat_member.router)  # Track bot join/leave groups
     dp.include_router(start.router)
     dp.include_router(admin.router)      # Admin (before search for forward mode)
     dp.include_router(playlist.router)   # Playlists

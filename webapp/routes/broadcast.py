@@ -137,6 +137,38 @@ async def _get_broadcast_state() -> dict:
     }
 
 
+async def _collect_broadcast_group_ids() -> list[int]:
+    """Collect all group IDs to notify: BLACKROOM config + all active bot_chats."""
+    group_ids: list[int] = []
+
+    # From config
+    if settings.BLACKROOM_GROUP_ID:
+        for gid in str(settings.BLACKROOM_GROUP_ID).split(","):
+            gid = gid.strip()
+            if gid:
+                try:
+                    group_ids.append(int(gid))
+                except ValueError:
+                    pass
+
+    # From DB: all groups where bot is active
+    try:
+        from bot.models.base import async_session as _as
+        from bot.models.bot_chat import BotChat
+        from sqlalchemy import select
+        async with _as() as session:
+            result = await session.execute(
+                select(BotChat.chat_id).where(BotChat.is_active == True)
+            )
+            for row in result.all():
+                if row[0] not in group_ids:
+                    group_ids.append(row[0])
+    except Exception as e:
+        logger.warning("Failed to load bot_chats for broadcast: %s", e)
+
+    return group_ids
+
+
 async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
     try:
         from aiogram import Bot
@@ -144,7 +176,11 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
         from aiogram.enums import ParseMode
         from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-        if not settings.BLACKROOM_GROUP_ID or not settings.BOT_TOKEN:
+        if not settings.BOT_TOKEN:
+            return
+
+        group_ids = await _collect_broadcast_group_ids()
+        if not group_ids:
             return
 
         bot = Bot(
@@ -153,12 +189,6 @@ async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
         )
         try:
             r = await _get_redis()
-
-            group_ids = [
-                int(gid.strip())
-                for gid in str(settings.BLACKROOM_GROUP_ID).split(",")
-                if gid.strip()
-            ]
 
             if action == "started":
                 text = (
