@@ -267,13 +267,20 @@ async def download_deezer(track_id: int, dest: Path, quality: str = "MP3_128") -
             timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             resp.raise_for_status()
-            with staged.open("wb") as f:
-                chunk_idx = 0
-                async for chunk in resp.content.iter_chunked(2048):
-                    if len(chunk) == 2048 and chunk_idx % 3 == 0:
-                        chunk = _decrypt_chunk(chunk, bf_key)
-                    f.write(chunk)
-                    chunk_idx += 1
+            # Read entire encrypted stream, then decrypt in 2048-byte blocks
+            encrypted = await resp.read()
+
+        # Deezer decryption: every 3rd 2048-byte block is Blowfish-encrypted
+        with staged.open("wb") as f:
+            chunk_idx = 0
+            pos = 0
+            while pos < len(encrypted):
+                chunk = encrypted[pos:pos + 2048]
+                if len(chunk) == 2048 and chunk_idx % 3 == 0:
+                    chunk = _decrypt_chunk(chunk, bf_key)
+                f.write(chunk)
+                pos += 2048
+                chunk_idx += 1
 
         return finalize_staged_file(staged, dest)
     except Exception as e:
