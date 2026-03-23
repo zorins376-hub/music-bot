@@ -2665,7 +2665,7 @@ async def _db_tracks_to_schemas(tracks) -> list[TrackSchema]:
 
 
 async def _fetch_lyrics(track_id: str) -> str | None:
-    """Fetch lyrics for a track by its source_id."""
+    """Fetch lyrics for a track. Tries LRCLIB (synced) → Genius (plain)."""
     from sqlalchemy import select
     from bot.models.base import async_session
     from bot.models.track import Track
@@ -2677,14 +2677,59 @@ async def _fetch_lyrics(track_id: str) -> str | None:
         if not t:
             return None
 
-    query = f"{t.artist} {t.title}"
+    artist = (t.artist or "").strip()
+    title = (t.title or "").strip()
+    if not title:
+        return None
 
-    # Try Genius API if token available
+    # 1) LRCLIB — free, no key, returns synced LRC lyrics
+    try:
+        import aiohttp
+        from bot.services.http_session import get_session
+        session = get_session()
+        params: dict[str, str | int] = {"track_name": title, "artist_name": artist}
+        if t.duration and t.duration > 0:
+            params["duration"] = t.duration
+        async with session.get(
+            "https://lrclib.net/api/get",
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                synced = data.get("syncedLyrics")
+                if synced and synced.strip():
+                    return synced.strip()
+                plain = data.get("plainLyrics")
+                if plain and plain.strip():
+                    return plain.strip()
+    except Exception as e:
+        logger.debug("LRCLIB lyrics fetch failed: %s", e)
+
+    # 1b) LRCLIB search fallback (looser matching)
+    try:
+        async with session.get(
+            "https://lrclib.net/api/search",
+            params={"q": f"{artist} {title}"},
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status == 200:
+                results = await resp.json()
+                if results and len(results) > 0:
+                    best = results[0]
+                    synced = best.get("syncedLyrics")
+                    if synced and synced.strip():
+                        return synced.strip()
+                    plain = best.get("plainLyrics")
+                    if plain and plain.strip():
+                        return plain.strip()
+    except Exception as e:
+        logger.debug("LRCLIB search failed: %s", e)
+
+    # 2) Genius API fallback (requires GENIUS_TOKEN)
     if settings.GENIUS_TOKEN:
         try:
-            import aiohttp
-            from bot.services.http_session import get_session
-            session = await get_session()
+            query = f"{artist} {title}"
             async with session.get(
                 "https://api.genius.com/search",
                 params={"q": query},
@@ -2696,7 +2741,6 @@ async def _fetch_lyrics(track_id: str) -> str | None:
                     hits = data.get("response", {}).get("hits", [])
                     if hits:
                         url = hits[0]["result"]["url"]
-                        # Scrape lyrics page
                         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as page_resp:
                             if page_resp.status == 200:
                                 from bs4 import BeautifulSoup
@@ -3476,6 +3520,10 @@ async def serve_admin():
         return FileResponse(admin_html, media_type="text/html")
     return HTMLResponse("<h1>Admin panel not found</h1>", status_code=404)
 
+
+_SOUNDS_DIR = Path(__file__).resolve().parent / "static" / "sounds"
+if _SOUNDS_DIR.is_dir():
+    app.mount("/sounds", StaticFiles(directory=_SOUNDS_DIR), name="ambient_sounds")
 
 if _FRONTEND_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="static_assets")
