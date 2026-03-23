@@ -542,9 +542,13 @@ async def stream_audio(
 
     # Check if already downloaded (and has valid MP3 header)
     mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-    if mp3_path.exists() and not _is_valid_mp3(mp3_path):
-        logger.warning("Removing corrupt or invalid file %s", mp3_path)
-        mp3_path.unlink()
+    if mp3_path.exists():
+        # Only remove truly corrupt files (very small AND invalid header)
+        # Don't remove files that might be mid-stream to another request
+        fsize = mp3_path.stat().st_size
+        if fsize < 10 * 1024 and not _is_valid_mp3(mp3_path):
+            logger.warning("Removing corrupt file %s (%d bytes)", mp3_path, fsize)
+            mp3_path.unlink()
 
     # Telegram CDN fallback: restore from cache channel if file missing
     if not mp3_path.exists():

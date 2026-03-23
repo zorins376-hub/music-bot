@@ -411,6 +411,7 @@ export function App() {
         bufferingTimeoutRef.current = null;
       }
     };
+    let _errorRetryCount = 0;
     const onError = () => {
       setBuffering(false);
       if (bufferingTimeoutRef.current) {
@@ -420,13 +421,35 @@ export function App() {
       // Only auto-skip if user was actually playing — prevents ghost state on cold start
       const s = stateRef.current;
       if (s.is_playing && s.current_track) {
+        // Retry once before skipping — stream may still be loading on server
+        if (_errorRetryCount < 1) {
+          _errorRetryCount++;
+          console.warn("Audio error, retrying in 1.5s...");
+          setBuffering(true);
+          setTimeout(() => {
+            const a = audioRef.current;
+            if (a && a.src) {
+              const src = a.src;
+              a.src = "";
+              a.src = src;
+              a.play().catch(() => {});
+            }
+          }, 1500);
+          return;
+        }
+        _errorRetryCount = 0;
         console.warn("Audio error during playback, auto-skipping to next track");
         showToast(`Track unavailable, skipping...`, "warning", 2500);
         sendAction("next").then(setState).catch(() => {});
       }
     };
+    // Reset retry counter on successful play
+    const onPlaying = () => {
+      _errorRetryCount = 0;
+      onBufferingClear();
+    };
     audio.addEventListener("waiting", onWaiting);
-    audio.addEventListener("playing", onBufferingClear);
+    audio.addEventListener("playing", onPlaying);
     audio.addEventListener("canplay", onBufferingClear);
     audio.addEventListener("error", onError);
 
@@ -576,7 +599,7 @@ export function App() {
       audio.removeEventListener("seeked", updatePositionState);
       audio.removeEventListener("ratechange", updatePositionState);
       audio.removeEventListener("waiting", onWaiting);
-      audio.removeEventListener("playing", onBufferingClear);
+      audio.removeEventListener("playing", onPlaying);
       audio.removeEventListener("canplay", onBufferingClear);
       audio.removeEventListener("error", onError);
       audio.pause();
