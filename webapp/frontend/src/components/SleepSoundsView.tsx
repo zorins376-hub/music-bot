@@ -1,9 +1,9 @@
 /**
  * Sleep & Focus Sounds Mixer
  *
- * Ambient sounds that overlay on top of music playback.
- * Uses Web Audio API to generate noise procedurally — NO external files needed.
- * Sounds: Rain, Ocean, Thunder, Fire, Wind, Forest, White Noise, Pink Noise, Brown Noise, Cafe
+ * Real ambient audio files for nature/ambient sounds + Web Audio synthesis for noise colors.
+ * Nature/ambient: rain, ocean, thunder, fire, wind, forest, cafe, train, night → /sounds/{id}.mp3
+ * Noise: white, pink, brown → procedural Web Audio generation
  */
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { memo } from "preact/compat";
@@ -37,6 +37,9 @@ const SOUNDS: SoundDef[] = [
   { id: "night",       label: "Night",       icon: "night",   category: "ambient" },
 ];
 
+/** IDs that use real audio files */
+const FILE_SOUNDS = new Set(["rain", "ocean", "thunder", "fire", "wind", "forest", "cafe", "train", "night"]);
+
 const ICON_SVG: Record<string, string> = {
   rain:    "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 4c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5zm-4 3c.83 0 1.5.67 1.5 1.5v3c0 .83-.67 1.5-1.5 1.5S6.5 14.33 6.5 13.5v-3c0-.83.67-1.5 1.5-1.5zm8 0c.83 0 1.5.67 1.5 1.5v3c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-3c0-.83.67-1.5 1.5-1.5z",
   ocean:   "M2 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 16c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0",
@@ -56,12 +59,13 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-// ── Procedural Audio Generators ──
+// ── Hybrid Audio Engine: real files + procedural noise ──
 
 class AmbientGenerator {
   private ctx: AudioContext;
   private masterGain: GainNode;
-  private sources: Map<string, { node: AudioNode; gain: GainNode }> = new Map();
+  private synthSources: Map<string, { node: AudioNode; gain: GainNode }> = new Map();
+  private audioElements: Map<string, { el: HTMLAudioElement; mediaNode: MediaElementAudioSourceNode; gain: GainNode }> = new Map();
 
   constructor() {
     this.ctx = new AudioContext();
@@ -77,98 +81,112 @@ class AmbientGenerator {
   }
 
   startSound(id: string, volume: number) {
-    if (this.sources.has(id)) return;
+    if (this.synthSources.has(id) || this.audioElements.has(id)) return;
     if (this.ctx.state === "suspended") this.ctx.resume();
 
+    if (FILE_SOUNDS.has(id)) {
+      this._startFileSound(id, volume);
+    } else {
+      this._startSynthSound(id, volume);
+    }
+  }
+
+  private _startFileSound(id: string, volume: number) {
     const gain = this.ctx.createGain();
     gain.gain.value = 0;
     gain.connect(this.masterGain);
-    // Fade in
+    gain.gain.setTargetAtTime(volume, this.ctx.currentTime, 0.3);
+
+    const el = new Audio(`/sounds/${id}.mp3`);
+    el.loop = true;
+    el.crossOrigin = "anonymous";
+    el.volume = 1; // volume controlled via Web Audio gain
+    const mediaNode = this.ctx.createMediaElementSource(el);
+    mediaNode.connect(gain);
+    el.play().catch(() => {});
+    this.audioElements.set(id, { el, mediaNode, gain });
+  }
+
+  private _startSynthSound(id: string, volume: number) {
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(this.masterGain);
     gain.gain.setTargetAtTime(volume, this.ctx.currentTime, 0.3);
 
     let node: AudioNode;
-
     switch (id) {
-      case "white_noise":
-        node = this.createNoise("white");
-        break;
-      case "pink_noise":
-        node = this.createNoise("pink");
-        break;
-      case "brown_noise":
-        node = this.createNoise("brown");
-        break;
-      case "rain":
-        node = this.createRain();
-        break;
-      case "ocean":
-        node = this.createOcean();
-        break;
-      case "thunder":
-        node = this.createThunder();
-        break;
-      case "fire":
-        node = this.createFire();
-        break;
-      case "wind":
-        node = this.createWind();
-        break;
-      case "forest":
-        node = this.createForest();
-        break;
-      case "cafe":
-        node = this.createCafe();
-        break;
-      case "train":
-        node = this.createTrain();
-        break;
-      case "night":
-        node = this.createNight();
-        break;
-      default:
-        node = this.createNoise("white");
+      case "white_noise": node = this.createNoise("white"); break;
+      case "pink_noise":  node = this.createNoise("pink"); break;
+      case "brown_noise": node = this.createNoise("brown"); break;
+      default:            node = this.createNoise("white");
     }
-
     node.connect(gain);
-    this.sources.set(id, { node, gain });
+    this.synthSources.set(id, { node, gain });
   }
 
   stopSound(id: string) {
-    const src = this.sources.get(id);
+    // File-based sound
+    const fileSrc = this.audioElements.get(id);
+    if (fileSrc) {
+      fileSrc.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
+      setTimeout(() => {
+        try {
+          fileSrc.el.pause();
+          fileSrc.el.src = "";
+          fileSrc.mediaNode.disconnect();
+          fileSrc.gain.disconnect();
+        } catch {}
+        this.audioElements.delete(id);
+      }, 600);
+      return;
+    }
+    // Synth sound
+    const src = this.synthSources.get(id);
     if (!src) return;
-    // Fade out
     src.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
     setTimeout(() => {
       try {
         src.node.disconnect();
         src.gain.disconnect();
       } catch {}
-      this.sources.delete(id);
+      this.synthSources.delete(id);
     }, 600);
   }
 
   setVolume(id: string, volume: number) {
-    const src = this.sources.get(id);
+    const fileSrc = this.audioElements.get(id);
+    if (fileSrc) {
+      fileSrc.gain.gain.setTargetAtTime(volume, this.ctx.currentTime, 0.05);
+      return;
+    }
+    const src = this.synthSources.get(id);
     if (src) {
       src.gain.gain.setTargetAtTime(volume, this.ctx.currentTime, 0.05);
     }
   }
 
   stopAll() {
-    for (const [id] of this.sources) {
-      this.stopSound(id);
-    }
+    for (const [id] of this.audioElements) this.stopSound(id);
+    for (const [id] of this.synthSources) this.stopSound(id);
   }
 
   destroy() {
-    this.stopAll();
+    // Immediate cleanup without fade
+    for (const [, src] of this.audioElements) {
+      try { src.el.pause(); src.el.src = ""; src.mediaNode.disconnect(); src.gain.disconnect(); } catch {}
+    }
+    this.audioElements.clear();
+    for (const [, src] of this.synthSources) {
+      try { src.node.disconnect(); src.gain.disconnect(); } catch {}
+    }
+    this.synthSources.clear();
     this.ctx.close();
   }
 
-  // ── Noise generators ──
+  // ── Noise generators (synthesis) ──
 
   private createNoise(type: "white" | "pink" | "brown"): AudioBufferSourceNode {
-    const bufferSize = this.ctx.sampleRate * 4; // 4 seconds loop
+    const bufferSize = this.ctx.sampleRate * 4;
     const buffer = this.ctx.createBuffer(2, bufferSize, this.ctx.sampleRate);
 
     for (let ch = 0; ch < 2; ch++) {
@@ -182,7 +200,6 @@ class AmbientGenerator {
         if (type === "white") {
           data[i] = white * 0.5;
         } else if (type === "pink") {
-          // Pink noise via Paul Kellet's algorithm
           b0 = 0.99886 * b0 + white * 0.0555179;
           b1 = 0.99332 * b1 + white * 0.0750759;
           b2 = 0.96900 * b2 + white * 0.1538520;
@@ -192,7 +209,6 @@ class AmbientGenerator {
           data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
           b6 = white * 0.115926;
         } else {
-          // Brown noise
           const next = lastOut + white * 0.02;
           lastOut = Math.max(-1, Math.min(1, next));
           data[i] = lastOut * 3.5;
@@ -205,238 +221,6 @@ class AmbientGenerator {
     src.loop = true;
     src.start();
     return src;
-  }
-
-  private createRain(): AudioNode {
-    // Pink noise + bandpass filter to simulate rain
-    const noise = this.createNoise("pink");
-    const hp = this.ctx.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.value = 1000;
-    hp.Q.value = 0.5;
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 8000;
-    lp.Q.value = 0.3;
-    noise.connect(hp);
-    hp.connect(lp);
-    // Add subtle LFO modulation for natural variation
-    const lfo = this.ctx.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.15;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 800;
-    lfo.connect(lfoGain);
-    lfoGain.connect(hp.frequency);
-    lfo.start();
-    return lp;
-  }
-
-  private createOcean(): AudioNode {
-    // Brown noise with slow LFO for wave-like motion
-    const noise = this.createNoise("brown");
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 400;
-    lp.Q.value = 1;
-    // Wave oscillation
-    const lfo = this.ctx.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.08; // ~8 second wave cycle
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 200;
-    lfo.connect(lfoGain);
-    lfoGain.connect(lp.frequency);
-    lfo.start();
-    noise.connect(lp);
-    return lp;
-  }
-
-  private createThunder(): AudioNode {
-    // Low rumble: brown noise filtered very low
-    const noise = this.createNoise("brown");
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 150;
-    lp.Q.value = 2;
-    // Intermittent volume for rumble effect
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.3;
-    const lfo = this.ctx.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.05;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 0.6;
-    lfo.connect(lfoGain);
-    lfoGain.connect(gain.gain);
-    lfo.start();
-    noise.connect(lp);
-    lp.connect(gain);
-    return gain;
-  }
-
-  private createFire(): AudioNode {
-    // Filtered brown noise with crackle texture
-    const noise = this.createNoise("brown");
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 600;
-    bp.Q.value = 0.5;
-    // Crackle: white noise bursts
-    const crackle = this.createNoise("white");
-    const crackleGain = this.ctx.createGain();
-    crackleGain.gain.value = 0.08;
-    const crackleFilter = this.ctx.createBiquadFilter();
-    crackleFilter.type = "highpass";
-    crackleFilter.frequency.value = 4000;
-    crackle.connect(crackleFilter);
-    crackleFilter.connect(crackleGain);
-    // Mix
-    const mixer = this.ctx.createGain();
-    mixer.gain.value = 1;
-    noise.connect(bp);
-    bp.connect(mixer);
-    crackleGain.connect(mixer);
-    return mixer;
-  }
-
-  private createWind(): AudioNode {
-    // Pink noise with slow sweeping bandpass
-    const noise = this.createNoise("pink");
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 800;
-    bp.Q.value = 2;
-    const lfo = this.ctx.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.12;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 600;
-    lfo.connect(lfoGain);
-    lfoGain.connect(bp.frequency);
-    lfo.start();
-    noise.connect(bp);
-    return bp;
-  }
-
-  private createForest(): AudioNode {
-    // Layered: gentle pink noise (leaves) + bird-like chirps
-    const leaves = this.createNoise("pink");
-    const leavesFilter = this.ctx.createBiquadFilter();
-    leavesFilter.type = "bandpass";
-    leavesFilter.frequency.value = 3000;
-    leavesFilter.Q.value = 0.3;
-    const leavesGain = this.ctx.createGain();
-    leavesGain.gain.value = 0.4;
-    leaves.connect(leavesFilter);
-    leavesFilter.connect(leavesGain);
-    // Bird chirps: high-pitched oscillator with random modulation
-    const bird = this.ctx.createOscillator();
-    bird.type = "sine";
-    bird.frequency.value = 3500;
-    const birdGain = this.ctx.createGain();
-    birdGain.gain.value = 0;
-    // Modulate bird volume with random pulses
-    const birdLfo = this.ctx.createOscillator();
-    birdLfo.type = "square";
-    birdLfo.frequency.value = 0.3;
-    const birdLfoGain = this.ctx.createGain();
-    birdLfoGain.gain.value = 0.03;
-    birdLfo.connect(birdLfoGain);
-    birdLfoGain.connect(birdGain.gain);
-    birdLfo.start();
-    bird.connect(birdGain);
-    bird.start();
-    // Mix
-    const mixer = this.ctx.createGain();
-    leavesGain.connect(mixer);
-    birdGain.connect(mixer);
-    return mixer;
-  }
-
-  private createCafe(): AudioNode {
-    // Muffled conversation: filtered pink noise
-    const noise = this.createNoise("pink");
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 1200;
-    bp.Q.value = 1.5;
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 3000;
-    // Gentle volume fluctuation
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.7;
-    const lfo = this.ctx.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.2;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 0.15;
-    lfo.connect(lfoGain);
-    lfoGain.connect(gain.gain);
-    lfo.start();
-    noise.connect(bp);
-    bp.connect(lp);
-    lp.connect(gain);
-    return gain;
-  }
-
-  private createTrain(): AudioNode {
-    // Rhythmic brown noise with periodic clickety-clack
-    const noise = this.createNoise("brown");
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 300;
-    // Rhythmic component
-    const click = this.ctx.createOscillator();
-    click.type = "square";
-    click.frequency.value = 2.2; // clickety-clack rhythm
-    const clickGain = this.ctx.createGain();
-    clickGain.gain.value = 0.06;
-    const clickFilter = this.ctx.createBiquadFilter();
-    clickFilter.type = "bandpass";
-    clickFilter.frequency.value = 800;
-    clickFilter.Q.value = 5;
-    click.connect(clickFilter);
-    clickFilter.connect(clickGain);
-    click.start();
-    const mixer = this.ctx.createGain();
-    noise.connect(lp);
-    lp.connect(mixer);
-    clickGain.connect(mixer);
-    return mixer;
-  }
-
-  private createNight(): AudioNode {
-    // Crickets + gentle wind
-    const wind = this.createNoise("pink");
-    const windFilter = this.ctx.createBiquadFilter();
-    windFilter.type = "lowpass";
-    windFilter.frequency.value = 600;
-    const windGain = this.ctx.createGain();
-    windGain.gain.value = 0.3;
-    wind.connect(windFilter);
-    windFilter.connect(windGain);
-    // Crickets: high-frequency oscillator with rapid modulation
-    const cricket = this.ctx.createOscillator();
-    cricket.type = "sine";
-    cricket.frequency.value = 4800;
-    const cricketAm = this.ctx.createOscillator();
-    cricketAm.type = "square";
-    cricketAm.frequency.value = 12;
-    const cricketAmGain = this.ctx.createGain();
-    cricketAmGain.gain.value = 0.015;
-    cricketAm.connect(cricketAmGain);
-    const cricketGain = this.ctx.createGain();
-    cricketGain.gain.value = 0;
-    cricketAmGain.connect(cricketGain.gain);
-    cricket.connect(cricketGain);
-    cricketAm.start();
-    cricket.start();
-    const mixer = this.ctx.createGain();
-    windGain.connect(mixer);
-    cricketGain.connect(mixer);
-    return mixer;
   }
 }
 
@@ -461,7 +245,6 @@ export const SleepSoundsView = memo(function SleepSoundsView({ accentColor = "va
   const generatorRef = useRef<AmbientGenerator | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Initialize generator
   useEffect(() => {
     return () => {
       generatorRef.current?.destroy();
@@ -508,11 +291,9 @@ export const SleepSoundsView = memo(function SleepSoundsView({ accentColor = "va
   const applyPreset = useCallback((preset: typeof PRESETS[0]) => {
     haptic("medium");
     const gen = getGenerator();
-    // Stop all current
     for (const id of Object.keys(activeSounds)) {
       gen.stopSound(id);
     }
-    // Start preset sounds
     const next: Record<string, number> = {};
     for (const [id, vol] of Object.entries(preset.sounds)) {
       gen.startSound(id, vol);
@@ -540,7 +321,6 @@ export const SleepSoundsView = memo(function SleepSoundsView({ accentColor = "va
       const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
       setTimerRemaining(remaining);
       if (remaining <= 0) {
-        // Fade out and stop
         if (timerRef.current) clearInterval(timerRef.current);
         stopAll();
       }

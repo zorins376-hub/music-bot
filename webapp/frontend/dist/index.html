@@ -30,6 +30,24 @@
       color: var(--tg-theme-text-color, #eee);
       min-height: 100vh;
       overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    /* Smooth scrolling everywhere */
+    *, *::before, *::after {
+      scroll-behavior: smooth;
+    }
+    /* GPU-accelerated scrollable containers */
+    [style*="overflow"] {
+      -webkit-overflow-scrolling: touch;
+      will-change: scroll-position;
+    }
+    /* Hide scrollbars but keep scrolling */
+    ::-webkit-scrollbar { width: 0; height: 0; display: none; }
+    /* Reduce backdrop-filter cost in scrolling lists */
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
     @keyframes meshRotate {
       0%, 100% { filter: blur(60px) brightness(0.5); transform: scale(1.1) rotate(0deg); }
@@ -388,7 +406,7 @@
     .boot-loader-sparkle.s5 { left: 49%; top: 10%; animation-delay: 1.8s; }
     .boot-loader-sparkle.s6 { left: 52%; bottom: 12%; animation-delay: 2.2s; }
   </style>
-  <script type="module" crossorigin src="/assets/index-BWnvKcai.js"></script>
+  <script type="module" crossorigin src="/assets/index-CmWL2Zq4.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/vendor-ChlNETzS.js">
 </head>
 <body>
