@@ -326,7 +326,6 @@ async def _collaborative(session, user_id: int, listened_ids: set[int], limit: i
             ListeningHistory.user_id.in_(similar_user_ids),
             ListeningHistory.action == "play",
             ~Track.id.in_(listened_ids),
-            Track.file_id.is_not(None),
         )
         .group_by(Track.id)
         .order_by(func.count(ListeningHistory.id).desc())
@@ -373,7 +372,6 @@ async def _content_based(session, user_obj, listened_ids: set[int], limit: int) 
         select(Track)
         .where(
             or_(*conditions),
-            Track.file_id.is_not(None),
         )
         .order_by(Track.downloads.desc())
         .limit(limit * 2)
@@ -396,7 +394,6 @@ async def _popular_fallback(session, listened_ids: set[int], limit: int) -> list
         .where(
             ListeningHistory.action == "play",
             ListeningHistory.created_at >= week_ago,
-            Track.file_id.is_not(None),
         )
         .group_by(Track.id)
         .order_by(func.count(ListeningHistory.id).desc())
@@ -413,7 +410,6 @@ async def _popular_fallback(session, listened_ids: set[int], limit: int) -> list
     # Ultimate fallback: any popular tracks
     result2 = await session.execute(
         select(Track)
-        .where(Track.file_id.is_not(None))
         .order_by(Track.downloads.desc())
         .limit(limit)
     )
@@ -427,11 +423,12 @@ def _track_to_dict(track) -> dict:
     return {
         "video_id": track.source_id,
         "title": track.title or "Unknown",
-        "uploader": track.artist or "Unknown",
+        "artist": track.artist or "Unknown",
         "duration": duration,
         "duration_fmt": (fmt_duration(duration) if duration > 0 else "?:??"),
         "source": track.source or "youtube",
         "file_id": track.file_id,
+        "cover_url": track.cover_url,
     }
 
 

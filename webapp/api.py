@@ -49,6 +49,13 @@ def _is_valid_mp3(path: Path) -> bool:
         return False
 
 
+def _yt_thumb(video_id: str) -> str | None:
+    """Return YouTube thumbnail URL if video_id looks like a YouTube ID."""
+    if not video_id or video_id.startswith(("ym_", "sp_", "dz_", "vk_", "sc_", "am_")):
+        return None
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+
 def _select_bitrate(pref: str | None, premium: bool) -> int:
     """Map stored quality preference to bitrate for yt-dlp pipeline.
 
@@ -1532,18 +1539,113 @@ async def get_wave(
     mood: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
-    """AI DJ: generate infinite track recommendations based on user taste."""
+    """AI DJ: generate infinite track recommendations based on user taste.
+
+    Hybrid approach:
+    1. If mood → Deezer mood-based discovery
+    2. DB-based recommendations (collaborative + content)
+    3. Deezer discovery based on user's top artists
+    4. Mix: 50% DB recs + 50% Deezer discovery (deduped)
+    """
     if user.get("id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    recs: list[dict] = []
+    from recommender.deezer_discovery import discover_for_user, discover_by_mood
+
+    # If mood specified → pure Deezer mood discovery
+    if mood:
+        dz_tracks = await discover_by_mood(mood, limit=limit)
+        tracks = [
+            TrackSchema(
+                video_id=r["video_id"], title=r["title"], artist=r["artist"],
+                duration=r.get("duration", 0), duration_fmt=r.get("duration_fmt", "0:00"),
+                source=r.get("source", "deezer"), cover_url=r.get("cover_url"),
+            )
+            for r in dz_tracks
+        ]
+        return SearchResult(tracks=tracks, total=len(tracks))
+
+    # Get DB-based recommendations
+    db_recs: list[dict] = []
     if settings.SUPABASE_AI_ENABLED:
         from bot.services.supabase_ai import supabase_ai
-        recs = await supabase_ai.get_recommendations(user_id, limit=limit)
+        db_recs = await supabase_ai.get_recommendations(user_id, limit=limit)
     else:
         from recommender.ai_dj import get_recommendations
-        recs = await get_recommendations(user_id, limit=limit)
+        db_recs = await get_recommendations(user_id, limit=limit)
 
+    # Get user's top artists for Deezer discovery
+    top_artists: list[str] = []
+    listened_vids: set[str] = set()
+    try:
+        from bot.models.base import async_session
+        from bot.models.track import ListeningHistory, Track
+        from sqlalchemy import func, select
+        async with async_session() as session:
+            artist_r = await session.execute(
+                select(Track.artist, func.count(ListeningHistory.id).label("c"))
+                .join(Track, Track.id == ListeningHistory.track_id)
+                .where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                    Track.artist.isnot(None),
+                )
+                .group_by(Track.artist)
+                .order_by(func.count(ListeningHistory.id).desc())
+                .limit(8)
+            )
+            top_artists = [row[0] for row in artist_r.all() if row[0]]
+
+            vid_r = await session.execute(
+                select(Track.source_id)
+                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                .where(ListeningHistory.user_id == user_id)
+            )
+            listened_vids = {row[0] for row in vid_r.all() if row[0]}
+    except Exception:
+        pass
+
+    # Deezer discovery (parallel with DB recs already fetched)
+    dz_recs: list[dict] = []
+    if top_artists:
+        try:
+            dz_recs = await discover_for_user(top_artists, listened_vids, limit=limit)
+        except Exception:
+            pass
+
+    # Mix: DB recs first, then fill with Deezer discovery (deduped)
+    seen_ids: set[str] = set()
+    merged: list[dict] = []
+
+    # Add DB recs
+    for r in db_recs:
+        vid = r.get("video_id", r.get("source_id", ""))
+        if vid and vid not in seen_ids:
+            seen_ids.add(vid)
+            merged.append(r)
+
+    # Interleave Deezer tracks (insert after every 2 DB tracks)
+    dz_idx = 0
+    insert_positions = []
+    for i in range(2, len(merged) + len(dz_recs), 3):
+        if dz_idx < len(dz_recs):
+            insert_positions.append((i, dz_recs[dz_idx]))
+            dz_idx += 1
+
+    for offset, (pos, track) in enumerate(insert_positions):
+        vid = track.get("video_id", "")
+        if vid and vid not in seen_ids:
+            seen_ids.add(vid)
+            merged.insert(min(pos + offset, len(merged)), track)
+
+    # Add remaining Deezer tracks at end
+    for t in dz_recs[dz_idx:]:
+        vid = t.get("video_id", "")
+        if vid and vid not in seen_ids:
+            seen_ids.add(vid)
+            merged.append(t)
+
+    # Convert to response format
     tracks = [
         TrackSchema(
             video_id=r.get("video_id", r.get("source_id", "")),
@@ -1552,9 +1654,9 @@ async def get_wave(
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
-            cover_url=r.get("cover_url") or (f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg" if r.get("source", "youtube") == "youtube" else None),
+            cover_url=r.get("cover_url") or _yt_thumb(r.get("video_id", "")),
         )
-        for r in recs
+        for r in merged[:limit]
         if r.get("video_id") or r.get("source_id")
     ]
     return SearchResult(tracks=tracks, total=len(tracks))
@@ -1686,23 +1788,60 @@ async def get_similar(
     limit: int = Query(default=10, ge=1, le=30),
     user: dict = Depends(get_current_user),
 ):
-    """Find tracks similar to a given track using Supabase AI embeddings."""
-    if not settings.SUPABASE_AI_ENABLED:
-        return SearchResult(tracks=[], total=0)
-    from bot.services.supabase_ai import supabase_ai
-    results = await supabase_ai.get_similar(source_id=video_id, limit=limit)
+    """Find tracks similar to a given track.
+
+    Tries: Supabase AI embeddings → local DB (same artist) → Deezer discovery.
+    """
+    results: list[dict] = []
+
+    # Try Supabase AI first
+    if settings.SUPABASE_AI_ENABLED:
+        from bot.services.supabase_ai import supabase_ai
+        results = await supabase_ai.get_similar(source_id=video_id, limit=limit)
+
+    # Try local ai_dj similar
+    if not results:
+        try:
+            from recommender.ai_dj import get_similar_tracks
+            from bot.models.base import async_session
+            from bot.models.track import Track
+            from sqlalchemy import select
+            async with async_session() as session:
+                row = (await session.execute(
+                    select(Track).where(Track.source_id == video_id)
+                )).scalar_one_or_none()
+                if row:
+                    results = await get_similar_tracks(row.id, limit=limit)
+        except Exception:
+            pass
+
+    # Deezer fallback: search by title + artist
+    if not results:
+        try:
+            from bot.models.base import async_session
+            from bot.models.track import Track
+            from sqlalchemy import select
+            from recommender.deezer_discovery import find_similar_via_deezer
+            async with async_session() as session:
+                track = (await session.execute(
+                    select(Track).where(Track.source_id == video_id)
+                )).scalar_one_or_none()
+                if track and (track.title or track.artist):
+                    results = await find_similar_via_deezer(
+                        track.title or "", track.artist or "", limit=limit
+                    )
+        except Exception:
+            pass
+
     tracks = [
         TrackSchema(
             video_id=r.get("video_id", r.get("source_id", "")),
             title=r.get("title", "Unknown"),
-            artist=r.get("artist", "Unknown"),
+            artist=r.get("artist", r.get("uploader", "Unknown")),
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
-            cover_url=r.get("cover_url") or (
-                f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg"
-                if r.get("source", "youtube") == "youtube" else None
-            ),
+            cover_url=r.get("cover_url") or _yt_thumb(r.get("video_id", "")),
         )
         for r in results
         if r.get("video_id") or r.get("source_id")
@@ -1745,11 +1884,49 @@ async def get_trending(
     hours: int = 24, limit: int = 20, genre: str | None = None,
     user: dict = Depends(get_current_user),
 ):
-    """Get currently trending tracks."""
-    if not settings.SUPABASE_AI_ENABLED:
-        return SearchResult(tracks=[], total=0)
-    from bot.services.supabase_ai import supabase_ai
-    results = await supabase_ai.get_trending(hours=hours, limit=limit, genre=genre)
+    """Get currently trending tracks — most played in last N hours."""
+    results: list[dict] = []
+
+    if settings.SUPABASE_AI_ENABLED:
+        from bot.services.supabase_ai import supabase_ai
+        results = await supabase_ai.get_trending(hours=hours, limit=limit, genre=genre)
+
+    # Local DB fallback: most played tracks in last N hours
+    if not results:
+        from bot.models.base import async_session
+        from bot.models.track import ListeningHistory, Track
+        from sqlalchemy import func, select
+        from datetime import datetime, timedelta, timezone
+
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        async with async_session() as session:
+            q = (
+                select(Track, func.count(ListeningHistory.id).label("plays"))
+                .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                .where(
+                    ListeningHistory.action == "play",
+                    ListeningHistory.created_at >= since,
+                )
+                .group_by(Track.id)
+                .order_by(func.count(ListeningHistory.id).desc())
+                .limit(limit)
+            )
+            rows = (await session.execute(q)).all()
+            results = [
+                {
+                    "video_id": t.source_id, "title": t.title or "Unknown",
+                    "artist": t.artist or "Unknown", "duration": t.duration or 0,
+                    "duration_fmt": f"{(t.duration or 0) // 60}:{(t.duration or 0) % 60:02d}",
+                    "source": t.source or "youtube", "cover_url": t.cover_url,
+                }
+                for t, plays in rows
+            ]
+
+    # If still empty (no listening data yet), fetch Deezer global chart
+    if not results:
+        from recommender.deezer_discovery import get_genre_tracks
+        results = await get_genre_tracks(0, limit=limit)
+
     tracks = [
         TrackSchema(
             video_id=r.get("video_id", r.get("source_id", "")),
@@ -1758,10 +1935,7 @@ async def get_trending(
             duration=r.get("duration", 0),
             duration_fmt=r.get("duration_fmt", "0:00"),
             source=r.get("source", "youtube"),
-            cover_url=r.get("cover_url") or (
-                f"https://i.ytimg.com/vi/{r.get('video_id', r.get('source_id', ''))}/hqdefault.jpg"
-                if r.get("source", "youtube") == "youtube" else None
-            ),
+            cover_url=r.get("cover_url") or _yt_thumb(r.get("video_id", "")),
         )
         for r in results
         if r.get("video_id") or r.get("source_id")

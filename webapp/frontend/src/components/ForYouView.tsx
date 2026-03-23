@@ -418,7 +418,7 @@ export const ForYouView = memo(function ForYouView({
       <div style={{
         marginBottom: 28, padding: 16, borderRadius: 22,
         background: tc.cardBg, border: tc.cardBorder,
-        backdropFilter: "blur(16px)",
+        transform: "translateZ(0)",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <SectionHeading icon={<IconWave size={16} color={tc.highlight} />} title="Волна" tc={tc} />
@@ -441,7 +441,7 @@ export const ForYouView = memo(function ForYouView({
       <div style={{
         marginBottom: 28, padding: 16, borderRadius: 22,
         background: tc.cardBg, border: tc.cardBorder,
-        backdropFilter: "blur(16px)",
+        transform: "translateZ(0)",
       }}>
         <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="В тренде" tc={tc} />
 
@@ -510,7 +510,7 @@ export const ForYouView = memo(function ForYouView({
         <div style={{
           marginBottom: 28, padding: 16, borderRadius: 22,
           background: tc.cardBg, border: tc.cardBorder,
-          backdropFilter: "blur(16px)",
+          transform: "translateZ(0)",
         }}>
           <SectionHeading icon={<IconSimilar size={16} color={tc.highlight} />} title="Похожее" tc={tc} />
           <div style={{
@@ -527,7 +527,7 @@ export const ForYouView = memo(function ForYouView({
       <div style={{
         padding: 16, borderRadius: 22,
         background: tc.cardBg, border: tc.cardBorder,
-        backdropFilter: "blur(16px)",
+        transform: "translateZ(0)",
       }}>
         <SectionHeading icon={<IconRocket size={16} color={tc.highlight} />} title="AI Плейлист" tc={tc} />
 
