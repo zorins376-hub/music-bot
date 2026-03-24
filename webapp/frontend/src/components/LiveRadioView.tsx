@@ -4,18 +4,14 @@ import {
   fetchBroadcast, startBroadcast, stopBroadcast, loadBroadcastChannel,
   skipBroadcast, syncBroadcastPlayback, removeBroadcastTrack,
   broadcastEventsUrl, fetchBroadcastChannels, importBroadcastChannel,
-  uploadBroadcastVoice,
-  type Broadcast, type BroadcastTrack, type Track, type ChannelInfo,
+  uploadBroadcastVoice, advanceBroadcast, getStreamUrl,
+  type Broadcast, type BroadcastTrack, type ChannelInfo,
 } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import { IconBroadcast, IconSpinner, IconMusic, IconTrash, IconMic } from "./Icons";
 
 interface Props {
   userId: number;
-  currentTrack?: Track | null;
-  elapsed?: number;
-  onPlayTrack: (track: Track) => void;
-  onBroadcastAdvance?: () => Promise<void>;
   isAdmin?: boolean;
   accentColor?: string;
   themeId?: string;
@@ -25,24 +21,8 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-function toPlayerTrack(track: BroadcastTrack, startAt?: number): Track {
-  return {
-    video_id: track.video_id,
-    title: track.title || "",
-    artist: track.artist || "",
-    duration: track.duration || 0,
-    duration_fmt: track.duration_fmt || "0:00",
-    source: track.source || "channel",
-    cover_url: track.cover_url,
-    startAt: startAt && startAt > 1 ? startAt : undefined,
-  };
-}
-
 export const LiveRadioView = memo(function LiveRadioView({
   userId,
-  onPlayTrack,
-  currentTrack,
-  elapsed = 0,
   isAdmin = false,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
@@ -65,16 +45,146 @@ export const LiveRadioView = memo(function LiveRadioView({
   const [crossfadeSec, setCrossfadeSec] = useState(() => {
     try { const v = localStorage.getItem("tma:broadcast-crossfade"); return v ? parseInt(v, 10) : 8; } catch { return 8; }
   });
+  const [elapsed, setElapsed] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const esRef = useRef<EventSource | null>(null);
   const reconnectTimer = useRef<number | null>(null);
   const refreshTimer = useRef<number | null>(null);
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
-  // Stable refs to avoid SSE reconnection on parent re-render
-  const onPlayTrackRef = useRef(onPlayTrack);
-  onPlayTrackRef.current = onPlayTrack;
+  // ── Independent audio system ──
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mixAudioRef = useRef<HTMLAudioElement | null>(null);
+  const crossfadeActiveRef = useRef(false);
+  const crossfadeTimerRef = useRef<number | null>(null);
+  const currentVideoIdRef = useRef<string>("");
   const playVoiceMessageRef = useRef<(url: string) => void>(() => {});
+
+  // ── Local audio: play a broadcast track independently ──
+  const playTrackLocally = useCallback((videoId: string, seekTo?: number) => {
+    if (!audioRef.current) return;
+    const audio = audioRef.current;
+    // Avoid reloading the same track
+    if (currentVideoIdRef.current === videoId && !audio.paused && !seekTo) return;
+    currentVideoIdRef.current = videoId;
+    audio.src = getStreamUrl(videoId);
+    audio.load();
+    const onCanPlay = () => {
+      audio.removeEventListener("canplay", onCanPlay);
+      if (seekTo && seekTo > 1) audio.currentTime = seekTo;
+      audio.play().catch(() => {});
+    };
+    audio.addEventListener("canplay", onCanPlay);
+    setIsPlaying(true);
+  }, []);
+
+  const stopLocalAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+    }
+    if (mixAudioRef.current) {
+      mixAudioRef.current.pause();
+      mixAudioRef.current.src = "";
+    }
+    if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+    crossfadeActiveRef.current = false;
+    currentVideoIdRef.current = "";
+    setIsPlaying(false);
+    setElapsed(0);
+  }, []);
+
+  // ── Init audio elements ──
+  useEffect(() => {
+    const audio = new Audio();
+    audio.volume = 1;
+    audioRef.current = audio;
+    const mix = new Audio();
+    mix.volume = 0;
+    mixAudioRef.current = mix;
+
+    // Track elapsed time + crossfade
+    const onTimeUpdate = () => {
+      const t = Math.floor(audio.currentTime);
+      setElapsed(t);
+
+      // ── Crossfade logic ──
+      if (!audio.duration || crossfadeActiveRef.current) return;
+      const cfSec = (() => { try { const v = localStorage.getItem("tma:broadcast-crossfade"); return v ? parseInt(v, 10) : 8; } catch { return 8; } })();
+      if (cfSec <= 0) return;
+      const remaining = audio.duration - audio.currentTime;
+      if (remaining > cfSec || remaining < 0.5 || audio.duration < cfSec * 2) return;
+
+      crossfadeActiveRef.current = true;
+      const fadeDur = Math.max(1, cfSec - 0.5);
+
+      // Advance broadcast to get next track, then crossfade
+      advanceBroadcast().then((data) => {
+        const nextTrack = data.tracks?.[data.current_idx];
+        if (!nextTrack || !mix) {
+          crossfadeActiveRef.current = false;
+          return;
+        }
+        mix.src = getStreamUrl(nextTrack.video_id);
+        mix.volume = 0;
+        mix.load();
+        mix.play().catch(() => {});
+
+        // Fade: main down, mix up
+        const startVol = audio.volume;
+        const steps = 20;
+        const stepMs = (fadeDur * 1000) / steps;
+        let step = 0;
+        const fadeInterval = window.setInterval(() => {
+          step++;
+          const progress = step / steps;
+          audio.volume = Math.max(0, startVol * (1 - progress));
+          mix.volume = Math.min(1, progress);
+          if (step >= steps) {
+            clearInterval(fadeInterval);
+            // Swap: mix becomes main
+            audio.pause();
+            audio.src = mix.src;
+            audio.volume = startVol;
+            audio.currentTime = mix.currentTime;
+            audio.play().catch(() => {});
+            mix.pause();
+            mix.src = "";
+            mix.volume = 0;
+            currentVideoIdRef.current = nextTrack.video_id;
+            crossfadeActiveRef.current = false;
+          }
+        }, stepMs);
+        crossfadeTimerRef.current = fadeInterval as unknown as number;
+      }).catch(() => {
+        crossfadeActiveRef.current = false;
+      });
+    };
+    audio.addEventListener("timeupdate", onTimeUpdate);
+
+    // Track ended → advance broadcast (no crossfade case)
+    const onEnded = () => {
+      if (!crossfadeActiveRef.current) {
+        advanceBroadcast().catch(() => {});
+      }
+    };
+    audio.addEventListener("ended", onEnded);
+
+    // Track playing/pause state
+    audio.addEventListener("playing", () => setIsPlaying(true));
+    audio.addEventListener("pause", () => { if (!audio.seeking) setIsPlaying(false); });
+
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("ended", onEnded);
+      audio.pause();
+      audio.src = "";
+      mix.pause();
+      mix.src = "";
+      if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+    };
+  }, []);
 
   // Fetch initial state
   const loadState = useCallback(async () => {
@@ -132,10 +242,9 @@ export const LiveRadioView = memo(function LiveRadioView({
 
   // ── DJ Monitor mute toggle ────────────────────────────────────
   const toggleDjMute = useCallback(() => {
-    const audio = document.querySelector("audio") as HTMLAudioElement | null;
-    if (audio) {
+    if (audioRef.current) {
       const next = !djMuted;
-      audio.muted = next;
+      audioRef.current.muted = next;
       setDjMuted(next);
       haptic("light");
     }
@@ -174,24 +283,23 @@ export const LiveRadioView = memo(function LiveRadioView({
 
   // ── Play DJ voice for listeners (duck music) ───────────────────
   const playVoiceMessage = useCallback((url: string) => {
-    // Duck the main player volume
-    const mainAudio = document.querySelector("audio") as HTMLAudioElement | null;
-    const prevVolume = mainAudio?.volume ?? 1;
-    if (mainAudio) mainAudio.volume = 0.15;
+    const audio = audioRef.current;
+    const prevVolume = audio?.volume ?? 1;
+    if (audio) audio.volume = 0.15;
 
     const va = new Audio(url);
     voiceAudioRef.current = va;
     va.volume = 1;
     va.onended = () => {
-      if (mainAudio) mainAudio.volume = prevVolume;
+      if (audio) audio.volume = prevVolume;
       voiceAudioRef.current = null;
     };
     va.onerror = () => {
-      if (mainAudio) mainAudio.volume = prevVolume;
+      if (audio) audio.volume = prevVolume;
       voiceAudioRef.current = null;
     };
     va.play().catch(() => {
-      if (mainAudio) mainAudio.volume = prevVolume;
+      if (audio) audio.volume = prevVolume;
     });
   }, []);
   playVoiceMessageRef.current = playVoiceMessage;
@@ -215,13 +323,14 @@ export const LiveRadioView = memo(function LiveRadioView({
             const idx = msg.data.current_idx ?? 0;
             const t = msg.data.tracks[idx];
             if (t?.video_id) {
-              const elapsed = typeof msg.data.elapsed_pos === "number" ? msg.data.elapsed_pos : 0;
-              onPlayTrackRef.current(toPlayerTrack(t, elapsed));
+              const ep = typeof msg.data.elapsed_pos === "number" ? msg.data.elapsed_pos : 0;
+              playTrackLocally(t.video_id, ep);
             }
           }
           return;
         }
         if (msg.event === "stopped") {
+          stopLocalAudio();
           setBroadcast(prev => prev ? {
             ...prev,
             is_live: false,
@@ -245,7 +354,7 @@ export const LiveRadioView = memo(function LiveRadioView({
           const nextPosition = typeof msg.data?.position === "number" ? msg.data.position : undefined;
 
           if (nextTrack.video_id) {
-            onPlayTrackRef.current(toPlayerTrack(nextTrack));
+            playTrackLocally(nextTrack.video_id);
           }
 
           setBroadcast(prev => {
@@ -295,8 +404,8 @@ export const LiveRadioView = memo(function LiveRadioView({
       }
       reconnectTimer.current = window.setTimeout(connectSSE, 3000);
     };
-    // Only depend on stable refs — NOT onPlayTrack/playVoiceMessage which change on re-render
-  }, [isAdmin, scheduleRefresh]);
+    // Only depend on stable refs — NOT playVoiceMessage which changes on re-render
+  }, [isAdmin, scheduleRefresh, playTrackLocally, stopLocalAudio]);
 
   useEffect(() => {
     loadState();
@@ -315,14 +424,9 @@ export const LiveRadioView = memo(function LiveRadioView({
     try {
       const data = await startBroadcast(channel, 30);
       setBroadcast(data);
-      // Auto-play first track
+      // Auto-play first track locally
       if (data.tracks.length > 0) {
-        const t = data.tracks[0];
-        onPlayTrack({
-          video_id: t.video_id, title: t.title, artist: t.artist,
-          duration: t.duration, duration_fmt: t.duration_fmt,
-          source: t.source, cover_url: t.cover_url,
-        });
+        playTrackLocally(data.tracks[0].video_id);
       }
     } catch (e) {
       console.error("Start broadcast failed:", e);
@@ -335,6 +439,7 @@ export const LiveRadioView = memo(function LiveRadioView({
     haptic("heavy");
     try {
       await stopBroadcast();
+      stopLocalAudio();
       setBroadcast(prev => prev ? { ...prev, is_live: false, tracks: [] } : null);
     } catch {}
   };
@@ -346,11 +451,7 @@ export const LiveRadioView = memo(function LiveRadioView({
       setBroadcast(data);
       const t = data.tracks[data.current_idx];
       if (t) {
-        onPlayTrack({
-          video_id: t.video_id, title: t.title, artist: t.artist,
-          duration: t.duration, duration_fmt: t.duration_fmt,
-          source: t.source, cover_url: t.cover_url,
-        });
+        playTrackLocally(t.video_id);
       }
     } catch {}
   };
@@ -399,7 +500,7 @@ export const LiveRadioView = memo(function LiveRadioView({
     }
 
     haptic("light");
-    onPlayTrack(toPlayerTrack(track));
+    playTrackLocally(track.video_id);
 
     // If admin, sync playback position
     if (isDJ && broadcast) {

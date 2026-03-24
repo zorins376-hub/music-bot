@@ -23,7 +23,7 @@ const ActivityFeedView = lazy(() => import("./components/ActivityFeedView").then
 const WrappedView = lazy(() => import("./components/WrappedView").then(m => ({ default: m.WrappedView })));
 const SleepSoundsView = lazy(() => import("./components/SleepSoundsView").then(m => ({ default: m.SleepSoundsView })));
 const LiveRadioView = lazy(() => import("./components/LiveRadioView").then(m => ({ default: m.LiveRadioView })));
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, advanceBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, applyThemeCSSVars, type Theme } from "./themes";
@@ -488,12 +488,7 @@ export function App() {
       }
 
       if (!isLastTrack) autoplayCountRef.current = 0;
-      // Broadcast mode: advance via broadcast endpoint so all listeners sync
-      if (viewRef.current === "broadcast") {
-        advanceBroadcast().catch(() => {});
-      } else {
-        sendAction("next").then(setState).catch(() => {});
-      }
+      sendAction("next").then(setState).catch(() => {});
     });
     audio.addEventListener("timeupdate", () => {
       const t = Math.floor(audio.currentTime);
@@ -516,8 +511,7 @@ export function App() {
       // ── Crossfade: smooth transition between tracks ──
       // Works in party mode (always 5s), broadcast mode (always 8s), OR regular mode (user-configurable)
       const remaining = audio.duration ? audio.duration - audio.currentTime : Infinity;
-      const bcfVal = viewRef.current === "broadcast" ? (() => { try { const v = localStorage.getItem("tma:broadcast-crossfade"); return v ? parseInt(v, 10) : 8; } catch { return 8; } })() : 0;
-      const cfDur = viewRef.current === "party" ? 5 : viewRef.current === "broadcast" ? bcfVal : crossfadeDurationRef.current;
+      const cfDur = viewRef.current === "party" ? 5 : crossfadeDurationRef.current;
       const shouldCrossfade = s.queue.length > 1 && cfDur > 0;
       if (shouldCrossfade && remaining <= cfDur && remaining > 0.5 && audio.duration > cfDur * 2 && !djCrossfadeActiveRef.current) {
         const nextIdx = (s.position + 1) % s.queue.length;
@@ -554,12 +548,7 @@ export function App() {
               // Restore main deck gain
               if (ctx) cfGain.gain.setValueAtTime(1, ctx.currentTime);
               djCrossfadeActiveRef.current = false;
-              // Advance queue — broadcast uses its own advance endpoint
-              if (viewRef.current === "broadcast") {
-                advanceBroadcast().catch(() => {});
-              } else {
-                sendAction("next").then(setState).catch(() => {});
-              }
+              sendAction("next").then(setState).catch(() => {});
             }, (fadeDur + 0.1) * 1000);
           }
         }
@@ -1125,9 +1114,6 @@ export function App() {
     };
     
     loadAudio().then(async () => {
-      // In broadcast mode, don't toggle play/pause on state changes —
-      // audio should keep playing uninterrupted
-      if (viewRef.current === "broadcast") return;
       if (state.is_playing && audio.paused) {
         await softPlay(audio);
       } else if (!state.is_playing && !audio.paused) {
@@ -1463,10 +1449,6 @@ export function App() {
   const handlePlayAndOpenPlayer = useCallback((track: Track) => {
     action("play", track.video_id, undefined, track);
     setView("player");
-  }, [action]);
-
-  const handleBroadcastPlayTrack = useCallback((track: Track) => {
-    action("play", track.video_id, undefined, track);
   }, [action]);
 
   // Stable callbacks for memo'd children
@@ -2541,7 +2523,7 @@ export function App() {
 
       {view === "sleep" && <Suspense fallback={null}><SleepSoundsView accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
-      {view === "broadcast" && <Suspense fallback={null}><ViewErrorBoundary viewName="Broadcast" fallbackColor={theme.hintColor}><LiveRadioView userId={userId} onPlayTrack={handleBroadcastPlayTrack} isAdmin={Boolean(userProfile?.is_admin)} accentColor={accentColor} themeId={theme.id} currentTrack={state.current_track} elapsed={elapsed} /></ViewErrorBoundary></Suspense>}
+      {view === "broadcast" && <Suspense fallback={null}><ViewErrorBoundary viewName="Broadcast" fallbackColor={theme.hintColor}><LiveRadioView userId={userId} isAdmin={Boolean(userProfile?.is_admin)} accentColor={accentColor} themeId={theme.id} /></ViewErrorBoundary></Suspense>}
 
       {view === "profile" && <Suspense fallback={null}><ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
