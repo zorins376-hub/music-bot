@@ -62,6 +62,9 @@ export const LiveRadioView = memo(function LiveRadioView({
   const [showImport, setShowImport] = useState(false);
   const [recording, setRecording] = useState(false);
   const [djMuted, setDjMuted] = useState(false);
+  const [crossfadeSec, setCrossfadeSec] = useState(() => {
+    try { const v = localStorage.getItem("tma:broadcast-crossfade"); return v ? parseInt(v, 10) : 8; } catch { return 8; }
+  });
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -580,7 +583,7 @@ export const LiveRadioView = memo(function LiveRadioView({
               </span>
               {isLive && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ff3232", animation: "bcast-pulse 1s ease infinite" }} />}
             </div>
-            {isLive && <span style={{ fontSize: 10, color: tc.hintColor, fontFamily: "monospace" }}>CROSSFADE: 8s</span>}
+            {isLive && <span style={{ fontSize: 10, color: tc.hintColor, fontFamily: "monospace" }}>CROSSFADE: {crossfadeSec}s</span>}
           </div>
 
           {!isLive ? (
@@ -693,18 +696,17 @@ export const LiveRadioView = memo(function LiveRadioView({
                 </div>
               </div>
 
-              {/* ═══ CROSSFADE VISUAL ═══ */}
+              {/* ═══ CROSSFADE SLIDER ═══ */}
               <div style={{ padding: "10px 16px", background: "rgba(255,255,255,0.02)", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {/* Progress bar A→B */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 9, color: "#ff3232", fontWeight: 700, width: 14, textAlign: "center" }}>A</span>
                   <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", position: "relative", overflow: "hidden" }}>
-                    {/* Crossfade indicator — shows zone where crossfade happens */}
                     <div style={{
                       position: "absolute", right: 0, top: 0, height: "100%", borderRadius: 2,
                       background: "linear-gradient(90deg, transparent, rgba(100,100,255,0.4))",
-                      width: currentTrackData?.duration ? `${Math.min(50, (8 / currentTrackData.duration) * 100)}%` : "15%",
+                      width: currentTrackData?.duration ? `${Math.min(50, (crossfadeSec / currentTrackData.duration) * 100)}%` : "15%",
                     }} />
-                    {/* Current position */}
                     <div style={{
                       height: "100%", borderRadius: 2,
                       background: "linear-gradient(90deg, #ff3232, #ff6b35)",
@@ -714,8 +716,22 @@ export const LiveRadioView = memo(function LiveRadioView({
                   </div>
                   <span style={{ fontSize: 9, color: "#6c7aff", fontWeight: 700, width: 14, textAlign: "center" }}>B</span>
                 </div>
+                {/* Slider */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 9, color: tc.hintColor, fontFamily: "monospace", width: 28 }}>0s</span>
+                  <input type="range" min={0} max={15} step={1} value={crossfadeSec}
+                    onInput={(e) => {
+                      const v = parseInt((e.target as HTMLInputElement).value, 10);
+                      setCrossfadeSec(v);
+                      try { localStorage.setItem("tma:broadcast-crossfade", String(v)); } catch {}
+                    }}
+                    style={{ flex: 1, height: 4, accentColor: tc.highlight, cursor: "pointer" }} />
+                  <span style={{ fontSize: 9, color: tc.hintColor, fontFamily: "monospace", width: 28, textAlign: "right" }}>15s</span>
+                </div>
                 <div style={{ textAlign: "center", fontSize: 9, color: tc.hintColor, marginTop: 4, fontFamily: "monospace" }}>
-                  AUTO-MIX {currentTrackData?.duration ? `(fade at ${Math.floor(currentTrackData.duration - 8 > 0 ? currentTrackData.duration - 8 : 0)}s)` : ""}
+                  {crossfadeSec > 0
+                    ? `AUTO-MIX ${crossfadeSec}s${currentTrackData?.duration ? ` (fade at ${Math.floor(Math.max(0, currentTrackData.duration - crossfadeSec))}s)` : ""}`
+                    : "CROSSFADE OFF"}
                 </div>
               </div>
 

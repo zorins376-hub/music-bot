@@ -516,7 +516,8 @@ export function App() {
       // ── Crossfade: smooth transition between tracks ──
       // Works in party mode (always 5s), broadcast mode (always 8s), OR regular mode (user-configurable)
       const remaining = audio.duration ? audio.duration - audio.currentTime : Infinity;
-      const cfDur = viewRef.current === "party" ? 5 : viewRef.current === "broadcast" ? 8 : crossfadeDurationRef.current;
+      const bcfVal = viewRef.current === "broadcast" ? (() => { try { const v = localStorage.getItem("tma:broadcast-crossfade"); return v ? parseInt(v, 10) : 8; } catch { return 8; } })() : 0;
+      const cfDur = viewRef.current === "party" ? 5 : viewRef.current === "broadcast" ? bcfVal : crossfadeDurationRef.current;
       const shouldCrossfade = s.queue.length > 1 && cfDur > 0;
       if (shouldCrossfade && remaining <= cfDur && remaining > 0.5 && audio.duration > cfDur * 2 && !djCrossfadeActiveRef.current) {
         const nextIdx = (s.position + 1) % s.queue.length;
