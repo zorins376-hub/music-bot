@@ -13,6 +13,7 @@ import { IconBroadcast, IconSpinner, IconMusic, IconTrash, IconMic } from "./Ico
 interface Props {
   userId: number;
   currentTrack?: Track | null;
+  elapsed?: number;
   onPlayTrack: (track: Track) => void;
   onBroadcastAdvance?: () => Promise<void>;
   isAdmin?: boolean;
@@ -40,6 +41,8 @@ function toPlayerTrack(track: BroadcastTrack, startAt?: number): Track {
 export const LiveRadioView = memo(function LiveRadioView({
   userId,
   onPlayTrack,
+  currentTrack,
+  elapsed = 0,
   isAdmin = false,
   accentColor = "var(--tg-theme-button-color, #7c4dff)",
   themeId = "blackroom",
@@ -544,173 +547,218 @@ export const LiveRadioView = memo(function LiveRadioView({
       {/* DJ Controls */}
       {isDJ && (
         <div style={{
-          background: tc.cardBg, borderRadius: 16, padding: 16,
-          border: tc.cardBorder, marginBottom: 16,
+          background: "linear-gradient(180deg, rgba(20,20,30,0.95), rgba(10,10,18,0.98))",
+          borderRadius: 20, padding: 0, overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.08)", marginBottom: 16,
           animation: "bcast-slideIn 0.6s ease",
+          boxShadow: isLive ? "0 0 30px rgba(255,50,50,0.1)" : "0 4px 20px rgba(0,0,0,0.3)",
         }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: tc.textColor, marginBottom: 12 }}>
-            DJ Panel
+          {/* Console Header */}
+          <div style={{
+            padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between",
+            background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14, letterSpacing: 2, fontWeight: 800, color: isLive ? "#ff3232" : tc.hintColor }}>
+                DJ CONSOLE
+              </span>
+              {isLive && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ff3232", animation: "bcast-pulse 1s ease infinite" }} />}
+            </div>
+            {isLive && <span style={{ fontSize: 10, color: tc.hintColor, fontFamily: "monospace" }}>CROSSFADE: 8s</span>}
           </div>
 
           {!isLive ? (
-            <>
+            <div style={{ padding: 16 }}>
               {/* Channel Selector */}
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 6 }}>
-                  Source channel
-                </div>
-                <div style={{
-                  display: "flex", flexWrap: "wrap", gap: 6,
-                }}>
+                <div style={{ fontSize: 10, color: tc.hintColor, marginBottom: 6, letterSpacing: 1, textTransform: "uppercase" }}>Source</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {(channels.length > 0 ? channels : [{ label: "tequila", track_count: 0 }, { label: "fullmoon", track_count: 0 }]).map(ch => (
-                    <button
-                      key={ch.label}
-                      onClick={() => { haptic("light"); setChannel(ch.label); }}
-                      style={{
-                        padding: "8px 14px", borderRadius: 10, border: "none",
+                    <button key={ch.label} onClick={() => { haptic("light"); setChannel(ch.label); }}
+                      style={{ padding: "8px 14px", borderRadius: 10, border: "none",
                         background: channel === ch.label ? tc.highlight : "rgba(255,255,255,0.06)",
                         color: channel === ch.label ? "#fff" : tc.hintColor,
-                        fontSize: 12, fontWeight: 600, cursor: "pointer",
-                        transition: "all 0.2s",
-                      }}
-                    >
+                        fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}>
                       {ch.label} {ch.track_count > 0 && <span style={{ opacity: 0.6 }}>({ch.track_count})</span>}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* Import Channel */}
+              {/* Import */}
               <div style={{ marginBottom: 12 }}>
-                <button
-                  onClick={() => setShowImport(!showImport)}
-                  style={{
-                    padding: "6px 12px", borderRadius: 8, border: "none",
-                    background: "rgba(255,255,255,0.06)", color: tc.hintColor,
-                    fontSize: 11, cursor: "pointer",
-                  }}
-                >
-                  {showImport ? "Hide" : "Import from Telegram channel"}
+                <button onClick={() => setShowImport(!showImport)}
+                  style={{ padding: "6px 12px", borderRadius: 8, border: "none",
+                    background: "rgba(255,255,255,0.06)", color: tc.hintColor, fontSize: 11, cursor: "pointer" }}>
+                  {showImport ? "Hide" : "Import from Telegram"}
                 </button>
-
                 {showImport && (
                   <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-                    <input
-                      value={importInput}
-                      onInput={(e) => setImportInput((e.target as HTMLInputElement).value)}
+                    <input value={importInput} onInput={(e) => setImportInput((e.target as HTMLInputElement).value)}
                       placeholder="@channel_name"
-                      style={{
-                        flex: 1, padding: "8px 12px", borderRadius: 10,
-                        border: tc.cardBorder, background: "rgba(255,255,255,0.04)",
-                        color: tc.textColor, fontSize: 13, outline: "none",
-                      }}
-                    />
-                    <button
-                      onClick={handleImport}
-                      disabled={importing || !importInput.trim()}
-                      style={{
-                        padding: "8px 16px", borderRadius: 10, border: "none",
-                        background: tc.highlight, color: "#fff",
-                        fontSize: 12, fontWeight: 600, cursor: "pointer",
-                        opacity: importing || !importInput.trim() ? 0.5 : 1,
-                      }}
-                    >
+                      style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: tc.cardBorder,
+                        background: "rgba(255,255,255,0.04)", color: tc.textColor, fontSize: 13, outline: "none" }} />
+                    <button onClick={handleImport} disabled={importing || !importInput.trim()}
+                      style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: tc.highlight, color: "#fff",
+                        fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: importing || !importInput.trim() ? 0.5 : 1 }}>
                       {importing ? "..." : "Import"}
                     </button>
                   </div>
                 )}
               </div>
-
-              {/* Start Button */}
-              <button
-                onClick={handleStart}
-                disabled={starting}
-                style={{
-                  width: "100%", padding: "14px 0", borderRadius: 14, border: "none",
-                  background: "linear-gradient(135deg, #ff3232, #ff6b35)",
-                  color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer",
-                  opacity: starting ? 0.6 : 1,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                }}
-              >
+              {/* GO LIVE */}
+              <button onClick={handleStart} disabled={starting}
+                style={{ width: "100%", padding: "14px 0", borderRadius: 14, border: "none",
+                  background: "linear-gradient(135deg, #ff3232, #ff6b35)", color: "#fff",
+                  fontSize: 16, fontWeight: 700, cursor: "pointer", opacity: starting ? 0.6 : 1,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 {starting ? <IconSpinner size={18} color="#fff" /> : <IconBroadcast size={18} color="#fff" />}
                 {starting ? "Starting..." : "GO LIVE"}
               </button>
-            </>
+            </div>
           ) : (
             <>
-              {/* Live Controls */}
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button
-                  onClick={handleSkip}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 12, border: "none",
-                    background: "rgba(255,255,255,0.08)", color: tc.textColor,
-                    fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  }}
-                >
-                  Skip
-                </button>
-                <button
-                  onClick={handleLoadMore}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 12, border: "none",
-                    background: "rgba(255,255,255,0.08)", color: tc.textColor,
-                    fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  }}
-                >
-                  + Tracks
-                </button>
-                <button
-                  onClick={handleStop}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 12, border: "none",
-                    background: "rgba(255, 50, 50, 0.15)", color: "#ff3232",
-                    fontSize: 13, fontWeight: 700, cursor: "pointer",
-                  }}
-                >
-                  Stop
-                </button>
+              {/* ═══ DUAL DECK DISPLAY ═══ */}
+              <div style={{ display: "flex", gap: 1, background: "rgba(255,255,255,0.04)" }}>
+                {/* DECK A — Now Playing */}
+                <div style={{ flex: 1, padding: "14px 12px", background: "rgba(255,50,50,0.05)" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2, color: "#ff3232", marginBottom: 8 }}>DECK A — NOW</div>
+                  {currentTrackData ? (
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,50,50,0.3)" }}>
+                        {currentTrackData.cover_url ? <img src={currentTrackData.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <IconMusic size={18} color={tc.hintColor} /></div>}
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: tc.textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {currentTrackData.title}
+                        </div>
+                        <div style={{ fontSize: 10, color: tc.hintColor }}>{currentTrackData.artist}</div>
+                        {/* Progress bar */}
+                        <div style={{ marginTop: 4, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                          <div style={{
+                            height: "100%", borderRadius: 2,
+                            background: "linear-gradient(90deg, #ff3232, #ff6b35)",
+                            width: `${currentTrackData.duration ? Math.min(100, (elapsed / currentTrackData.duration) * 100) : 0}%`,
+                            transition: "width 1s linear",
+                          }} />
+                        </div>
+                        <div style={{ fontSize: 9, color: tc.hintColor, marginTop: 2, fontFamily: "monospace" }}>
+                          {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} / {currentTrackData.duration_fmt}
+                        </div>
+                      </div>
+                    </div>
+                  ) : <div style={{ fontSize: 11, color: tc.hintColor }}>—</div>}
+                </div>
+
+                {/* DECK B — Next */}
+                <div style={{ flex: 1, padding: "14px 12px", background: "rgba(100,100,255,0.03)" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2, color: "#6c7aff", marginBottom: 8 }}>DECK B — NEXT</div>
+                  {tracks[currentIdx + 1] ? (
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(100,100,255,0.2)" }}>
+                        {tracks[currentIdx + 1].cover_url ? <img src={tracks[currentIdx + 1].cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <IconMusic size={18} color={tc.hintColor} /></div>}
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: tc.textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {tracks[currentIdx + 1].title}
+                        </div>
+                        <div style={{ fontSize: 10, color: tc.hintColor }}>{tracks[currentIdx + 1].artist}</div>
+                        <div style={{ fontSize: 9, color: tc.hintColor, marginTop: 6, fontFamily: "monospace" }}>
+                          {tracks[currentIdx + 1].duration_fmt}
+                        </div>
+                      </div>
+                    </div>
+                  ) : <div style={{ fontSize: 11, color: tc.hintColor }}>Queue empty</div>}
+                </div>
               </div>
 
-              {/* Mic Button */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <button
-                  onPointerDown={(e) => { e.preventDefault(); startRecording(); }}
-                  onPointerUp={stopRecording}
-                  onPointerLeave={stopRecording}
-                  style={{
-                    width: 48, height: 48, borderRadius: "50%", border: "none",
-                    background: recording ? "rgba(255, 50, 50, 0.4)" : "rgba(255,255,255,0.08)",
-                    color: recording ? "#ff3232" : tc.textColor,
-                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                    animation: recording ? "bcast-pulse 0.8s ease infinite" : undefined,
-                    transition: "background 0.2s",
-                  }}
-                >
-                  <IconMic size={22} color={recording ? "#ff3232" : tc.textColor} />
-                </button>
-                <span style={{ fontSize: 12, color: recording ? "#ff3232" : tc.hintColor, fontWeight: recording ? 600 : 400 }}>
-                  {recording ? "Recording... release to send" : "Hold to talk"}
-                </span>
+              {/* ═══ CROSSFADE VISUAL ═══ */}
+              <div style={{ padding: "10px 16px", background: "rgba(255,255,255,0.02)", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 9, color: "#ff3232", fontWeight: 700, width: 14, textAlign: "center" }}>A</span>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", position: "relative", overflow: "hidden" }}>
+                    {/* Crossfade indicator — shows zone where crossfade happens */}
+                    <div style={{
+                      position: "absolute", right: 0, top: 0, height: "100%", borderRadius: 2,
+                      background: "linear-gradient(90deg, transparent, rgba(100,100,255,0.4))",
+                      width: currentTrackData?.duration ? `${Math.min(50, (8 / currentTrackData.duration) * 100)}%` : "15%",
+                    }} />
+                    {/* Current position */}
+                    <div style={{
+                      height: "100%", borderRadius: 2,
+                      background: "linear-gradient(90deg, #ff3232, #ff6b35)",
+                      width: `${currentTrackData?.duration ? Math.min(100, (elapsed / currentTrackData.duration) * 100) : 0}%`,
+                      transition: "width 1s linear",
+                    }} />
+                  </div>
+                  <span style={{ fontSize: 9, color: "#6c7aff", fontWeight: 700, width: 14, textAlign: "center" }}>B</span>
+                </div>
+                <div style={{ textAlign: "center", fontSize: 9, color: tc.hintColor, marginTop: 4, fontFamily: "monospace" }}>
+                  AUTO-MIX {currentTrackData?.duration ? `(fade at ${Math.floor(currentTrackData.duration - 8 > 0 ? currentTrackData.duration - 8 : 0)}s)` : ""}
+                </div>
               </div>
 
-              {/* Channel Switch */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {(channels.length > 0 ? channels : [{ label: "tequila", track_count: 0 }, { label: "fullmoon", track_count: 0 }]).map(ch => (
-                  <button
-                    key={ch.label}
-                    onClick={() => { haptic("light"); setChannel(ch.label); }}
-                    style={{
-                      padding: "6px 10px", borderRadius: 8, border: "none",
-                      background: channel === ch.label ? "rgba(255,255,255,0.12)" : "transparent",
-                      color: channel === ch.label ? tc.textColor : tc.hintColor,
-                      fontSize: 11, fontWeight: 500, cursor: "pointer",
-                    }}
-                  >
-                    {ch.label} {ch.track_count > 0 && <span style={{ opacity: 0.5 }}>({ch.track_count})</span>}
+              {/* ═══ CONTROLS ═══ */}
+              <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Transport buttons */}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={handleSkip}
+                    style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.04)", color: tc.textColor,
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}>
+                    SKIP
                   </button>
-                ))}
+                  <button onClick={handleLoadMore}
+                    style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.04)", color: tc.textColor,
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}>
+                    + TRACKS
+                  </button>
+                  <button onClick={handleStop}
+                    style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1px solid rgba(255,50,50,0.2)",
+                      background: "rgba(255,50,50,0.08)", color: "#ff3232",
+                      fontSize: 12, fontWeight: 800, cursor: "pointer", letterSpacing: 1 }}>
+                    STOP
+                  </button>
+                </div>
+
+                {/* Mic + Channel row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <button
+                    onPointerDown={(e) => { e.preventDefault(); startRecording(); }}
+                    onPointerUp={stopRecording}
+                    onPointerLeave={stopRecording}
+                    style={{
+                      width: 44, height: 44, borderRadius: "50%", border: recording ? "2px solid #ff3232" : "1px solid rgba(255,255,255,0.1)",
+                      background: recording ? "rgba(255,50,50,0.3)" : "rgba(255,255,255,0.04)",
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                      animation: recording ? "bcast-pulse 0.6s ease infinite" : undefined,
+                      transition: "all 0.2s", flexShrink: 0,
+                    }}>
+                    <IconMic size={20} color={recording ? "#ff3232" : tc.hintColor} />
+                  </button>
+                  <span style={{ fontSize: 11, color: recording ? "#ff3232" : tc.hintColor, fontWeight: recording ? 600 : 400, flex: 1 }}>
+                    {recording ? "REC... release to send" : "Hold to talk"}
+                  </span>
+                </div>
+
+                {/* Channel chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {(channels.length > 0 ? channels : [{ label: "tequila", track_count: 0 }, { label: "fullmoon", track_count: 0 }]).map(ch => (
+                    <button key={ch.label} onClick={() => { haptic("light"); setChannel(ch.label); }}
+                      style={{ padding: "5px 10px", borderRadius: 6, border: "none",
+                        background: channel === ch.label ? "rgba(255,255,255,0.1)" : "transparent",
+                        color: channel === ch.label ? tc.textColor : tc.hintColor,
+                        fontSize: 10, fontWeight: 500, cursor: "pointer" }}>
+                      {ch.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </>
           )}
