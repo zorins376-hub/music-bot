@@ -755,9 +755,9 @@ async def broadcast_skip(user: dict = Depends(get_current_user)):
         "position": new_idx,
         "track": track,
     })
-    # Send track audio to group chats
-    dj_name = await r.hget(_BCAST_STATE_KEY, "dj_name") or "DJ"
-    _fire_task(_broadcast_send_track_to_chats(track, dj_name))
+    # Disabled: track sending to chats (listening in-app only for now)
+    # dj_name = await r.hget(_BCAST_STATE_KEY, "dj_name") or "DJ"
+    # _fire_task(_broadcast_send_track_to_chats(track, dj_name))
     _fire_task(_broadcast_rebuild_voice_chat_queue(
         r,
         await r.hget(_BCAST_STATE_KEY, "channel") or "tequila",
@@ -857,9 +857,9 @@ async def broadcast_advance(user: dict = Depends(get_current_user)):
         "position": new_idx,
         "track": track,
     })
-    # Send track audio to group chats
-    dj_name = await r.hget(_BCAST_STATE_KEY, "dj_name") or "DJ"
-    _fire_task(_broadcast_send_track_to_chats(track, dj_name))
+    # Disabled: track sending to chats (listening in-app only for now)
+    # dj_name = await r.hget(_BCAST_STATE_KEY, "dj_name") or "DJ"
+    # _fire_task(_broadcast_send_track_to_chats(track, dj_name))
 
     return await _get_broadcast_state()
 
