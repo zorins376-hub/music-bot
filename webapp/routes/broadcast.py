@@ -401,13 +401,15 @@ async def _load_channel_to_broadcast(r, channel: str, limit: int, exclude: list[
         ).where(
             TrackModel.channel == channel,
             TrackModel.file_id.isnot(None),
-        ).order_by(func.random()).limit(limit)
+        )
+        # Exclude already-queued tracks at DB level to avoid duplicates
+        if exclude_set:
+            q = q.where(TrackModel.source_id.notin_(list(exclude_set)))
+        q = q.order_by(func.random()).limit(limit)
 
         result = await session.execute(q)
         for row in result.all():
             vid = row[0]
-            if vid in exclude_set:
-                continue
             track_data = json.dumps({
                 "video_id": vid,
                 "title": row[1] or "Unknown",

@@ -68,6 +68,10 @@ export const LiveRadioView = memo(function LiveRadioView({
   const reconnectTimer = useRef<number | null>(null);
   const refreshTimer = useRef<number | null>(null);
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Stable refs to avoid SSE reconnection on parent re-render
+  const onPlayTrackRef = useRef(onPlayTrack);
+  onPlayTrackRef.current = onPlayTrack;
+  const playVoiceMessageRef = useRef<(url: string) => void>(() => {});
 
   // Fetch initial state
   const loadState = useCallback(async () => {
@@ -187,6 +191,7 @@ export const LiveRadioView = memo(function LiveRadioView({
       if (mainAudio) mainAudio.volume = prevVolume;
     });
   }, []);
+  playVoiceMessageRef.current = playVoiceMessage;
 
   // SSE connection
   const connectSSE = useCallback(() => {
@@ -208,7 +213,7 @@ export const LiveRadioView = memo(function LiveRadioView({
             const t = msg.data.tracks[idx];
             if (t?.video_id) {
               const elapsed = typeof msg.data.elapsed_pos === "number" ? msg.data.elapsed_pos : 0;
-              onPlayTrack(toPlayerTrack(t, elapsed));
+              onPlayTrackRef.current(toPlayerTrack(t, elapsed));
             }
           }
           return;
@@ -237,7 +242,7 @@ export const LiveRadioView = memo(function LiveRadioView({
           const nextPosition = typeof msg.data?.position === "number" ? msg.data.position : undefined;
 
           if (nextTrack.video_id) {
-            onPlayTrack(toPlayerTrack(nextTrack));
+            onPlayTrackRef.current(toPlayerTrack(nextTrack));
           }
 
           setBroadcast(prev => {
@@ -258,7 +263,6 @@ export const LiveRadioView = memo(function LiveRadioView({
               tracks: nextTracks,
             };
           });
-          scheduleRefresh(500);
           return;
         }
         if (msg.event === "playback_sync") {
@@ -268,11 +272,10 @@ export const LiveRadioView = memo(function LiveRadioView({
             seek_pos: typeof msg.data?.seek_pos === "number" ? msg.data.seek_pos : prev.seek_pos,
             current_idx: typeof msg.data?.current_idx === "number" ? msg.data.current_idx : prev.current_idx,
           } : null);
-          scheduleRefresh(400);
           return;
         }
         if (msg.event === "voice" && msg.data?.url) {
-          playVoiceMessage(msg.data.url);
+          playVoiceMessageRef.current(msg.data.url);
           return;
         }
         if (msg.event === "queue_updated") {
@@ -289,7 +292,8 @@ export const LiveRadioView = memo(function LiveRadioView({
       }
       reconnectTimer.current = window.setTimeout(connectSSE, 3000);
     };
-  }, [isAdmin, onPlayTrack, scheduleRefresh, playVoiceMessage]);
+    // Only depend on stable refs — NOT onPlayTrack/playVoiceMessage which change on re-render
+  }, [isAdmin, scheduleRefresh]);
 
   useEffect(() => {
     loadState();
