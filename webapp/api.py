@@ -3525,6 +3525,10 @@ _SOUNDS_DIR = Path(__file__).resolve().parent / "static" / "sounds"
 if _SOUNDS_DIR.is_dir():
     app.mount("/sounds", StaticFiles(directory=_SOUNDS_DIR), name="ambient_sounds")
 
+_VOICE_DIR = Path(__file__).resolve().parent / "static" / "voice"
+_VOICE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/voice", StaticFiles(directory=_VOICE_DIR), name="dj_voice")
+
 if _FRONTEND_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="static_assets")
 

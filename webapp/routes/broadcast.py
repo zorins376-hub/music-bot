@@ -8,7 +8,9 @@ import logging
 import time as _time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from bot.config import settings
@@ -906,3 +908,48 @@ async def broadcast_import_channel(request: Request, user: dict = Depends(get_cu
 
     _fire_task(_import_channel_tracks(user, channel_ref, label))
     return {"status": "importing", "channel": channel_ref, "label": label}
+
+
+# ── Voice messages ───────────────────────────────────────────────────
+_VOICE_DIR = Path(__file__).resolve().parent.parent / "static" / "voice"
+_VOICE_DIR.mkdir(parents=True, exist_ok=True)
+_MAX_VOICE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+@router.post("/api/broadcast/voice")
+async def broadcast_voice(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """DJ uploads a voice message that plays for all listeners over the music."""
+    await _require_broadcast_admin(user)
+
+    r = await _get_redis()
+    is_live = await r.get(_BCAST_LIVE_KEY)
+    if not is_live:
+        raise HTTPException(400, "No active broadcast")
+
+    data = await file.read()
+    if len(data) > _MAX_VOICE_SIZE:
+        raise HTTPException(413, "Voice message too large (max 5 MB)")
+
+    ts = int(_time.time() * 1000)
+    ext = "webm"
+    if file.content_type and "ogg" in file.content_type:
+        ext = "ogg"
+    elif file.content_type and "mp4" in file.content_type:
+        ext = "m4a"
+
+    filename = f"dj_{ts}.{ext}"
+    filepath = _VOICE_DIR / filename
+    filepath.write_bytes(data)
+
+    voice_url = f"/voice/{filename}"
+
+    await _notify_broadcast("voice", {
+        "url": voice_url,
+        "dj_name": user.get("first_name", "DJ"),
+        "duration": None,
+    })
+
+    return {"status": "ok", "url": voice_url}

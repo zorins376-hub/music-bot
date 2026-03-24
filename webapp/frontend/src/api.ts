@@ -1109,6 +1109,18 @@ export async function importBroadcastChannel(channelRef: string, label?: string)
   return r.json();
 }
 
+export async function uploadBroadcastVoice(blob: Blob): Promise<{ url: string }> {
+  const form = new FormData();
+  form.append("file", blob, "voice.webm");
+  const r = await fetch(`${API_BASE}/broadcast/voice`, {
+    method: "POST",
+    headers: { "X-Telegram-Init-Data": getInitData() },
+    body: form,
+  });
+  if (!r.ok) throw new Error("Voice upload failed");
+  return r.json();
+}
+
 export function broadcastEventsUrl(): string {
   const initData = encodeURIComponent(getInitData());
   return `${API_BASE}/broadcast/events?token=${initData}`;

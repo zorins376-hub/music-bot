@@ -4,10 +4,11 @@ import {
   fetchBroadcast, startBroadcast, stopBroadcast, loadBroadcastChannel,
   skipBroadcast, syncBroadcastPlayback, removeBroadcastTrack,
   broadcastEventsUrl, fetchBroadcastChannels, importBroadcastChannel,
+  uploadBroadcastVoice,
   type Broadcast, type BroadcastTrack, type Track, type ChannelInfo,
 } from "../api";
 import { getThemeById, themeColors } from "../themes";
-import { IconBroadcast, IconSpinner, IconMusic, IconTrash } from "./Icons";
+import { IconBroadcast, IconSpinner, IconMusic, IconTrash, IconMic } from "./Icons";
 
 interface Props {
   userId: number;
@@ -56,9 +57,13 @@ export const LiveRadioView = memo(function LiveRadioView({
   const [importInput, setImportInput] = useState("");
   const [importing, setImporting] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const esRef = useRef<EventSource | null>(null);
   const reconnectTimer = useRef<number | null>(null);
   const refreshTimer = useRef<number | null>(null);
+  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Fetch initial state
   const loadState = useCallback(async () => {
@@ -113,6 +118,60 @@ export const LiveRadioView = memo(function LiveRadioView({
       setImporting(false);
     }
   };
+
+  // ── Voice recording (DJ) ──────────────────────────────────────
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (blob.size > 500) {
+          try { await uploadBroadcastVoice(blob); } catch (e) { console.error("Voice upload failed:", e); }
+        }
+        setRecording(false);
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setRecording(true);
+      haptic("heavy");
+    } catch (e) {
+      console.error("Mic access denied:", e);
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      haptic("medium");
+    }
+  }, []);
+
+  // ── Play DJ voice for listeners (duck music) ───────────────────
+  const playVoiceMessage = useCallback((url: string) => {
+    // Duck the main player volume
+    const mainAudio = document.querySelector("audio") as HTMLAudioElement | null;
+    const prevVolume = mainAudio?.volume ?? 1;
+    if (mainAudio) mainAudio.volume = 0.15;
+
+    const va = new Audio(url);
+    voiceAudioRef.current = va;
+    va.volume = 1;
+    va.onended = () => {
+      if (mainAudio) mainAudio.volume = prevVolume;
+      voiceAudioRef.current = null;
+    };
+    va.onerror = () => {
+      if (mainAudio) mainAudio.volume = prevVolume;
+      voiceAudioRef.current = null;
+    };
+    va.play().catch(() => {
+      if (mainAudio) mainAudio.volume = prevVolume;
+    });
+  }, []);
 
   // SSE connection
   const connectSSE = useCallback(() => {
@@ -197,6 +256,10 @@ export const LiveRadioView = memo(function LiveRadioView({
           scheduleRefresh(400);
           return;
         }
+        if (msg.event === "voice" && msg.data?.url) {
+          playVoiceMessage(msg.data.url);
+          return;
+        }
         if (msg.event === "queue_updated") {
           scheduleRefresh(200);
         }
@@ -211,7 +274,7 @@ export const LiveRadioView = memo(function LiveRadioView({
       }
       reconnectTimer.current = window.setTimeout(connectSSE, 3000);
     };
-  }, [isAdmin, onPlayTrack, scheduleRefresh]);
+  }, [isAdmin, onPlayTrack, scheduleRefresh, playVoiceMessage]);
 
   useEffect(() => {
     loadState();
@@ -608,6 +671,28 @@ export const LiveRadioView = memo(function LiveRadioView({
                 >
                   Stop
                 </button>
+              </div>
+
+              {/* Mic Button */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <button
+                  onPointerDown={(e) => { e.preventDefault(); startRecording(); }}
+                  onPointerUp={stopRecording}
+                  onPointerLeave={stopRecording}
+                  style={{
+                    width: 48, height: 48, borderRadius: "50%", border: "none",
+                    background: recording ? "rgba(255, 50, 50, 0.4)" : "rgba(255,255,255,0.08)",
+                    color: recording ? "#ff3232" : tc.textColor,
+                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                    animation: recording ? "bcast-pulse 0.8s ease infinite" : undefined,
+                    transition: "background 0.2s",
+                  }}
+                >
+                  <IconMic size={22} color={recording ? "#ff3232" : tc.textColor} />
+                </button>
+                <span style={{ fontSize: 12, color: recording ? "#ff3232" : tc.hintColor, fontWeight: recording ? 600 : 400 }}>
+                  {recording ? "Recording... release to send" : "Hold to talk"}
+                </span>
               </div>
 
               {/* Channel Switch */}
