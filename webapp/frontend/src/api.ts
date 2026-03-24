@@ -169,6 +169,7 @@ export interface Track {
   source: string;
   file_id?: string;
   cover_url?: string;
+  startAt?: number;
 }
 
 export interface PlayerState {
@@ -999,6 +1000,7 @@ export interface Broadcast {
   dj_name: string | null;
   current_idx: number;
   seek_pos: number;
+  elapsed_pos?: number;
   action: string;
   started_at: string | null;
   updated_at: string | null;

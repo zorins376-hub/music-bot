@@ -1058,6 +1058,9 @@ export function App() {
       audio.src = cachedUrl; // uses cache blob URL if available, otherwise API URL
       // No audio.load() — setting src already triggers load; explicit load() aborts & restarts connection
 
+      // Broadcast radio sync: seek to the DJ's current position
+      const seekToStart = track.startAt;
+
       // Wait for browser to buffer enough before playing (prevents underrun clicks)
       if (state.is_playing) {
         await new Promise<void>((resolve) => {
@@ -1067,6 +1070,9 @@ export function App() {
           // Timeout fallback: don't block forever on slow networks
           setTimeout(resolve, 8000);
         });
+        if (seekToStart && seekToStart > 1) {
+          audio.currentTime = seekToStart;
+        }
         await audio.play().catch((e) => {
           console.warn("loadAudio play() rejected:", e?.message || e);
         });

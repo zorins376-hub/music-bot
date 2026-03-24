@@ -23,7 +23,7 @@ const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-function toPlayerTrack(track: BroadcastTrack): Track {
+function toPlayerTrack(track: BroadcastTrack, startAt?: number): Track {
   return {
     video_id: track.video_id,
     title: track.title || "",
@@ -32,6 +32,7 @@ function toPlayerTrack(track: BroadcastTrack): Track {
     duration_fmt: track.duration_fmt || "0:00",
     source: track.source || "channel",
     cover_url: track.cover_url,
+    startAt: startAt && startAt > 1 ? startAt : undefined,
   };
 }
 
@@ -127,11 +128,13 @@ export const LiveRadioView = memo(function LiveRadioView({
         if (msg.event === "connected" && msg.data) {
           setBroadcast(msg.data);
           // Auto-play current track for listeners joining a live broadcast
+          // Use elapsed_pos so listener hears the same moment as the DJ
           if (msg.data.is_live && msg.data.tracks?.length > 0) {
             const idx = msg.data.current_idx ?? 0;
             const t = msg.data.tracks[idx];
             if (t?.video_id) {
-              onPlayTrack(toPlayerTrack(t));
+              const elapsed = typeof msg.data.elapsed_pos === "number" ? msg.data.elapsed_pos : 0;
+              onPlayTrack(toPlayerTrack(t, elapsed));
             }
           }
           return;

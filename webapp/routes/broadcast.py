@@ -122,13 +122,31 @@ async def _get_broadcast_state() -> dict:
         except Exception:
             pass
 
+    # Compute real-time playback position so listeners can sync mid-track
+    seek_pos = float(state.get("seek_pos", 0))
+    action = state.get("action", "idle") if tracks else "idle"
+    elapsed_pos = seek_pos
+    if action == "play" and state.get("updated_at"):
+        try:
+            updated_at = datetime.fromisoformat(state["updated_at"])
+            elapsed = (datetime.now(timezone.utc) - updated_at).total_seconds()
+            elapsed_pos = seek_pos + max(0, elapsed)
+            # Clamp to current track duration
+            if tracks and current_idx < len(tracks):
+                dur = tracks[current_idx].get("duration", 0)
+                if dur and elapsed_pos > dur:
+                    elapsed_pos = dur
+        except Exception:
+            pass
+
     return {
         "is_live": True,
         "dj_id": int(state.get("dj_id", 0)) if state.get("dj_id") else None,
         "dj_name": state.get("dj_name"),
         "current_idx": current_idx,
-        "seek_pos": float(state.get("seek_pos", 0)),
-        "action": state.get("action", "idle") if tracks else "idle",
+        "seek_pos": seek_pos,
+        "elapsed_pos": round(elapsed_pos, 1),
+        "action": action,
         "started_at": state.get("started_at"),
         "updated_at": state.get("updated_at"),
         "channel": state.get("channel"),
