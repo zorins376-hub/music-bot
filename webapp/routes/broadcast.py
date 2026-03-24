@@ -189,6 +189,46 @@ async def _collect_broadcast_group_ids() -> list[int]:
     return group_ids
 
 
+async def _broadcast_send_track_to_chats(track: dict, dj_name: str = "DJ"):
+    """Send the current track as audio message to all groups where bot is active."""
+    try:
+        from aiogram import Bot
+        from aiogram.client.default import DefaultBotProperties
+        from aiogram.enums import ParseMode
+
+        if not settings.BOT_TOKEN or not track.get("file_id"):
+            return
+
+        group_ids = await _collect_broadcast_group_ids()
+        if not group_ids:
+            return
+
+        bot = Bot(
+            token=settings.BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+        try:
+            caption = (
+                f"<b>ON AIR</b>  {track.get('title', '?')} — {track.get('artist', '?')}\n"
+                f"DJ: {dj_name}"
+            )
+            for gid in group_ids:
+                try:
+                    await bot.send_audio(
+                        chat_id=gid,
+                        audio=track["file_id"],
+                        caption=caption,
+                        title=track.get("title"),
+                        performer=track.get("artist"),
+                    )
+                except Exception as e:
+                    logger.warning("Failed to send track to chat %s: %s", gid, e)
+        finally:
+            await bot.session.close()
+    except Exception as e:
+        logger.error("Broadcast send track to chats failed: %s", e)
+
+
 async def _broadcast_notify_chat(action: str, dj_name: str = "DJ"):
     try:
         from aiogram import Bot
@@ -713,6 +753,9 @@ async def broadcast_skip(user: dict = Depends(get_current_user)):
         "position": new_idx,
         "track": track,
     })
+    # Send track audio to group chats
+    dj_name = await r.hget(_BCAST_STATE_KEY, "dj_name") or "DJ"
+    _fire_task(_broadcast_send_track_to_chats(track, dj_name))
     _fire_task(_broadcast_rebuild_voice_chat_queue(
         r,
         await r.hget(_BCAST_STATE_KEY, "channel") or "tequila",
@@ -812,6 +855,9 @@ async def broadcast_advance(user: dict = Depends(get_current_user)):
         "position": new_idx,
         "track": track,
     })
+    # Send track audio to group chats
+    dj_name = await r.hget(_BCAST_STATE_KEY, "dj_name") or "DJ"
+    _fire_task(_broadcast_send_track_to_chats(track, dj_name))
 
     return await _get_broadcast_state()
 

@@ -61,6 +61,7 @@ export const LiveRadioView = memo(function LiveRadioView({
   const [importing, setImporting] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [djMuted, setDjMuted] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -121,6 +122,17 @@ export const LiveRadioView = memo(function LiveRadioView({
       setImporting(false);
     }
   };
+
+  // ── DJ Monitor mute toggle ────────────────────────────────────
+  const toggleDjMute = useCallback(() => {
+    const audio = document.querySelector("audio") as HTMLAudioElement | null;
+    if (audio) {
+      const next = !djMuted;
+      audio.muted = next;
+      setDjMuted(next);
+      haptic("light");
+    }
+  }, [djMuted]);
 
   // ── Voice recording (DJ) ──────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -707,6 +719,14 @@ export const LiveRadioView = memo(function LiveRadioView({
               <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
                 {/* Transport buttons */}
                 <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={toggleDjMute}
+                    style={{ padding: "11px 14px", borderRadius: 10,
+                      border: djMuted ? "1px solid rgba(255,180,0,0.3)" : "1px solid rgba(255,255,255,0.08)",
+                      background: djMuted ? "rgba(255,180,0,0.12)" : "rgba(255,255,255,0.04)",
+                      color: djMuted ? "#ffb400" : tc.textColor,
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}>
+                    {djMuted ? "MUTED" : "MUTE"}
+                  </button>
                   <button onClick={handleSkip}
                     style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)",
                       background: "rgba(255,255,255,0.04)", color: tc.textColor,
