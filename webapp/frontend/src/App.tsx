@@ -1125,6 +1125,9 @@ export function App() {
     };
     
     loadAudio().then(async () => {
+      // In broadcast mode, don't toggle play/pause on state changes —
+      // audio should keep playing uninterrupted
+      if (viewRef.current === "broadcast") return;
       if (state.is_playing && audio.paused) {
         await softPlay(audio);
       } else if (!state.is_playing && !audio.paused) {
