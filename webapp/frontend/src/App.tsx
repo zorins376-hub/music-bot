@@ -461,7 +461,7 @@ export function App() {
       const s = stateRef.current;
       const isLastTrack = s.queue.length > 0 && s.position >= s.queue.length - 1;
 
-      if (isLastTrack && autoplayCountRef.current < (radioMode ? 50 : 3)) {
+      if (isLastTrack && autoplayCountRef.current < (radioMode ? 200 : 3)) {
         // Infinity autoplay: queue exhausted — fetch more tracks
         autoplayCountRef.current++;
         try {
@@ -2201,7 +2201,7 @@ export function App() {
             </div>
           )}
 
-          {/* Radio Mode Toggle */}
+          {/* Flow Mode Toggle */}
           {state.current_track && (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
@@ -2214,23 +2214,23 @@ export function App() {
                     radioSeedRef.current = state.current_track?.video_id || null;
                     radioPlayedRef.current = state.current_track ? [state.current_track.video_id] : [];
                     setRadioMode(true);
-                    showToast("Radio Mode ON — endless similar tracks");
+                    showToast("Поток включён — подбираю похожую музыку");
                   } else {
                     setRadioMode(false);
                     radioSeedRef.current = null;
                     radioPlayedRef.current = [];
-                    showToast("Radio Mode OFF");
+                    showToast("Поток выключен");
                   }
                 }}
                 style={{
-                  padding: "10px 20px",
-                  borderRadius: 16,
+                  padding: "10px 22px",
+                  borderRadius: 20,
                   border: radioMode
                     ? (isTequila ? "1px solid rgba(255,213,79,0.4)" : `1px solid ${accentColor}`)
-                    : (isTequila ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(255,255,255,0.08)"),
+                    : (isTequila ? "1px solid rgba(255,213,79,0.12)" : "1px solid rgba(255,255,255,0.1)"),
                   background: radioMode
-                    ? (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.4), rgba(255,213,79,0.25))" : `linear-gradient(135deg, ${accentColor}, rgba(224,64,251,0.7))`)
-                    : (isTequila ? "rgba(255,213,79,0.05)" : "rgba(255,255,255,0.04)"),
+                    ? (isTequila ? "linear-gradient(135deg, rgba(255,109,0,0.45), rgba(255,213,79,0.3))" : `linear-gradient(135deg, ${accentColor}, rgba(124,77,255,0.6))`)
+                    : (isTequila ? "rgba(255,213,79,0.06)" : "rgba(255,255,255,0.05)"),
                   color: radioMode ? "#fff" : theme.hintColor,
                   fontSize: 13,
                   fontWeight: radioMode ? 700 : 600,
@@ -2244,8 +2244,11 @@ export function App() {
                     : "none",
                 }}
               >
-                <IconRocket size={14} color={radioMode ? "#fff" : theme.hintColor} />
-                {radioMode ? "Radio ON" : "Radio"}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={radioMode ? "#fff" : theme.hintColor} stroke-width="2" stroke-linecap="round">
+                  <path d="M2 12c2-3 4-5 6-5s4 5 6 5 4-5 6-5" />
+                  {radioMode && <path d="M2 17c2-3 4-5 6-5s4 5 6 5 4-5 6-5" opacity="0.5" />}
+                </svg>
+                {radioMode ? "Поток ∞" : "Поток"}
               </button>
             </div>
           )}
@@ -2617,7 +2620,7 @@ export function App() {
               setRadioMode(true);
               action("play", t.video_id, undefined, t);
               setView("player");
-              showToast("Radio mode ON");
+              showToast("Поток включён — подбираю похожую музыку");
               break;
             case "share": {
               const text = `${t.title} — ${t.artist}`;

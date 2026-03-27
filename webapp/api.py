@@ -3092,8 +3092,8 @@ async def radio_next(
     user: dict = Depends(get_current_user),
 ):
     """
-    Get next batch of radio tracks based on seed track.
-    Uses similar tracks + trending mix for variety.
+    Flow mode: get next batch of tracks based on seed.
+    Uses AI similar → collaborative filtering → Deezer discovery → YouTube fallback.
     """
     body = await request.json()
     seed_id = body.get("seed_video_id", "")
@@ -3103,43 +3103,118 @@ async def radio_next(
     if not seed_id:
         raise HTTPException(400, "seed_video_id required")
 
-    tracks = []
+    uid = int(user.get("id", 0))
+    exclude_set = set(exclude + [seed_id])
+    seen: set[str] = set()
+    tracks: list[dict] = []
+
+    def _add(items: list[dict]) -> None:
+        for r in items:
+            vid = r.get("video_id") or r.get("source_id", "")
+            if vid and vid not in exclude_set and vid not in seen:
+                seen.add(vid)
+                tracks.append({
+                    "video_id": vid,
+                    "title": r.get("title", "Unknown"),
+                    "artist": r.get("artist", r.get("uploader", "Unknown")),
+                    "duration": r.get("duration", 0),
+                    "duration_fmt": r.get("duration_fmt", "0:00"),
+                    "source": r.get("source", "unknown"),
+                    "cover_url": r.get("cover_url") or _yt_thumb(vid),
+                })
+
+    # ── 1. AI similar tracks (Supabase → local ML → Deezer) ──
     try:
-        # Try similar tracks first
-        from bot.services.search_engine import search as _search
-        from bot.services.downloader import resolve_youtube_url
+        similar: list[dict] = []
+        if settings.SUPABASE_AI_ENABLED:
+            from bot.services.supabase_ai import supabase_ai
+            similar = await supabase_ai.get_similar(source_id=seed_id, limit=limit)
 
-        # Get track info for search
-        from bot.models.base import async_session as _as
-        from bot.models.track import Track as TrackModel
-        from sqlalchemy import select
-
-        seed_title = ""
-        seed_artist = ""
-        async with _as() as session:
-            t = (await session.execute(
-                select(TrackModel).where(TrackModel.source_id == seed_id)
-            )).scalar_one_or_none()
-            if t:
-                seed_title = t.title or ""
-                seed_artist = t.artist or ""
-
-        # Mix strategy: similar + artist radio + random trending
-        queries = []
-        if seed_artist:
-            queries.append(f"{seed_artist} mix")
-            queries.append(f"{seed_artist} best songs")
-        if seed_title and seed_artist:
-            queries.append(f"{seed_title} {seed_artist} similar")
-
-        exclude_set = set(exclude + [seed_id])
-        seen = set()
-
-        for q in queries[:3]:
+        if not similar:
             try:
+                from recommender.ai_dj import get_similar_tracks
+                from bot.models.base import async_session as _as
+                from bot.models.track import Track as TrackModel
+                from sqlalchemy import select
+                async with _as() as session:
+                    row = (await session.execute(
+                        select(TrackModel).where(TrackModel.source_id == seed_id)
+                    )).scalar_one_or_none()
+                    if row:
+                        similar = await get_similar_tracks(row.id, limit=limit)
+            except Exception:
+                pass
+
+        if not similar:
+            try:
+                from bot.models.base import async_session as _as
+                from bot.models.track import Track as TrackModel
+                from sqlalchemy import select
+                from recommender.deezer_discovery import find_similar_via_deezer
+                async with _as() as session:
+                    track = (await session.execute(
+                        select(TrackModel).where(TrackModel.source_id == seed_id)
+                    )).scalar_one_or_none()
+                    if track and (track.title or track.artist):
+                        similar = await find_similar_via_deezer(
+                            track.title or "", track.artist or "", limit=limit
+                        )
+            except Exception:
+                pass
+
+        _add(similar)
+    except Exception as e:
+        logger.error("Flow similar failed: %s", e)
+
+    # ── 2. Personalized recs from user history ──
+    if len(tracks) < limit:
+        try:
+            from recommender.ai_dj import get_recommendations
+            recs = await get_recommendations(uid, limit=limit - len(tracks) + 4)
+            _add(recs)
+        except Exception:
+            pass
+
+    # ── 3. Deezer user-based discovery ──
+    if len(tracks) < limit:
+        try:
+            from recommender.deezer_discovery import discover_for_user
+            from bot.models.base import async_session as _as
+            from bot.models.track import Track as TrackModel
+            from bot.models.listening_history import ListeningHistory
+            from sqlalchemy import select, func, desc
+            async with _as() as session:
+                top_artists = [
+                    r[0] for r in (await session.execute(
+                        select(TrackModel.artist, func.count(ListeningHistory.id).label("cnt"))
+                        .join(TrackModel, TrackModel.id == ListeningHistory.track_id)
+                        .where(ListeningHistory.user_id == uid, TrackModel.artist.isnot(None))
+                        .group_by(TrackModel.artist)
+                        .order_by(desc("cnt"))
+                        .limit(5)
+                    )).all() if r[0]
+                ]
+            if top_artists:
+                dz = await discover_for_user(top_artists, list(exclude_set), limit=limit - len(tracks) + 2)
+                _add(dz)
+        except Exception:
+            pass
+
+    # ── 4. YouTube search fallback ──
+    if len(tracks) < limit:
+        try:
+            from bot.services.search_engine import search as _search
+            from bot.models.base import async_session as _as
+            from bot.models.track import Track as TrackModel
+            from sqlalchemy import select
+            async with _as() as session:
+                t = (await session.execute(
+                    select(TrackModel).where(TrackModel.source_id == seed_id)
+                )).scalar_one_or_none()
+            if t and t.artist:
                 results = await asyncio.wait_for(
                     asyncio.get_running_loop().run_in_executor(
-                        None, lambda qq=q: _search(qq, max_results=8)
+                        None, lambda: _search(f"{t.artist} best songs", max_results=8)
                     ),
                     timeout=5.0,
                 )
@@ -3156,16 +3231,11 @@ async def radio_next(
                             "source": "youtube",
                             "cover_url": r.get("cover_url"),
                         })
-                        if len(tracks) >= limit:
-                            break
-            except Exception:
-                continue
-            if len(tracks) >= limit:
-                break
+        except Exception:
+            pass
 
-    except Exception as e:
-        logger.error("Radio next failed: %s", e)
-
+    import random
+    random.shuffle(tracks)
     return {"tracks": tracks[:limit]}
 
 

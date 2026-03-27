@@ -103,7 +103,7 @@ export const ActionSheet = memo(function ActionSheet({
     { id: "queue", label: "Add to Queue", icon: <IconPlus size={18} color={tc.highlight} /> },
     { id: "playlist", label: "Add to Playlist", icon: <IconMusic size={18} color={tc.highlight} /> },
     { id: "similar", label: "Similar Tracks", icon: <IconSimilar size={18} color={tc.highlight} /> },
-    { id: "radio", label: "Start Radio", icon: <IconRocket size={18} color={tc.highlight} /> },
+    { id: "radio", label: "Запустить Поток", icon: <IconRocket size={18} color={tc.highlight} /> },
     { id: "share", label: "Share", icon: <IconShare size={18} color={tc.highlight} /> },
   ];
 
