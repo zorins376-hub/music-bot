@@ -70,12 +70,26 @@ export const LiveRadioView = memo(function LiveRadioView({
     currentVideoIdRef.current = videoId;
     audio.src = getStreamUrl(videoId);
     audio.load();
-    const onCanPlay = () => {
-      audio.removeEventListener("canplay", onCanPlay);
-      if (seekTo && seekTo > 1) audio.currentTime = seekTo;
-      audio.play().catch(() => {});
-    };
-    audio.addEventListener("canplay", onCanPlay);
+
+    if (seekTo && seekTo > 1) {
+      // For mid-track sync: wait for metadata (duration known), then seek, then play
+      const onMeta = () => {
+        audio.removeEventListener("loadedmetadata", onMeta);
+        audio.currentTime = seekTo;
+        const onSeeked = () => {
+          audio.removeEventListener("seeked", onSeeked);
+          audio.play().catch(() => {});
+        };
+        audio.addEventListener("seeked", onSeeked, { once: true });
+      };
+      audio.addEventListener("loadedmetadata", onMeta, { once: true });
+    } else {
+      const onCanPlay = () => {
+        audio.removeEventListener("canplay", onCanPlay);
+        audio.play().catch(() => {});
+      };
+      audio.addEventListener("canplay", onCanPlay, { once: true });
+    }
     setIsPlaying(true);
   }, []);
 
