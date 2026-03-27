@@ -242,8 +242,9 @@ export function App() {
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [a2pPlaylists, setA2pPlaylists] = useState<Playlist[]>([]);
   const [a2pAdding, setA2pAdding] = useState<number | null>(null);
-  // ── Radio Mode ──
+  // ── Flow Mode (formerly Radio) ──
   const [radioMode, setRadioMode] = useState(false);
+  const radioModeRef = useRef(false);
   const radioSeedRef = useRef<string | null>(null);
   const radioLoadingRef = useRef(false);
   const radioPlayedRef = useRef<string[]>([]);
@@ -456,25 +457,38 @@ export function App() {
     audio.addEventListener("ended", async () => {
       // DJ crossfade already handled the transition — skip double-advance
       if (djCrossfadeActiveRef.current) return;
-      // Don't swap audio elements — it breaks AudioContext source connection.
-      // Cache + prefetch ensures the next track loads almost instantly.
+
+      // ── Flow mode: play next track directly from AI (no queue) ──
+      if (radioModeRef.current) {
+        const s = stateRef.current;
+        const currentId = s.current_track?.video_id;
+        const seed = radioSeedRef.current || currentId;
+        if (seed) {
+          try {
+            let recs = await fetchRadioNext(seed, radioPlayedRef.current.slice(-50), 8);
+            if (recs.length === 0) recs = await fetchWave(userIdRef.current, 8, null);
+            if (recs.length > 0) {
+              const next = recs[0];
+              radioPlayedRef.current.push(next.video_id);
+              radioSeedRef.current = next.video_id;
+              const ns = await sendAction("play", next.video_id, undefined, next);
+              setState(ns);
+              return;
+            }
+          } catch {}
+        }
+      }
+
+      // Normal queue mode
       const s = stateRef.current;
       const isLastTrack = s.queue.length > 0 && s.position >= s.queue.length - 1;
 
-      if (isLastTrack && autoplayCountRef.current < (radioMode ? 200 : 3)) {
-        // Infinity autoplay: queue exhausted — fetch more tracks
+      if (isLastTrack && autoplayCountRef.current < 3) {
         autoplayCountRef.current++;
         try {
           const currentId = s.current_track?.video_id;
           let recs: Track[] = [];
-          if (radioMode && currentId) {
-            // Radio mode: use dedicated radio endpoint with seed
-            const seed = radioSeedRef.current || currentId;
-            recs = await fetchRadioNext(seed, radioPlayedRef.current.slice(-30), 8);
-            if (recs.length > 0) {
-              recs.forEach(t => radioPlayedRef.current.push(t.video_id));
-            }
-          } else if (currentId) {
+          if (currentId) {
             recs = await fetchSimilar(currentId, 8);
           }
           if (recs.length === 0) recs = await fetchWave(userIdRef.current, 8, null);
@@ -548,7 +562,24 @@ export function App() {
               // Restore main deck gain
               if (ctx) cfGain.gain.setValueAtTime(1, ctx.currentTime);
               djCrossfadeActiveRef.current = false;
-              sendAction("next").then(setState).catch(() => {});
+              if (radioModeRef.current) {
+                // Flow mode: play next from AI
+                const curId = stateRef.current.current_track?.video_id;
+                const seed = radioSeedRef.current || curId;
+                if (seed) {
+                  fetchRadioNext(seed, radioPlayedRef.current.slice(-50), 8).then(async (recs) => {
+                    if (recs.length === 0) recs = await fetchWave(userIdRef.current, 8, null);
+                    if (recs.length > 0) {
+                      const nxt = recs[0];
+                      radioPlayedRef.current.push(nxt.video_id);
+                      radioSeedRef.current = nxt.video_id;
+                      sendAction("play", nxt.video_id, undefined, nxt).then(setState).catch(() => {});
+                    }
+                  }).catch(() => {});
+                }
+              } else {
+                sendAction("next").then(setState).catch(() => {});
+              }
             }, (fadeDur + 0.1) * 1000);
           }
         }
@@ -967,7 +998,7 @@ export function App() {
             sendAction("play").then(setState).catch(() => {});
           }
         } else if (action === "next") {
-          sendAction("next").then(setState).catch(() => {});
+          if (radioModeRef.current) { flowNext(); } else { sendAction("next").then(setState).catch(() => {}); }
         } else if (action === "prev") {
           sendAction("prev").then(setState).catch(() => {});
         }
@@ -1372,6 +1403,12 @@ export function App() {
   const action = useCallback(
     async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
       try {
+        // ── Flow mode: intercept "next" to fetch from AI instead of queue ──
+        if (act === "next" && radioModeRef.current && !trackId) {
+          flowNext();
+          return;
+        }
+
         // ── Optimistic UI: instantly toggle play/pause icon ──
         if (act === "play" && !trackId) {
           setState((prev) => ({ ...prev, is_playing: true }));
@@ -1436,6 +1473,41 @@ export function App() {
     },
     [ensureEqualizerGraph, softPlay, softPause, state.current_track]
   );
+
+  // ── Flow mode: fetch next track and play directly (no queue) ──
+  const flowNext = useCallback(async () => {
+    if (radioLoadingRef.current) return;
+    radioLoadingRef.current = true;
+    try {
+      const s = stateRef.current;
+      const currentId = s.current_track?.video_id;
+      const seed = radioSeedRef.current || currentId;
+      if (!seed) return;
+
+      // Ingest skip event
+      if (s.current_track && audioRef.current) {
+        ingestEvent("skip", s.current_track, Math.round(audioRef.current.currentTime), "flow");
+      }
+
+      let recs = await fetchRadioNext(seed, radioPlayedRef.current.slice(-50), 8);
+      if (recs.length === 0) recs = await fetchWave(userIdRef.current, 8, null);
+      if (recs.length > 0) {
+        const next = recs[0];
+        radioPlayedRef.current.push(next.video_id);
+        // Update seed to current track for better relevance drift
+        radioSeedRef.current = next.video_id;
+        // Play directly — don't add to queue
+        const ns = await sendAction("play", next.video_id, undefined, next);
+        setState(ns);
+      } else {
+        showToast("Не удалось подобрать трек");
+      }
+    } catch {
+      showToast("Ошибка подбора трека", "error");
+    } finally {
+      radioLoadingRef.current = false;
+    }
+  }, []);
 
   const updateQuality = useCallback(async (quality: string) => {
     try {
@@ -2213,9 +2285,11 @@ export function App() {
                   if (!radioMode) {
                     radioSeedRef.current = state.current_track?.video_id || null;
                     radioPlayedRef.current = state.current_track ? [state.current_track.video_id] : [];
+                    radioModeRef.current = true;
                     setRadioMode(true);
                     showToast("Поток включён — подбираю похожую музыку");
                   } else {
+                    radioModeRef.current = false;
                     setRadioMode(false);
                     radioSeedRef.current = null;
                     radioPlayedRef.current = [];
@@ -2617,6 +2691,7 @@ export function App() {
             case "radio":
               radioSeedRef.current = t.video_id;
               radioPlayedRef.current = [t.video_id];
+              radioModeRef.current = true;
               setRadioMode(true);
               action("play", t.video_id, undefined, t);
               setView("player");
