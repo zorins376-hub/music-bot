@@ -3108,10 +3108,36 @@ async def radio_next(
     seen: set[str] = set()
     tracks: list[dict] = []
 
+    # Get seed artist to enforce diversity
+    seed_artist = ""
+    try:
+        from bot.models.base import async_session as _as
+        from bot.models.track import Track as TrackModel
+        from sqlalchemy import select
+        async with _as() as session:
+            _seed_row = (await session.execute(
+                select(TrackModel).where(TrackModel.source_id == seed_id)
+            )).scalar_one_or_none()
+            if _seed_row:
+                seed_artist = (_seed_row.artist or "").lower().strip()
+    except Exception:
+        pass
+
+    # Artist diversity: max 2 tracks from the same artist as seed
+    _same_artist_count = 0
+    _MAX_SAME_ARTIST = 2
+
     def _add(items: list[dict]) -> None:
+        nonlocal _same_artist_count
         for r in items:
             vid = r.get("video_id") or r.get("source_id", "")
             if vid and vid not in exclude_set and vid not in seen:
+                art = (r.get("artist") or r.get("uploader") or "").lower().strip()
+                # Enforce artist diversity
+                if seed_artist and art == seed_artist:
+                    if _same_artist_count >= _MAX_SAME_ARTIST:
+                        continue
+                    _same_artist_count += 1
                 seen.add(vid)
                 tracks.append({
                     "video_id": vid,
@@ -3200,7 +3226,7 @@ async def radio_next(
         except Exception:
             pass
 
-    # ── 4. YouTube search fallback ──
+    # ── 4. YouTube search fallback (diverse queries) ──
     if len(tracks) < limit:
         try:
             from bot.services.search_engine import search as _search
@@ -3211,26 +3237,27 @@ async def radio_next(
                 t = (await session.execute(
                     select(TrackModel).where(TrackModel.source_id == seed_id)
                 )).scalar_one_or_none()
-            if t and t.artist:
-                results = await asyncio.wait_for(
-                    asyncio.get_running_loop().run_in_executor(
-                        None, lambda: _search(f"{t.artist} best songs", max_results=8)
-                    ),
-                    timeout=5.0,
-                )
-                for r in (results or []):
-                    vid = r.get("video_id") or r.get("id", "")
-                    if vid and vid not in exclude_set and vid not in seen:
-                        seen.add(vid)
-                        tracks.append({
-                            "video_id": vid,
-                            "title": r.get("title", ""),
-                            "artist": r.get("uploader", r.get("artist", "")),
-                            "duration": r.get("duration", 0),
-                            "duration_fmt": r.get("duration_fmt", "0:00"),
-                            "source": "youtube",
-                            "cover_url": r.get("cover_url"),
-                        })
+            if t:
+                # Search for SIMILAR artists, not the same one
+                queries = []
+                if t.artist and t.title:
+                    queries.append(f"artists similar to {t.artist}")
+                    queries.append(f"{t.title} type beat")
+                elif t.artist:
+                    queries.append(f"artists like {t.artist}")
+                for q in queries[:2]:
+                    if len(tracks) >= limit:
+                        break
+                    try:
+                        results = await asyncio.wait_for(
+                            asyncio.get_running_loop().run_in_executor(
+                                None, lambda qq=q: _search(qq, max_results=6)
+                            ),
+                            timeout=5.0,
+                        )
+                        _add(results or [])
+                    except Exception:
+                        continue
         except Exception:
             pass
 

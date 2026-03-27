@@ -309,35 +309,42 @@ async def discover_for_user(
 
 
 async def find_similar_via_deezer(title: str, artist: str, limit: int = 10) -> list[dict]:
-    """Find similar tracks to a given track via Deezer search."""
+    """Find similar tracks to a given track via Deezer search.
+    Prioritizes related artists for diversity — max 2 same-artist tracks."""
     cache_key = f"dz_sim:{artist}:{title}:{limit}"
     cached = _cache_get(cache_key)
     if cached:
         return cached
 
-    all_tracks: list[dict] = []
+    related_tracks: list[dict] = []
+    same_artist_tracks: list[dict] = []
     seen: set[str] = set()
 
-    # 1. More tracks by same artist
-    artist_tracks = await search_by_artist(artist, limit=10)
-    for t in artist_tracks:
-        # Skip the exact same track
-        if t["title"].lower() != title.lower() and t["video_id"] not in seen:
-            seen.add(t["video_id"])
-            all_tracks.append(t)
-
-    # 2. Related artists' top tracks
-    related = await get_related_artists(artist, limit=3)
+    # 1. Related artists' top tracks (PRIORITY — diversity)
+    related = await get_related_artists(artist, limit=5)
     for rel in related:
         name = rel.get("name")
         if name:
-            tracks = await get_artist_top_tracks(name, limit=3)
+            tracks = await get_artist_top_tracks(name, limit=4)
             for t in tracks:
                 if t["video_id"] not in seen:
                     seen.add(t["video_id"])
-                    all_tracks.append(t)
+                    related_tracks.append(t)
 
-    result = all_tracks[:limit]
+    # 2. A few tracks by same artist (max 2)
+    artist_tracks = await search_by_artist(artist, limit=5)
+    for t in artist_tracks:
+        if t["title"].lower() != title.lower() and t["video_id"] not in seen:
+            seen.add(t["video_id"])
+            same_artist_tracks.append(t)
+
+    # Mix: related first, then up to 2 same-artist
+    import random
+    random.shuffle(related_tracks)
+    result = related_tracks[:limit - 2] + same_artist_tracks[:2]
+    random.shuffle(result)
+    result = result[:limit]
+
     if result:
         _cache_set(cache_key, result)
     return result
