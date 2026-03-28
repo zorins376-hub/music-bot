@@ -204,10 +204,11 @@ export async function fetchPlayerState(userId: number): Promise<PlayerState> {
   return r.json();
 }
 
-export async function sendAction(action: string, trackId?: string, seekPos?: number, track?: Track): Promise<PlayerState> {
+export async function sendAction(action: string, trackId?: string, seekPos?: number, track?: Track, mode?: string): Promise<PlayerState> {
   const body: Record<string, unknown> = { action };
   if (trackId) body.track_id = trackId;
   if (seekPos !== undefined) body.position = seekPos;
+  if (mode) body.mode = mode;
   if (track) {
     body.track_title = track.title;
     body.track_artist = track.artist;
@@ -790,6 +791,7 @@ export interface LastfmArtistInfo {
   playcount: number;
   tags: string[];
   bio: string;
+  image?: string;
   similar: string[];
 }
 

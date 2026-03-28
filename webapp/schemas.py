@@ -33,6 +33,7 @@ class PlayerAction(BaseModel):
     track_duration: Optional[int] = None
     track_source: Optional[str] = None
     track_cover_url: Optional[str] = None
+    mode: Optional[str] = None  # "direct" = play without adding to queue
 
 
 class PlaylistSchema(BaseModel):

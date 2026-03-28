@@ -175,6 +175,9 @@ export const ForYouView = memo(function ForYouView({
   const [weeklyTracks, setWeeklyTracks] = useState<Track[]>([]);
   const [weeklyLoading, setWeeklyLoading] = useState(true);
 
+  // --- Bio expand ---
+  const [bioExpanded, setBioExpanded] = useState(false);
+
   // --- Pull-to-refresh ---
   const [refreshing, setRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
@@ -665,29 +668,73 @@ export const ForYouView = memo(function ForYouView({
         }}>
           <SectionHeading icon={<IconStar size={16} color={tc.highlight} filled />} title="Об артисте" tc={tc} />
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: tc.textColor, marginBottom: 4 }}>
-              {artistInfo.name}
+            {/* Artist header with photo */}
+            <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
+              {artistInfo.image ? (
+                <img src={artistInfo.image} alt={artistInfo.name} style={{
+                  width: 72, height: 72, borderRadius: 18, objectFit: "cover",
+                  border: `2px solid ${tc.highlight}40`,
+                  flexShrink: 0,
+                }} />
+              ) : (
+                <div style={{
+                  width: 72, height: 72, borderRadius: 18, flexShrink: 0,
+                  background: `linear-gradient(135deg, ${tc.highlight}30, ${tc.highlight}10)`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  border: `2px solid ${tc.highlight}40`,
+                }}>
+                  <IconMusicNote size={28} color={tc.highlight} />
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: tc.textColor, marginBottom: 6 }}>
+                  {artistInfo.name}
+                </div>
+                <div style={{ display: "flex", gap: 16 }}>
+                  <div style={{ fontSize: 11, color: tc.hintColor }}>
+                    <span style={{ fontWeight: 700, color: tc.textColor, fontSize: 14 }}>
+                      {artistInfo.listeners > 1000000 ? `${(artistInfo.listeners / 1000000).toFixed(1)}M` : artistInfo.listeners > 1000 ? `${(artistInfo.listeners / 1000).toFixed(0)}K` : artistInfo.listeners}
+                    </span> слушателей
+                  </div>
+                  <div style={{ fontSize: 11, color: tc.hintColor }}>
+                    <span style={{ fontWeight: 700, color: tc.textColor, fontSize: 14 }}>
+                      {artistInfo.playcount > 1000000 ? `${(artistInfo.playcount / 1000000).toFixed(0)}M` : artistInfo.playcount > 1000 ? `${(artistInfo.playcount / 1000).toFixed(0)}K` : artistInfo.playcount}
+                    </span> прослушиваний
+                  </div>
+                </div>
+              </div>
             </div>
+            {/* Bio — expandable */}
             {artistInfo.bio && (
-              <div style={{
-                fontSize: 12, color: tc.hintColor, lineHeight: 1.5,
-                maxHeight: 60, overflow: "hidden", marginBottom: 8,
-              }}>
-                {artistInfo.bio}
+              <div style={{ marginBottom: 12 }}>
+                <div
+                  onClick={() => setBioExpanded(!bioExpanded)}
+                  style={{
+                    fontSize: 12, color: tc.hintColor, lineHeight: 1.6,
+                    maxHeight: bioExpanded ? "none" : 54,
+                    overflow: "hidden",
+                    cursor: "pointer",
+                    position: "relative",
+                  }}
+                >
+                  {artistInfo.bio}
+                  {!bioExpanded && artistInfo.bio.length > 120 && (
+                    <div style={{
+                      position: "absolute", bottom: 0, left: 0, right: 0, height: 28,
+                      background: `linear-gradient(transparent, ${tc.cardBgSolid || "rgba(30,30,30,1)"})`,
+                    }} />
+                  )}
+                </div>
+                {artistInfo.bio.length > 120 && (
+                  <button onClick={() => setBioExpanded(!bioExpanded)} style={{
+                    background: "none", border: "none", padding: "4px 0", cursor: "pointer",
+                    fontSize: 11, fontWeight: 600, color: tc.highlight,
+                  }}>
+                    {bioExpanded ? "Свернуть ▲" : "Читать далее ▼"}
+                  </button>
+                )}
               </div>
             )}
-            <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
-              <div style={{ fontSize: 11, color: tc.hintColor }}>
-                <span style={{ fontWeight: 700, color: tc.textColor, fontSize: 14 }}>
-                  {artistInfo.listeners > 1000000 ? `${(artistInfo.listeners / 1000000).toFixed(1)}M` : artistInfo.listeners > 1000 ? `${(artistInfo.listeners / 1000).toFixed(0)}K` : artistInfo.listeners}
-                </span> слушателей
-              </div>
-              <div style={{ fontSize: 11, color: tc.hintColor }}>
-                <span style={{ fontWeight: 700, color: tc.textColor, fontSize: 14 }}>
-                  {artistInfo.playcount > 1000000 ? `${(artistInfo.playcount / 1000000).toFixed(0)}M` : artistInfo.playcount > 1000 ? `${(artistInfo.playcount / 1000).toFixed(0)}K` : artistInfo.playcount}
-                </span> прослушиваний
-              </div>
-            </div>
             {artistInfo.tags.length > 0 && (
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: tc.hintColor, marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>Жанры</div>

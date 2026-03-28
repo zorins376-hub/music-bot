@@ -1276,15 +1276,8 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
 
     if body.action == "play":
         if body.track_id:
-            # Find track in queue or add it
-            found = False
-            for i, t in enumerate(state.queue):
-                if t.video_id == body.track_id:
-                    state.position = i
-                    found = True
-                    break
-            if not found and body.track_id:
-                # Load track info from DB, fallback to metadata from request
+            if body.mode == "direct":
+                # Direct play: replace current track WITHOUT adding to queue
                 track = await _get_track_by_source_id(body.track_id)
                 if not track and body.track_title:
                     from bot.utils import fmt_duration
@@ -1302,8 +1295,36 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
                         cover_url=cover,
                     )
                 if track:
-                    state.queue.append(track)
-                    state.position = len(state.queue) - 1
+                    state.current_track = track
+                    # Don't touch queue or position
+            else:
+                # Normal play: find track in queue or add it
+                found = False
+                for i, t in enumerate(state.queue):
+                    if t.video_id == body.track_id:
+                        state.position = i
+                        found = True
+                        break
+                if not found:
+                    track = await _get_track_by_source_id(body.track_id)
+                    if not track and body.track_title:
+                        from bot.utils import fmt_duration
+                        dur = body.track_duration or 0
+                        cover = body.track_cover_url
+                        if not cover and (body.track_source or "youtube") == "youtube":
+                            cover = f"https://i.ytimg.com/vi/{body.track_id}/hqdefault.jpg"
+                        track = TrackSchema(
+                            video_id=body.track_id,
+                            title=body.track_title,
+                            artist=body.track_artist or "Unknown",
+                            duration=dur,
+                            duration_fmt=fmt_duration(dur),
+                            source=body.track_source or "youtube",
+                            cover_url=cover,
+                        )
+                    if track:
+                        state.queue.append(track)
+                        state.position = len(state.queue) - 1
         state.is_playing = True
 
     elif body.action == "pause":
@@ -1385,9 +1406,10 @@ async def player_action(body: PlayerAction, user: dict = Depends(get_current_use
                 if track:
                     state.queue.append(track)
 
-    # Update current track
-    if state.queue and 0 <= state.position < len(state.queue):
-        state.current_track = state.queue[state.position]
+    # Update current track (skip if direct mode already set it)
+    if body.action != "play" or body.mode != "direct":
+        if state.queue and 0 <= state.position < len(state.queue):
+            state.current_track = state.queue[state.position]
 
     await _save_state(user_id, state)
     return state

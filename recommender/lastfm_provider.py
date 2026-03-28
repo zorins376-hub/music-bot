@@ -502,12 +502,23 @@ async def get_artist_info(artist: str) -> Optional[dict]:
     if isinstance(tags, dict):
         tags = [tags]
 
+    # Extract artist image (prefer large/extralarge)
+    images = info.get("image", [])
+    image_url = ""
+    if isinstance(images, list):
+        for img in reversed(images):  # Last = largest
+            url = img.get("#text", "") if isinstance(img, dict) else ""
+            if url and not url.endswith("2a96cbd8b46e442fc41c2b86b821562f.png"):
+                image_url = url
+                break
+
     result = {
         "name": info.get("name", artist),
         "listeners": int(info.get("stats", {}).get("listeners", 0)),
         "playcount": int(info.get("stats", {}).get("playcount", 0)),
         "tags": [t.get("name", "") for t in tags if t.get("name")],
         "bio": (info.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip(),
+        "image": image_url,
         "similar": [
             a.get("name", "")
             for a in (info.get("similar", {}).get("artist", []) or [])

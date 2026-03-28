@@ -1420,7 +1420,7 @@ export function App() {
   }, [isWaveLoading, state.is_playing, userId, moodFilter]);
 
   const action = useCallback(
-    async (act: string, trackId?: string, seekPos?: number, track?: Track) => {
+    async (act: string, trackId?: string, seekPos?: number, track?: Track, mode?: string) => {
       try {
         // ── Flow mode: intercept "next" to fetch from AI instead of queue ──
         if (act === "next" && radioModeRef.current && !trackId) {
@@ -1474,7 +1474,7 @@ export function App() {
           }
         }
 
-        const s = await sendAction(act, trackId, seekPos, track);
+        const s = await sendAction(act, trackId, seekPos, track, mode);
         if (act === "seek" && seekPos !== undefined && audioRef.current) {
           audioRef.current.currentTime = seekPos;
         }
@@ -1538,14 +1538,19 @@ export function App() {
   }, []);
 
   const handlePlayAndOpenPlayer = useCallback((track: Track) => {
-    action("play", track.video_id, undefined, track);
+    action("play", track.video_id, undefined, track, "direct");
     setView("player");
   }, [action]);
 
   // Stable callbacks for memo'd children
   const handlePlayAllAndOpenPlayer = useCallback(async (tracks: Track[]) => {
-    for (const t of tracks) await action("add", t.video_id, undefined, t);
-    if (tracks.length) await action("play", tracks[0].video_id);
+    // First track plays directly, rest go to queue
+    if (tracks.length) {
+      await action("play", tracks[0].video_id, undefined, tracks[0]);
+      for (let i = 1; i < tracks.length; i++) {
+        await action("add", tracks[i].video_id, undefined, tracks[i]);
+      }
+    }
     setView("player");
   }, [action]);
 
@@ -1602,13 +1607,21 @@ export function App() {
   }, [state.current_track, userId]);
 
   const handlePlayerPlayTrack = useCallback(async (t: Track) => {
-    await action("add", t.video_id, undefined, t);
-    await action("play", t.video_id);
+    await action("play", t.video_id, undefined, t, "direct");
   }, [action]);
 
   const handlePlayerPlayAll = useCallback(async (tracks: Track[]) => {
-    for (const t of tracks) await action("add", t.video_id, undefined, t);
-    if (tracks.length) await action("play", tracks[0].video_id);
+    if (tracks.length) {
+      await action("play", tracks[0].video_id, undefined, tracks[0]);
+      for (let i = 1; i < tracks.length; i++) {
+        await action("add", tracks[i].video_id, undefined, tracks[i]);
+      }
+    }
+  }, [action]);
+
+  const handleAddToQueue = useCallback(async (t: Track) => {
+    await action("add", t.video_id, undefined, t);
+    showToast("Добавлено в очередь");
   }, [action]);
 
   const handleLyricsBack = useCallback(() => {
@@ -2239,7 +2252,7 @@ export function App() {
       {view === "player" && (
         <ViewErrorBoundary viewName="Player" fallbackColor={theme.hintColor}>
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={handleToggleSpectrum} spectrumStyle={spectrumStyle} onSpectrumStyleChange={handleSpectrumStyleChange} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={handleAddToPlaylist} onPlayTrack={handlePlayerPlayTrack} onPlayAll={handlePlayerPlayAll} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={handleToggleSpectrum} spectrumStyle={spectrumStyle} onSpectrumStyleChange={handleSpectrumStyleChange} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={handleAddToPlaylist} onAddToQueue={handleAddToQueue} onPlayTrack={handlePlayerPlayTrack} onPlayAll={handlePlayerPlayAll} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (

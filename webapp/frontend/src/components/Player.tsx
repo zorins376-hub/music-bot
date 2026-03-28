@@ -66,11 +66,12 @@ interface Props {
   coverMode?: "default" | "vinyl" | "cd" | "case";
   onCoverMode?: (mode: "default" | "vinyl" | "cd" | "case") => void;
   onAddToPlaylist?: () => void;
+  onAddToQueue?: (track: Track) => void;
   onPlayTrack?: (track: Track) => void;
   onPlayAll?: (tracks: Track[]) => void;
 }
 
-export const Player = memo(function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onPlayTrack, onPlayAll }: Props) {
+export const Player = memo(function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onAddToQueue, onPlayTrack, onPlayAll }: Props) {
   const isTequila = themeId === "tequila";
   const vinylSpin = coverMode === "vinyl";
   const cdMode = coverMode === "cd";
@@ -1274,6 +1275,16 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           <button onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${sleepTimerRemaining ? gold + "88" : borderGold}`, background: sleepTimerRemaining ? "rgba(255,167,38,0.18)" : glassCard, color: sleepTimerRemaining ? gold : "#fef0e0", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <IconMoon size={14} /> {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
           </button>
+          {track && (
+            <button onClick={() => { haptic("light"); if (track) onAddToQueue?.(track); }} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${borderGold}`, background: glassCard, color: "#fef0e0", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <IconPlus size={14} /> В очередь
+            </button>
+          )}
+          {track && (
+            <button onClick={() => { haptic("light"); onAddToPlaylist?.(); }} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${borderGold}`, background: glassCard, color: "#fef0e0", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <IconMusic size={14} /> В плейлист
+            </button>
+          )}
         </div>
 
         {/* Similar Tracks — warm */}
@@ -1931,6 +1942,16 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         <button onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${sleepTimerRemaining ? accentColor : "rgba(255,255,255,0.1)"}`, background: sleepTimerRemaining ? accentColorAlpha : "rgba(255,255,255,0.05)", color: sleepTimerRemaining ? accentColor : "var(--tg-theme-text-color, #eee)", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
           <IconMoon size={14} /> {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
         </button>
+        {track && (
+          <button onClick={() => { haptic("light"); if (track) onAddToQueue?.(track); }} style={{ padding: "8px 16px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", color: "var(--tg-theme-text-color, #eee)", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <IconPlus size={14} /> В очередь
+          </button>
+        )}
+        {track && (
+          <button onClick={() => { haptic("light"); onAddToPlaylist?.(); }} style={{ padding: "8px 16px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", color: "var(--tg-theme-text-color, #eee)", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <IconMusic size={14} /> В плейлист
+          </button>
+        )}
       </div>
 
       {/* Sleep Timer Menu */}
