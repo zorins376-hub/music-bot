@@ -386,35 +386,84 @@ async def get_top_by_tag(tag: str, limit: int = 20) -> list[dict]:
     return results
 
 
+_COUNTRY_TAGS: dict[str, list[str]] = {
+    "Russian Federation": ["russian", "russian pop", "russian rock", "russian hip-hop"],
+    "Kazakhstan": ["kazakh", "russian pop", "post-soviet"],
+    "Kyrgyzstan": ["russian pop", "central asian", "post-soviet"],
+    "United States": ["american", "us pop", "hip-hop", "r&b"],
+    "United Kingdom": ["british", "uk", "britpop", "uk drill"],
+    "Germany": ["german", "deutsche", "german pop", "german rap"],
+    "Turkey": ["turkish", "turkish pop", "turkish rock"],
+    "France": ["french", "french pop", "french rap", "chanson"],
+    "Brazil": ["brazilian", "mpb", "sertanejo", "funk brasileiro"],
+    "Japan": ["japanese", "j-pop", "j-rock", "anime"],
+    "Korea, Republic of": ["korean", "k-pop", "k-indie", "k-rap"],
+    "India": ["indian", "bollywood", "hindi", "punjabi"],
+}
+
+_MAX_PER_ARTIST = 2  # max tracks from one artist in geo results
+
+
 async def get_geo_top_tracks(country: str = "russia", limit: int = 20) -> list[dict]:
-    """Get trending tracks in a specific country via Last.fm geo data."""
-    cache_key = f"lfm_geo:{country}:{limit}"
+    """Get trending tracks in a specific country via Last.fm geo data + regional tags for diversity."""
+    cache_key = f"lfm_geo_v2:{country}:{limit}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
 
-    data = await _lastfm_get("geo.getTopTracks", {
-        "country": country,
-        "limit": str(limit),
-    })
-    if not data:
-        return []
+    import asyncio as _aio
+    import random
 
-    tracks = data.get("tracks", {}).get("track", [])
-    if isinstance(tracks, dict):
-        tracks = [tracks]
+    # Fetch geo top + regional tag tracks in parallel for diversity
+    country_tags = _COUNTRY_TAGS.get(country, [])
+    tag = random.choice(country_tags) if country_tags else None
+
+    coros = [
+        _lastfm_get("geo.getTopTracks", {"country": country, "limit": str(limit + 20)}),
+    ]
+    if tag:
+        coros.append(_lastfm_get("tag.getTopTracks", {"tag": tag, "limit": str(limit)}))
+
+    fetched = await _aio.gather(*coros, return_exceptions=True)
+
+    geo_data = fetched[0] if not isinstance(fetched[0], Exception) else None
+    tag_data = fetched[1] if len(fetched) > 1 and not isinstance(fetched[1], Exception) else None
 
     results = []
     seen: set[str] = set()
-    for t in tracks:
-        norm = _normalize_track(t, source="lastfm_geo")
-        if norm:
-            key = f"{norm['artist'].lower()}:{norm['title'].lower()}"
-            if key not in seen:
-                seen.add(key)
-                # geo endpoint gives listeners count
-                norm["listeners"] = int(t.get("listeners", 0))
-                results.append(norm)
+    artist_count: dict[str, int] = {}
+
+    def _add_tracks(data, source: str):
+        if not data:
+            return
+        key_path = "tracks" if "tracks" in data else "toptracks"
+        tracks = data.get(key_path, data).get("track", [])
+        if isinstance(tracks, dict):
+            tracks = [tracks]
+        for t in tracks:
+            norm = _normalize_track(t, source=source)
+            if norm:
+                key = f"{norm['artist'].lower()}:{norm['title'].lower()}"
+                artist_key = norm['artist'].lower()
+                if key not in seen and artist_count.get(artist_key, 0) < _MAX_PER_ARTIST:
+                    seen.add(key)
+                    artist_count[artist_key] = artist_count.get(artist_key, 0) + 1
+                    norm["listeners"] = int(t.get("listeners", 0))
+                    results.append(norm)
+
+    # Geo tracks first (higher priority)
+    _add_tracks(geo_data, "lastfm_geo")
+    # Then regional tag tracks to fill gaps
+    _add_tracks(tag_data, "lastfm_tag")
+
+    # Shuffle a bit to mix geo and tag results but keep top ones first
+    if len(results) > 6:
+        top = results[:4]
+        rest = results[4:]
+        random.shuffle(rest)
+        results = top + rest
+
+    results = results[:limit]
 
     if results:
         _cache_set(cache_key, results)
