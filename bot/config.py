@@ -98,10 +98,7 @@ class Settings(BaseSettings):
     # ── Каналы экосистемы (v1.1) ─────────────────────────────────────────
     TEQUILA_CHANNEL: str = ""
     FULLMOON_CHANNEL: str = ""
-    BLACKROOM_GROUP_ID: Optional[str] = None
-
-    # ── Telegram CDN Cache Channel ─────────────────────────────────────
-    CACHE_CHANNEL_ID: Optional[int] = None  # Private channel ID for audio storage
+    BLACKROOM_GROUP_ID: Optional[int] = None
 
     # ── YouTube cookies (base64-encoded Netscape cookies.txt) ────────────
     YT_COOKIES: Optional[str] = None
@@ -141,6 +138,9 @@ class Settings(BaseSettings):
 
     # ── Genius (lyrics) ──────────────────────────────────────────────────
     GENIUS_TOKEN: Optional[str] = None
+
+    # ── Last.fm (recommendations / similar tracks) ────────────────────────
+    LASTFM_API_KEY: Optional[str] = None
 
     # ── Prometheus metrics ────────────────────────────────────────────
     METRICS_PORT: int = 9090  # VPS: enabled (0 = disabled)

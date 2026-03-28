@@ -3149,8 +3149,37 @@ async def radio_next(
                     "cover_url": r.get("cover_url") or _yt_thumb(vid),
                 })
 
-    # ── 1. AI similar tracks (Supabase → local ML → Deezer) ──
+    # ── 0. Last.fm similar (best quality — 20+ years of listening data) ──
+    seed_title = ""
+    _seed_artist_raw = ""
     try:
+        from bot.models.base import async_session as _as2
+        from bot.models.track import Track as TrackModel
+        from sqlalchemy import select as _sel
+        async with _as2() as session:
+            _seed = (await session.execute(
+                _sel(TrackModel).where(TrackModel.source_id == seed_id)
+            )).scalar_one_or_none()
+            if _seed:
+                seed_title = _seed.title or ""
+                _seed_artist_raw = _seed.artist or ""
+    except Exception:
+        pass
+
+    if seed_title and _seed_artist_raw and settings.LASTFM_API_KEY:
+        try:
+            from recommender.lastfm_provider import discover_similar_flow, resolve_to_playable
+            lfm_raw = await discover_similar_flow(seed_title, _seed_artist_raw, limit=limit + 5)
+            if lfm_raw:
+                lfm_resolved = await resolve_to_playable(lfm_raw, exclude_set.copy())
+                _add(lfm_resolved)
+                logger.info("Flow: Last.fm provided %d tracks", len(lfm_resolved))
+        except Exception as e:
+            logger.warning("Flow Last.fm failed: %s", e)
+
+    # ── 1. AI similar tracks (Supabase → local ML → Deezer) ──
+    if len(tracks) < limit:
+      try:
         similar: list[dict] = []
         if settings.SUPABASE_AI_ENABLED:
             from bot.services.supabase_ai import supabase_ai
@@ -3171,25 +3200,17 @@ async def radio_next(
             except Exception:
                 pass
 
-        if not similar:
+        if not similar and seed_title and _seed_artist_raw:
             try:
-                from bot.models.base import async_session as _as
-                from bot.models.track import Track as TrackModel
-                from sqlalchemy import select
                 from recommender.deezer_discovery import find_similar_via_deezer
-                async with _as() as session:
-                    track = (await session.execute(
-                        select(TrackModel).where(TrackModel.source_id == seed_id)
-                    )).scalar_one_or_none()
-                    if track and (track.title or track.artist):
-                        similar = await find_similar_via_deezer(
-                            track.title or "", track.artist or "", limit=limit
-                        )
+                similar = await find_similar_via_deezer(
+                    seed_title, _seed_artist_raw, limit=limit
+                )
             except Exception:
                 pass
 
         _add(similar)
-    except Exception as e:
+      except Exception as e:
         logger.error("Flow similar failed: %s", e)
 
     # ── 2. Personalized recs from user history ──
