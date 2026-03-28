@@ -1428,6 +1428,28 @@ export function App() {
           return;
         }
 
+        // ── Empty queue: auto-fill with recommendations when user presses play ──
+        if (act === "play" && !trackId && !stateRef.current.current_track && stateRef.current.queue.length === 0) {
+          setBuffering(true);
+          try {
+            let recs = await fetchWave(userIdRef.current, 15, null);
+            if (recs.length === 0) recs = await fetchTrending(15);
+            if (recs.length > 0) {
+              const first = recs[0];
+              const ns = await sendAction("play", first.video_id, undefined, first);
+              for (let i = 1; i < recs.length; i++) {
+                await sendAction("add", recs[i].video_id, undefined, recs[i]);
+              }
+              const final_s = await fetchPlayerState(userIdRef.current);
+              setState(final_s);
+              setBuffering(false);
+              return;
+            }
+          } catch {}
+          setBuffering(false);
+          return;
+        }
+
         // ── Optimistic UI: instantly toggle play/pause icon ──
         if (act === "play" && !trackId) {
           setState((prev) => ({ ...prev, is_playing: true }));

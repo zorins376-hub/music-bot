@@ -864,45 +864,80 @@ export const ForYouView = memo(function ForYouView({
         </div>
       )}
 
-      {/* ===== Geo Trending ===== */}
-      {(geoTracks.length > 0 || geoLoading) && (
+      {/* ===== Geo Trending — Modern Flag Cards ===== */}
+      <div style={{
+        marginBottom: 28,
+        transform: "translateZ(0)",
+      }}>
+        <div style={{ padding: "0 0 10px 0" }}>
+          <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="Популярное в мире" tc={tc} />
+        </div>
+        {/* Horizontal scrollable flag cards */}
         <div style={{
-          marginBottom: 28, padding: 16, borderRadius: 22,
-          background: tc.cardBg, border: tc.cardBorder,
-          transform: "translateZ(0)",
+          display: "flex", gap: 12, overflowX: "auto",
+          padding: "4px 0 14px 0", scrollbarWidth: "none",
+          WebkitOverflowScrolling: "touch",
+          scrollSnapType: "x mandatory",
         }}>
-          <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="Популярное в регионе" tc={tc} />
-          <div style={{
-            display: "flex", gap: 6, marginBottom: 10, marginTop: -4,
-            overflowX: "auto", scrollbarWidth: "none",
-          }}>
-            {[
-              { code: "russia", label: "🇷🇺 Россия" },
-              { code: "kazakhstan", label: "🇰🇿 Казахстан" },
-              { code: "united states", label: "🇺🇸 США" },
-              { code: "united kingdom", label: "🇬🇧 UK" },
-              { code: "germany", label: "🇩🇪 Германия" },
-              { code: "turkey", label: "🇹🇷 Турция" },
-            ].map(({ code, label }) => (
-              <button key={code} onClick={() => {
-                haptic("light");
-                setGeoCountry(code);
-                setGeoLoading(true);
-                fetchLastfmGeoTop(code, 15).then(t => { setGeoTracks(t); setGeoLoading(false); }).catch(() => setGeoLoading(false));
-              }} style={{
-                padding: "5px 12px", borderRadius: 10, fontSize: 11, fontWeight: 600,
-                border: geoCountry === code ? `1px solid ${tc.highlight}` : `1px solid ${tc.accentBorderAlpha}`,
-                background: geoCountry === code ? `${tc.highlight}20` : "transparent",
-                color: geoCountry === code ? tc.highlight : tc.hintColor,
-                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+          {[
+            { code: "russia", flag: "🇷🇺", label: "Россия", grad: "linear-gradient(135deg, #1565c0, #e53935)" },
+            { code: "kazakhstan", flag: "🇰🇿", label: "Казахстан", grad: "linear-gradient(135deg, #00bcd4, #ffd600)" },
+            { code: "kyrgyzstan", flag: "🇰🇬", label: "Кыргызстан", grad: "linear-gradient(135deg, #e53935, #ffd600)" },
+            { code: "united states", flag: "🇺🇸", label: "США", grad: "linear-gradient(135deg, #1565c0, #b71c1c)" },
+            { code: "united kingdom", flag: "🇬🇧", label: "UK", grad: "linear-gradient(135deg, #0d47a1, #c62828)" },
+            { code: "germany", flag: "🇩🇪", label: "Германия", grad: "linear-gradient(135deg, #212121, #ffc107)" },
+            { code: "turkey", flag: "🇹🇷", label: "Турция", grad: "linear-gradient(135deg, #c62828, #e53935)" },
+            { code: "france", flag: "🇫🇷", label: "Франция", grad: "linear-gradient(135deg, #1565c0, #c62828)" },
+            { code: "brazil", flag: "🇧🇷", label: "Бразилия", grad: "linear-gradient(135deg, #2e7d32, #ffd600)" },
+            { code: "japan", flag: "🇯🇵", label: "Япония", grad: "linear-gradient(135deg, #e8eaf6, #c62828)" },
+            { code: "south korea", flag: "🇰🇷", label: "Корея", grad: "linear-gradient(135deg, #1565c0, #c62828)" },
+            { code: "india", flag: "🇮🇳", label: "Индия", grad: "linear-gradient(135deg, #ff9800, #2e7d32)" },
+          ].map(({ code, flag, label, grad }) => (
+            <button key={code} onClick={() => {
+              haptic("medium");
+              setGeoCountry(code);
+              setGeoLoading(true);
+              fetchLastfmGeoTop(code, 15).then(t => { setGeoTracks(t); setGeoLoading(false); }).catch(() => setGeoLoading(false));
+            }} style={{
+              minWidth: 88, height: 100, borderRadius: 20, border: "none",
+              background: geoCountry === code ? grad : tc.cardBg,
+              cursor: "pointer", flexShrink: 0,
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 6,
+              scrollSnapAlign: "start",
+              boxShadow: geoCountry === code ? `0 4px 20px ${tc.highlight}30` : "none",
+              border: geoCountry === code ? `2px solid ${tc.highlight}` : tc.cardBorder,
+              transition: "all 0.2s ease",
+              position: "relative",
+              overflow: "hidden",
+            }}>
+              <span style={{ fontSize: 36, lineHeight: 1, filter: geoCountry === code ? "none" : "grayscale(0.3)" }}>
+                {flag}
+              </span>
+              <span style={{
+                fontSize: 11, fontWeight: 700,
+                color: geoCountry === code ? "#fff" : tc.hintColor,
+                letterSpacing: 0.3,
               }}>
                 {label}
-              </button>
-            ))}
-          </div>
+              </span>
+              {geoCountry === code && (
+                <div style={{
+                  position: "absolute", bottom: 0, left: 0, right: 0, height: 3,
+                  background: "#fff", borderRadius: "3px 3px 0 0", opacity: 0.6,
+                }} />
+              )}
+            </button>
+          ))}
+        </div>
+        {/* Tracks for selected country */}
+        <div style={{
+          padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+        }}>
           <HorizontalCards tracks={geoTracks} loading={geoLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
         </div>
-      )}
+      </div>
 
       {/* ===== Genre Discovery (tag-based) ===== */}
       <div style={{
