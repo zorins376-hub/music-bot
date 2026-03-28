@@ -95,6 +95,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
   const [trendingTracks, setTrendingTracks] = useState<Track[]>([]);
   const [showTrending, setShowTrending] = useState(false);
   const [isTrendingLoading, setIsTrendingLoading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleSimilar = async () => {
     if (!track || isSimilarLoading) return;
@@ -1949,92 +1950,16 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             >
               <IconImage size={18} /> Story
             </button>
-            {/* Волна */}
+            {/* Настройки */}
             <button
-              onClick={() => { haptic("medium"); onWave?.(); }}
-              disabled={isWaveLoading}
+              onClick={() => { haptic("light"); setShowSettings(!showSettings); }}
               style={{
-                padding: "10px 16px",
+                padding: "10px 18px",
                 borderRadius: 20,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "linear-gradient(135deg, rgba(124,77,255,0.15), rgba(224,64,251,0.12))",
+                border: showSettings ? `1px solid ${accentColor}` : "1px solid var(--tg-theme-hint-color, #555)",
+                background: showSettings ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
                 backdropFilter: "blur(12px)",
-                color: "var(--tg-theme-text-color, #eee)",
-                cursor: isWaveLoading ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                fontWeight: 600,
-                flexShrink: 0,
-                scrollSnapAlign: "start",
-                transition: "all 0.3s ease",
-                opacity: isWaveLoading ? 0.6 : 1,
-              }}
-            >
-              {isWaveLoading ? <IconSpinner size={18} /> : <IconWave size={18} />}
-              Волна
-            </button>
-            {/* Похожие */}
-            <button
-              onClick={handleSimilar}
-              disabled={!track || isSimilarLoading}
-              style={{
-                padding: "10px 16px",
-                borderRadius: 20,
-                border: `1px solid ${showSimilar ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
-                background: showSimilar ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
-                backdropFilter: "blur(12px)",
-                color: showSimilar ? accentColor : "var(--tg-theme-text-color, #eee)",
-                cursor: !track || isSimilarLoading ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                fontWeight: 600,
-                flexShrink: 0,
-                scrollSnapAlign: "start",
-                transition: "all 0.3s ease",
-                opacity: !track ? 0.4 : 1,
-              }}
-            >
-              {isSimilarLoading ? <IconSpinner size={18} /> : <IconSimilar size={18} />}
-              Похожие
-            </button>
-            {/* Тренды */}
-            <button
-              onClick={handleTrending}
-              style={{
-                padding: "10px 16px",
-                borderRadius: 20,
-                border: `1px solid ${showTrending ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
-                background: showTrending ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
-                backdropFilter: "blur(12px)",
-                color: showTrending ? accentColor : "var(--tg-theme-text-color, #eee)",
-                cursor: isTrendingLoading ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                fontWeight: 600,
-                flexShrink: 0,
-                scrollSnapAlign: "start",
-                transition: "all 0.3s ease",
-              }}
-            >
-              {isTrendingLoading ? <IconSpinner size={18} /> : <IconTrending size={18} />}
-              Тренды
-            </button>
-            {/* Sleep */}
-            <button
-              onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
-              style={{
-                padding: "10px 16px",
-                borderRadius: 20,
-                border: `1px solid ${sleepTimerRemaining ? accentColor : "var(--tg-theme-hint-color, #555)"}`,
-                background: sleepTimerRemaining ? `${accentColorAlpha}` : "rgba(255,255,255,0.06)",
-                backdropFilter: "blur(12px)",
-                color: sleepTimerRemaining ? accentColor : "var(--tg-theme-text-color, #eee)",
+                color: showSettings ? accentColor : "var(--tg-theme-text-color, #eee)",
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
@@ -2046,8 +1971,8 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
                 transition: "all 0.3s ease",
               }}
             >
-              <IconMoon size={18} />
-              {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              Настройки
             </button>
           </div>
           {/* Carousel fade edges */}
@@ -2055,6 +1980,35 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           <div style={{ position: "absolute", top: 0, right: 0, width: 20, height: "100%", background: "linear-gradient(270deg, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none" }} />
         </div>
       )}
+
+      {/* ── Settings Panel (all heavy UI sections) ── */}
+      {showSettings && (
+      <div style={{
+        marginTop: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        animation: "fadeSlideIn 0.25s ease",
+      }}>
+
+      {/* Quick Actions Row */}
+      <div style={{
+        display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center",
+        marginBottom: 12,
+      }}>
+        <button onClick={() => { haptic("medium"); onWave?.(); }} disabled={isWaveLoading} style={{ padding: "8px 16px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.1)", background: "linear-gradient(135deg, rgba(124,77,255,0.15), rgba(224,64,251,0.12))", color: "var(--tg-theme-text-color, #eee)", cursor: isWaveLoading ? "wait" : "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, opacity: isWaveLoading ? 0.6 : 1 }}>
+          {isWaveLoading ? <IconSpinner size={14} /> : <IconWave size={14} />} Волна
+        </button>
+        <button onClick={handleSimilar} disabled={!track || isSimilarLoading} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${showSimilar ? accentColor : "rgba(255,255,255,0.1)"}`, background: showSimilar ? accentColorAlpha : "rgba(255,255,255,0.05)", color: showSimilar ? accentColor : "var(--tg-theme-text-color, #eee)", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {isSimilarLoading ? <IconSpinner size={14} /> : <IconSimilar size={14} />} Похожие
+        </button>
+        <button onClick={handleTrending} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${showTrending ? accentColor : "rgba(255,255,255,0.1)"}`, background: showTrending ? accentColorAlpha : "rgba(255,255,255,0.05)", color: showTrending ? accentColor : "var(--tg-theme-text-color, #eee)", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {isTrendingLoading ? <IconSpinner size={14} /> : <IconTrending size={14} />} Тренды
+        </button>
+        <button onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${sleepTimerRemaining ? accentColor : "rgba(255,255,255,0.1)"}`, background: sleepTimerRemaining ? accentColorAlpha : "rgba(255,255,255,0.05)", color: sleepTimerRemaining ? accentColor : "var(--tg-theme-text-color, #eee)", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <IconMoon size={14} /> {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
+        </button>
+      </div>
 
       {/* Sleep Timer Menu */}
       {showSleepMenu && (
@@ -2265,6 +2219,10 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
 
       {audioControlsPanel(false)}
       {luxuryPanel(false)}
+
+      </div>
+      )}
+      {/* end showSettings */}
 
       {/* Share Card Modal */}
       {showShareCard && track && (

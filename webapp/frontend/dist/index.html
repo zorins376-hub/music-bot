@@ -49,6 +49,10 @@
     @media (prefers-reduced-motion: reduce) {
       * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
     @keyframes meshRotate {
       0%, 100% { filter: blur(60px) brightness(0.5); transform: scale(1.1) rotate(0deg); }
       33% { filter: blur(65px) brightness(0.45); transform: scale(1.15) rotate(2deg); }
@@ -406,7 +410,7 @@
     .boot-loader-sparkle.s5 { left: 49%; top: 10%; animation-delay: 1.8s; }
     .boot-loader-sparkle.s6 { left: 52%; bottom: 12%; animation-delay: 2.2s; }
   </style>
-  <script type="module" crossorigin src="/assets/index-DrOL4ZZW.js"></script>
+  <script type="module" crossorigin src="/assets/index-DwzHEPY_.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/vendor-ChlNETzS.js">
 </head>
 <body>
