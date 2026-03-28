@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { memo } from "preact/compat";
 import type { JSX } from "preact";
-import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, fetchLastfmTagTop, fetchLastfmGeoTop, fetchLastfmChart, fetchLastfmNewReleases, fetchLastfmArtistMix, fetchLastfmArtistInfo, type Track, type SmartPlaylist, type LastfmArtistInfo } from "../api";
+import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, fetchLastfmTagTop, fetchLastfmGeoTop, fetchLastfmChart, fetchLastfmNewReleases, fetchLastfmArtistMix, fetchLastfmArtistInfo, fetchLastfmPersonalMix, fetchLastfmWeeklyDiscovery, type Track, type SmartPlaylist, type LastfmArtistInfo } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar, IconHeart, IconMoon, IconDiscover, IconChart } from "./Icons";
 
@@ -166,6 +166,15 @@ export const ForYouView = memo(function ForYouView({
   // --- Last.fm Artist Info ---
   const [artistInfo, setArtistInfo] = useState<LastfmArtistInfo | null>(null);
 
+  // --- Personal Mix (from Last.fm) ---
+  const [personalMixTracks, setPersonalMixTracks] = useState<Track[]>([]);
+  const [personalMixArtists, setPersonalMixArtists] = useState<string[]>([]);
+  const [personalMixLoading, setPersonalMixLoading] = useState(true);
+
+  // --- Weekly Discovery ---
+  const [weeklyTracks, setWeeklyTracks] = useState<Track[]>([]);
+  const [weeklyLoading, setWeeklyLoading] = useState(true);
+
   // --- Pull-to-refresh ---
   const [refreshing, setRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
@@ -230,6 +239,8 @@ export const ForYouView = memo(function ForYouView({
     setChartLoading(true);
     setGeoLoading(true);
     setNewRelLoading(true);
+    setPersonalMixLoading(true);
+    setWeeklyLoading(true);
     if (currentTrack?.video_id) setSimilarLoading(true);
 
     Promise.allSettled([
@@ -241,7 +252,9 @@ export const ForYouView = memo(function ForYouView({
       fetchLastfmChart(15),
       fetchLastfmGeoTop(geoCountry, 15),
       fetchLastfmNewReleases(15),
-    ]).then(([wave, trending, tod, smart, similar, chart, geo, newRel]) => {
+      fetchLastfmPersonalMix(15),
+      fetchLastfmWeeklyDiscovery(15),
+    ]).then(([wave, trending, tod, smart, similar, chart, geo, newRel, personalMix, weekly]) => {
       if (cancelled) return;
       setWaveTracks(wave.status === "fulfilled" ? wave.value : []);
       setWaveError(wave.status === "rejected");
@@ -263,6 +276,13 @@ export const ForYouView = memo(function ForYouView({
         setNewRelArtists(newRel.value.artists);
       }
       setNewRelLoading(false);
+      if (personalMix.status === "fulfilled") {
+        setPersonalMixTracks(personalMix.value.tracks);
+        setPersonalMixArtists(personalMix.value.seedArtists);
+      }
+      setPersonalMixLoading(false);
+      setWeeklyTracks(weekly.status === "fulfilled" ? weekly.value : []);
+      setWeeklyLoading(false);
     });
 
     // Load artist info + artist mix if current track is playing
@@ -491,6 +511,37 @@ export const ForYouView = memo(function ForYouView({
         <HorizontalCards tracks={waveTracks} loading={waveLoading} error={waveError} tc={tc} onTrackClick={handlePlayTrack} />
       </div>
 
+      {/* ===== Personal Mix (Last.fm deep discovery) ===== */}
+      {(personalMixTracks.length > 0 || personalMixLoading) && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: `linear-gradient(135deg, ${tc.highlight}15, ${tc.highlight}05)`,
+          border: `1px solid ${tc.highlight}25`,
+          transform: "translateZ(0)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionHeading icon={<IconStar size={16} color={tc.highlight} filled />} title="Твой микс" tc={tc} />
+            {personalMixTracks.length > 0 && (
+              <button onClick={() => handlePlayAll(personalMixTracks)} style={{
+                padding: "5px 12px", borderRadius: 12, border: "none",
+                background: tc.accentGradient,
+                color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                <IconPlaySmall size={12} color="#fff" />
+                Слушать все
+              </button>
+            )}
+          </div>
+          {personalMixArtists.length > 0 && (
+            <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 8, marginTop: -4 }}>
+              На основе: {personalMixArtists.join(", ")}
+            </div>
+          )}
+          <HorizontalCards tracks={personalMixTracks} loading={personalMixLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+        </div>
+      )}
+
       {/* ===== Trending Section ===== */}
       <div style={{
         marginBottom: 28, padding: 16, borderRadius: 22,
@@ -577,6 +628,34 @@ export const ForYouView = memo(function ForYouView({
         </div>
       )}
 
+      {/* ===== Weekly Discovery ===== */}
+      {(weeklyTracks.length > 0 || weeklyLoading) && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+          transform: "translateZ(0)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionHeading icon={<IconDiscover size={16} color={tc.highlight} />} title="Открытия недели" tc={tc} />
+            {weeklyTracks.length > 0 && (
+              <button onClick={() => handlePlayAll(weeklyTracks)} style={{
+                padding: "5px 12px", borderRadius: 12, border: "none",
+                background: tc.accentGradient,
+                color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                <IconPlaySmall size={12} color="#fff" />
+                Слушать
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 8, marginTop: -4 }}>
+            Микс из чартов, трендов и жанров
+          </div>
+          <HorizontalCards tracks={weeklyTracks} loading={weeklyLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+        </div>
+      )}
+
       {/* ===== Artist Info Card (if playing) ===== */}
       {artistInfo && currentTrack && (
         <div style={{
@@ -610,20 +689,53 @@ export const ForYouView = memo(function ForYouView({
               </div>
             </div>
             {artistInfo.tags.length > 0 && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {artistInfo.tags.slice(0, 5).map(tag => (
-                  <span key={tag} onClick={() => {
-                    haptic("light");
-                    setActiveTag(tag);
-                    setTagLoading(true);
-                    fetchLastfmTagTop(tag, 15).then(t => { setTagTracks(t); setTagLoading(false); }).catch(() => setTagLoading(false));
-                  }} style={{
-                    padding: "4px 10px", borderRadius: 10, fontSize: 11, cursor: "pointer",
-                    background: `${tc.highlight}20`, color: tc.highlight, border: `1px solid ${tc.highlight}30`,
-                  }}>
-                    {tag}
-                  </span>
-                ))}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: tc.hintColor, marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>Жанры</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {artistInfo.tags.slice(0, 5).map(tag => (
+                    <span key={tag} onClick={() => {
+                      haptic("light");
+                      setActiveTag(tag);
+                      setTagLoading(true);
+                      fetchLastfmTagTop(tag, 15).then(t => { setTagTracks(t); setTagLoading(false); }).catch(() => setTagLoading(false));
+                    }} style={{
+                      padding: "4px 10px", borderRadius: 10, fontSize: 11, cursor: "pointer",
+                      background: `${tc.highlight}20`, color: tc.highlight, border: `1px solid ${tc.highlight}30`,
+                    }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {artistInfo.similar && artistInfo.similar.length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: tc.hintColor, marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>Похожие артисты</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {artistInfo.similar.map(name => (
+                    <span key={name} onClick={() => {
+                      haptic("medium");
+                      setArtistMixName(name);
+                      setArtistMixLoading(true);
+                      fetchLastfmArtistMix(name, 10).then(tracks => {
+                        setArtistMixTracks(tracks);
+                        setArtistMixLoading(false);
+                      }).catch(() => setArtistMixLoading(false));
+                      fetchLastfmArtistInfo(name).then(info => {
+                        if (info) setArtistInfo(info);
+                      }).catch(() => {});
+                    }} style={{
+                      padding: "5px 12px", borderRadius: 12, fontSize: 12, fontWeight: 600,
+                      cursor: "pointer",
+                      background: tc.activeBg,
+                      color: tc.textColor,
+                      border: `1px solid ${tc.accentBorderAlpha}`,
+                      transition: "all 0.15s ease",
+                    }}>
+                      {name}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>

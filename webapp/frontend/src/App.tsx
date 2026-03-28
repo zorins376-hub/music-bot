@@ -23,7 +23,7 @@ const ActivityFeedView = lazy(() => import("./components/ActivityFeedView").then
 const WrappedView = lazy(() => import("./components/WrappedView").then(m => ({ default: m.WrappedView })));
 const SleepSoundsView = lazy(() => import("./components/SleepSoundsView").then(m => ({ default: m.SleepSoundsView })));
 const LiveRadioView = lazy(() => import("./components/LiveRadioView").then(m => ({ default: m.LiveRadioView })));
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchTrending, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, applyThemeCSSVars, type Theme } from "./themes";
@@ -1268,11 +1268,30 @@ export function App() {
 
     if (userId) {
       fetchUserProfile().then(setUserProfile).catch(() => {});
-      fetchPlayerState(userId).then((s) => {
+      fetchPlayerState(userId).then(async (s) => {
         // On initial load, force paused state — user must press play
         setState({ ...s, is_playing: false });
         // If user has a track loaded, switch to player view
-        if (s.current_track) setView("player");
+        if (s.current_track) {
+          setView("player");
+        } else {
+          // No track playing — auto-start a smart flow with popular music
+          try {
+            let recs = await fetchWave(userId, 15, null);
+            if (recs.length === 0) recs = await fetchTrending(15);
+            if (recs.length > 0) {
+              // Play the first track, add rest to queue
+              const first = recs[0];
+              const ns = await sendAction("play", first.video_id, undefined, first);
+              for (let i = 1; i < recs.length; i++) {
+                await sendAction("add", recs[i].video_id, undefined, recs[i]);
+              }
+              const final_s = await fetchPlayerState(userId);
+              setState({ ...final_s, is_playing: false });
+              setView("player");
+            }
+          } catch {}
+        }
       }).catch(() => {});
     }
     // Handle deep link from share: startapp=play_VIDEOID

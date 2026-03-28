@@ -3784,6 +3784,131 @@ async def lastfm_artist_info(
         return {}
 
 
+@app.get("/api/lastfm/personal-mix")
+async def lastfm_personal_mix(
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    """Deep personal mix: takes user's top artists, finds similar tracks via Last.fm,
+    and creates a shuffled playlist of discoveries the user hasn't heard."""
+    if not settings.LASTFM_API_KEY:
+        return {"tracks": []}
+    limit = min(limit, 40)
+    uid = int(user.get("id", 0))
+
+    # Get user's top artists from history
+    fav_artists: list[str] = []
+    heard_ids: set[str] = set()
+    try:
+        from bot.models.base import async_session as _as
+        from bot.models.track import ListeningHistory, Track as TrackModel
+        from sqlalchemy import select, func, desc
+        async with _as() as session:
+            top_q = await session.execute(
+                select(TrackModel.artist, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == uid, ListeningHistory.action == "play")
+                .group_by(TrackModel.artist)
+                .order_by(desc("cnt"))
+                .limit(6)
+            )
+            fav_artists = [r[0] for r in top_q.all() if r[0]]
+            # Get recently heard video_ids to exclude
+            recent_q = await session.execute(
+                select(TrackModel.video_id)
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == uid, ListeningHistory.action == "play")
+                .order_by(desc(ListeningHistory.created_at))
+                .limit(100)
+            )
+            heard_ids = {r[0] for r in recent_q.all() if r[0]}
+    except Exception:
+        pass
+
+    if not fav_artists:
+        return {"tracks": []}
+
+    try:
+        import asyncio as _aio
+        from recommender.lastfm_provider import (
+            get_similar_tracks, get_artist_top_tracks,
+            get_similar_artists, resolve_to_playable,
+        )
+
+        all_raw: list[dict] = []
+        seen: set[str] = set()
+
+        # For each fav artist, get similar artists' top tracks
+        sim_tasks = [get_similar_artists(a, limit=3) for a in fav_artists[:4]]
+        sim_results = await _aio.gather(*sim_tasks, return_exceptions=True)
+
+        top_tasks = []
+        for r in sim_results:
+            if isinstance(r, list):
+                for sim_art in r:
+                    name = sim_art.get("name", "")
+                    if name and name.lower() not in {a.lower() for a in fav_artists}:
+                        top_tasks.append(get_artist_top_tracks(name, limit=4))
+        top_results = await _aio.gather(*top_tasks[:12], return_exceptions=True)
+
+        for r in top_results:
+            if isinstance(r, list):
+                for t in r:
+                    key = f"{t['artist'].lower()}:{t['title'].lower()}"
+                    if key not in seen:
+                        seen.add(key)
+                        t["source"] = "lastfm_personal_mix"
+                        all_raw.append(t)
+
+        import random
+        random.shuffle(all_raw)
+        resolved = await resolve_to_playable(all_raw[:limit + 10], list(heard_ids))
+        return {"tracks": resolved[:limit], "seed_artists": fav_artists[:4]}
+    except Exception as e:
+        logger.warning("Last.fm personal-mix failed: %s", e)
+        return {"tracks": []}
+
+
+@app.get("/api/lastfm/weekly-discovery")
+async def lastfm_weekly_discovery(
+    limit: int = 15,
+    user: dict = Depends(get_current_user),
+):
+    """Weekly discovery: mix of global chart, geo top, and genre exploration."""
+    if not settings.LASTFM_API_KEY:
+        return {"tracks": []}
+    limit = min(limit, 30)
+    try:
+        import asyncio as _aio
+        import random
+        from recommender.lastfm_provider import (
+            get_global_chart, get_geo_top_tracks, get_top_by_tag,
+            resolve_to_playable,
+        )
+        # Fetch from 3 diverse sources in parallel
+        chart_t, geo_t, tag_t = await _aio.gather(
+            get_global_chart(limit=10),
+            get_geo_top_tracks("russia", limit=10),
+            get_top_by_tag(random.choice(["pop", "rock", "electronic", "hip-hop", "indie", "r&b"]), limit=10),
+            return_exceptions=True,
+        )
+        all_raw: list[dict] = []
+        seen: set[str] = set()
+        for src in [chart_t, geo_t, tag_t]:
+            if isinstance(src, list):
+                for t in src:
+                    key = f"{t.get('artist','').lower()}:{t.get('title','').lower()}"
+                    if key not in seen:
+                        seen.add(key)
+                        all_raw.append(t)
+        random.shuffle(all_raw)
+        resolved = await resolve_to_playable(all_raw[:limit + 10])
+        return {"tracks": resolved[:limit]}
+    except Exception as e:
+        logger.warning("Last.fm weekly-discovery failed: %s", e)
+        return {"tracks": []}
+
+
 # ── Live Radio Broadcast (extracted to webapp/routes/broadcast.py) ─────
 from webapp.routes.broadcast import router as broadcast_router
 app.include_router(broadcast_router)

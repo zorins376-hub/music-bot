@@ -809,6 +809,18 @@ export interface PartyTrack extends Track {
   position: number;
 }
 
+export async function fetchLastfmPersonalMix(limit = 20): Promise<{ tracks: Track[]; seedArtists: string[] }> {
+  const r = await apiFetch(`/api/lastfm/personal-mix?limit=${limit}`);
+  const j = await r.json();
+  return { tracks: (j.tracks || []).map(mapTrack), seedArtists: j.seed_artists || [] };
+}
+
+export async function fetchLastfmWeeklyDiscovery(limit = 15): Promise<Track[]> {
+  const r = await apiFetch(`/api/lastfm/weekly-discovery?limit=${limit}`);
+  const j = await r.json();
+  return (j.tracks || []).map(mapTrack);
+}
+
 export interface PartyMember {
   user_id: number;
   display_name?: string;
