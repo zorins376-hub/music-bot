@@ -1225,92 +1225,16 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
               >
                 <IconImage size={18} /> Story
               </button>
-              {/* Волна */}
+              {/* Настройки */}
               <button
-                onClick={() => { haptic("medium"); onWave?.(); }}
-                disabled={isWaveLoading}
+                onClick={() => { haptic("light"); setShowSettings(!showSettings); }}
                 style={{
-                  padding: "10px 16px",
+                  padding: "10px 18px",
                   borderRadius: 24,
-                  border: `1px solid ${gold}55`,
-                  background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))",
+                  border: showSettings ? `1px solid ${gold}88` : `1px solid ${borderGold}`,
+                  background: showSettings ? "rgba(255,167,38,0.18)" : glassCard,
                   backdropFilter: "blur(12px)",
-                  color: gold,
-                  cursor: isWaveLoading ? "wait" : "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  flexShrink: 0,
-                  scrollSnapAlign: "start",
-                  transition: "all 0.3s ease",
-                  opacity: isWaveLoading ? 0.6 : 1,
-                }}
-              >
-                {isWaveLoading ? <IconSpinner size={18} color={gold} /> : <IconWave size={18} />}
-                Волна
-              </button>
-              {/* Похожие */}
-              <button
-                onClick={handleSimilar}
-                disabled={!track || isSimilarLoading}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 24,
-                  border: `1px solid ${showSimilar ? gold + "88" : borderGold}`,
-                  background: showSimilar ? "rgba(255,167,38,0.18)" : glassCard,
-                  backdropFilter: "blur(12px)",
-                  color: showSimilar ? gold : "#fef0e0",
-                  cursor: !track || isSimilarLoading ? "wait" : "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  flexShrink: 0,
-                  scrollSnapAlign: "start",
-                  transition: "all 0.3s ease",
-                  opacity: !track ? 0.4 : 1,
-                }}
-              >
-                {isSimilarLoading ? <IconSpinner size={18} color={showSimilar ? gold : "#fef0e0"} /> : <IconSimilar size={18} />}
-                Похожие
-              </button>
-              {/* Тренды */}
-              <button
-                onClick={handleTrending}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 24,
-                  border: `1px solid ${showTrending ? gold + "88" : borderGold}`,
-                  background: showTrending ? "rgba(255,167,38,0.18)" : glassCard,
-                  backdropFilter: "blur(12px)",
-                  color: showTrending ? gold : "#fef0e0",
-                  cursor: isTrendingLoading ? "wait" : "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  flexShrink: 0,
-                  scrollSnapAlign: "start",
-                  transition: "all 0.3s ease",
-                }}
-              >
-                {isTrendingLoading ? <IconSpinner size={18} color={showTrending ? gold : "#fef0e0"} /> : <IconTrending size={18} />}
-                Тренды
-              </button>
-              {/* Сон */}
-              <button
-                onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 24,
-                  border: `1px solid ${sleepTimerRemaining ? gold + "88" : borderGold}`,
-                  background: sleepTimerRemaining ? "rgba(255,167,38,0.18)" : glassCard,
-                  backdropFilter: "blur(12px)",
-                  color: sleepTimerRemaining ? gold : "#fef0e0",
+                  color: showSettings ? gold : "#fef0e0",
                   cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
@@ -1322,8 +1246,8 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
                   transition: "all 0.3s ease",
                 }}
               >
-                <IconMoon size={18} />
-                {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Настройки
               </button>
             </div>
             {/* Carousel fade edges — warm */}
@@ -1331,6 +1255,26 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             <div style={{ position: "absolute", top: 0, right: 0, width: 20, height: "100%", background: "linear-gradient(270deg, rgba(28, 18, 12, 1), transparent)", pointerEvents: "none" }} />
           </div>
         )}
+
+        {/* ── Settings Panel (tequila) ── */}
+        {showSettings && (
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 0, animation: "fadeSlideIn 0.25s ease" }}>
+
+        {/* Quick Actions Row */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginBottom: 12 }}>
+          <button onClick={() => { haptic("medium"); onWave?.(); }} disabled={isWaveLoading} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${borderGold}`, background: "linear-gradient(135deg, rgba(255,109,0,0.2), rgba(255,213,79,0.12))", color: gold, cursor: isWaveLoading ? "wait" : "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, opacity: isWaveLoading ? 0.6 : 1 }}>
+            {isWaveLoading ? <IconSpinner size={14} color={gold} /> : <IconWave size={14} />} Волна
+          </button>
+          <button onClick={handleSimilar} disabled={!track || isSimilarLoading} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${showSimilar ? gold + "88" : borderGold}`, background: showSimilar ? "rgba(255,167,38,0.18)" : glassCard, color: showSimilar ? gold : "#fef0e0", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {isSimilarLoading ? <IconSpinner size={14} /> : <IconSimilar size={14} />} Похожие
+          </button>
+          <button onClick={handleTrending} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${showTrending ? gold + "88" : borderGold}`, background: showTrending ? "rgba(255,167,38,0.18)" : glassCard, color: showTrending ? gold : "#fef0e0", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {isTrendingLoading ? <IconSpinner size={14} /> : <IconTrending size={14} />} Тренды
+          </button>
+          <button onClick={() => { haptic("light"); setShowSleepMenu(!showSleepMenu); }} style={{ padding: "8px 16px", borderRadius: 14, border: `1px solid ${sleepTimerRemaining ? gold + "88" : borderGold}`, background: sleepTimerRemaining ? "rgba(255,167,38,0.18)" : glassCard, color: sleepTimerRemaining ? gold : "#fef0e0", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <IconMoon size={14} /> {sleepTimerRemaining ? `${Math.ceil(sleepTimerRemaining / 60)}м` : "Сон"}
+          </button>
+        </div>
 
         {/* Similar Tracks — warm */}
         {showSimilar && similarTracks.length > 0 && (
@@ -1482,14 +1426,6 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         {audioControlsPanel(true)}
         {luxuryPanel(true)}
 
-        <style>{`
-          @keyframes partyPulse {
-            0% { box-shadow: 0 0 8px rgba(255, 109, 0, 0.3); }
-            50% { box-shadow: 0 0 20px rgba(224, 64, 251, 0.5); }
-            100% { box-shadow: 0 0 8px rgba(255, 109, 0, 0.3); }
-          }
-        `}</style>
-
         {/* Sleep menu — warm glass */}
         {showSleepMenu && (
           <div style={{
@@ -1507,47 +1443,34 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             {[5, 15, 30, 45, 60].map((m) => (
               <button
                 key={m}
-                onClick={() => {
-                  haptic("medium");
-                  onSleepTimer?.(m);
-                  setShowSleepMenu(false);
-                }}
-                style={{
-                  padding: "7px 16px",
-                  borderRadius: 14,
-                  border: `1px solid ${borderGold}`,
-                  background: "rgba(255,213,79,0.08)",
-                  color: "#fef0e0",
-                  fontSize: 13,
-                  cursor: "pointer",
-                  transition: "background 0.2s ease",
-                }}
+                onClick={() => { haptic("medium"); onSleepTimer?.(m); setShowSleepMenu(false); }}
+                style={{ padding: "7px 16px", borderRadius: 14, border: `1px solid ${borderGold}`, background: "rgba(255,213,79,0.08)", color: "#fef0e0", fontSize: 13, cursor: "pointer" }}
               >
                 {m} мин
               </button>
             ))}
             {sleepTimerRemaining && (
               <button
-                onClick={() => {
-                  haptic("light");
-                  onSleepTimer?.(null);
-                  setShowSleepMenu(false);
-                }}
-                style={{
-                  padding: "7px 16px",
-                  borderRadius: 14,
-                  border: "1px solid rgba(255, 109, 0, 0.4)",
-                  background: "rgba(255, 109, 0, 0.15)",
-                  color: "#ff6d00",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
+                onClick={() => { haptic("light"); onSleepTimer?.(null); setShowSleepMenu(false); }}
+                style={{ padding: "7px 16px", borderRadius: 14, border: "1px solid rgba(255, 109, 0, 0.4)", background: "rgba(255, 109, 0, 0.15)", color: "#ff6d00", fontSize: 13, cursor: "pointer" }}
               >
                 Отмена
               </button>
             )}
           </div>
         )}
+
+        </div>
+        )}
+        {/* end showSettings tequila */}
+
+        <style>{`
+          @keyframes partyPulse {
+            0% { box-shadow: 0 0 8px rgba(255, 109, 0, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(224, 64, 251, 0.5); }
+            100% { box-shadow: 0 0 8px rgba(255, 109, 0, 0.3); }
+          }
+        `}</style>
 
         {/* Share Card Modal */}
         {showShareCard && track && (

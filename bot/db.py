@@ -157,7 +157,6 @@ async def get_or_create_user_raw(
                 if user.is_admin and user_id not in settings.ADMIN_IDS:
                     settings.ADMIN_IDS.append(user_id)
                     await persist_admin_id(user_id)
-                    logger.info("Admin ID added at runtime: user_id=%s username=%s", user_id, username)
 
                 return user
         except IntegrityError:
@@ -276,7 +275,7 @@ async def record_listening_event(
                 play_count = await _get_user_play_count(user_id)
                 if play_count > 0 and play_count % 10 == 0:
                     from recommender.profile_updater import trigger_profile_update
-                    await trigger_profile_update(user_id)
+                    trigger_profile_update(user_id)
             except Exception:
                 logger.debug("profile update trigger failed for user %s", user_id, exc_info=True)
     except Exception as e:

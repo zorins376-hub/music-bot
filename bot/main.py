@@ -35,7 +35,6 @@ from bot.handlers import promote
 from bot.handlers import voice_chat
 from bot.handlers import family
 from bot.handlers import party
-from bot.handlers import chat_member
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
 from bot.middlewares.captcha import CaptchaMiddleware
@@ -158,16 +157,25 @@ async def on_startup(bot: Bot) -> None:
     # One-time version broadcast for existing users after deploy
     asyncio.create_task(_broadcast_version_update(bot))
 
-    # Register bot commands for private chats (keep clean & minimal)
+    # Register bot commands for private chats
     private_commands = [
         BotCommand(command="start", description="◉ Главное меню"),
         BotCommand(command="search", description="◈ Найти трек"),
-        BotCommand(command="charts", description="🏆 Чарты"),
+        BotCommand(command="mix", description="✦ Daily Mix"),
+        BotCommand(command="radar", description="🆕 Release Radar"),
+        BotCommand(command="video", description="🎦 Найти клип"),
+        BotCommand(command="top", description="◆ Топ треков"),
+        BotCommand(command="charts", description="🏆 Топ-чарты"),
+        BotCommand(command="stats", description="◎ Моя статистика"),
+        BotCommand(command="history", description="▹ Мои запросы"),
+        BotCommand(command="settings", description="≡ Качество аудио"),
         BotCommand(command="playlist", description="▸ Плейлисты"),
         BotCommand(command="favorites", description="❤️ Любимое"),
-        BotCommand(command="profile", description="◉ Профиль"),
-        BotCommand(command="settings", description="⚙ Настройки"),
+        BotCommand(command="profile", description="◉ Мой профиль"),
+        BotCommand(command="lang", description="○ Сменить язык"),
         BotCommand(command="help", description="◌ Справка"),
+        BotCommand(command="faq", description="❓ FAQ"),
+        BotCommand(command="ai_playlist", description="🤖 AI Плейлист"),
     ]
     try:
         await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
@@ -378,7 +386,6 @@ def build_dispatcher() -> Dispatcher:
     dp.message.middleware(ThrottleMiddleware())
     dp.message.middleware(LoggingMiddleware())
 
-    dp.include_router(chat_member.router)  # Track bot join/leave groups
     dp.include_router(start.router)
     dp.include_router(admin.router)      # Admin (before search for forward mode)
     dp.include_router(playlist.router)   # Playlists

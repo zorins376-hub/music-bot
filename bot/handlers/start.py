@@ -21,35 +21,61 @@ router = Router()
 
 def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
     from bot.config import settings
-    rows = []
-    # TMA Player WebApp button — top priority
+    rows = [
+        [
+            InlineKeyboardButton(text="▸ TEQUILA LIVE", callback_data="radio:tequila"),
+            InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
+        ],
+    ]
+    # TMA Player WebApp button (1.1)
     if settings.TMA_URL:
         rows.append([
             InlineKeyboardButton(text="🎵 Открыть плеер", web_app=WebAppInfo(url=settings.TMA_URL)),
         ])
     rows += [
         [
+            InlineKeyboardButton(text="✦ DAILY MIX", callback_data="action:mix"),
+            InlineKeyboardButton(text="🎙 AI DJ", callback_data="action:dj"),
+        ],
+        [
+            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
+            InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
+        ],
+        [
             InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
-            InlineKeyboardButton(text="✦ Моя Волна", callback_data="action:recommend"),
-        ],
-        [
-            InlineKeyboardButton(text="🏆 Чарты", callback_data="action:charts"),
-            InlineKeyboardButton(text="🆕 Новые релизы", callback_data="action:radar"),
-        ],
-        [
-            InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
-            InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
-        ],
-        [
-            InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
-            InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
-        ],
-        [
-            InlineKeyboardButton(text="📻 Радио", callback_data="action:radio_menu"),
             InlineKeyboardButton(text="🤖 AI Плейлист", callback_data="action:ai_playlist"),
         ],
         [
-            InlineKeyboardButton(text="⋯ Ещё", callback_data="action:more"),
+            InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
+        ],
+        [
+            InlineKeyboardButton(text="�🎦 Видео", callback_data="action:video"),
+            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
+        ],
+        [
+            InlineKeyboardButton(text="🆕 Новые релизы", callback_data="action:radar"),
+            InlineKeyboardButton(text="🎤 Вкус", callback_data="action:taste"),
+        ],
+        [
+            InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
+            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="action:family"),
+        ],
+        [
+            InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
+        ],
+        [
+            InlineKeyboardButton(text="🏅 Бейджи", callback_data="action:badges"),
+            InlineKeyboardButton(text="🏆 Топ игроков", callback_data="action:leaderboard"),
+        ],
+        [
+            InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
+        ],
+        [
+            InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
+        ],
+        [
+            InlineKeyboardButton(text="📥 Импорт", callback_data="action:import_playlist"),
+            InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
         ],
     ]
     if admin:
@@ -57,52 +83,6 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◆ Админ-панель", callback_data="action:admin"),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _more_menu(lang: str) -> InlineKeyboardMarkup:
-    """Submenu with additional features."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✦ Daily Mix", callback_data="action:mix"),
-            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
-        ],
-        [
-            InlineKeyboardButton(text="🎦 Видео", callback_data="action:video"),
-            InlineKeyboardButton(text="🎤 Мой вкус", callback_data="action:taste"),
-        ],
-        [
-            InlineKeyboardButton(text="🏅 Бейджи", callback_data="action:badges"),
-            InlineKeyboardButton(text="🏆 Топ игроков", callback_data="action:leaderboard"),
-        ],
-        [
-            InlineKeyboardButton(text="📥 Импорт", callback_data="action:import_playlist"),
-            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="action:family"),
-        ],
-        [
-            InlineKeyboardButton(text="⚙ Настройки", callback_data="action:settings"),
-            InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
-        ],
-        [
-            InlineKeyboardButton(text="◁ Назад", callback_data="action:menu"),
-        ],
-    ])
-
-
-def _radio_menu(lang: str) -> InlineKeyboardMarkup:
-    """Radio submenu with live streams and auto mix."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="▸ TEQUILA LIVE", callback_data="radio:tequila"),
-            InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
-        ],
-        [
-            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
-            InlineKeyboardButton(text="🎙 AI DJ", callback_data="action:dj"),
-        ],
-        [
-            InlineKeyboardButton(text="◁ Назад", callback_data="action:menu"),
-        ],
-    ])
 
 
 _LANG_KEYBOARD = InlineKeyboardMarkup(
@@ -215,15 +195,15 @@ async def cmd_changelog(message: Message) -> None:
     """Show full changelog."""
     user = await get_or_create_user(message.from_user)
     parts = [f"<b>{t(user.language, 'changelog_title')}</b>\n"]
-
+    
     # Sort versions newest first
     from packaging.version import Version
     versions = sorted(CHANGELOG.keys(), key=lambda v: Version(v), reverse=True)
-
+    
     for ver in versions[:5]:  # Last 5 versions
         parts.append(get_changelog_text(user.language, ver))
         parts.append("")
-
+    
     await message.answer("\n".join(parts).strip(), parse_mode="HTML")
 
 
@@ -237,15 +217,14 @@ async def cmd_help(message: Message) -> None:
 async def cmd_lang(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     await message.answer(
-        t(user.language, "choose_language"),
-        reply_markup=_LANG_KEYBOARD,
+        t(user.language, "choose_lang"), reply_markup=_LANG_KEYBOARD
     )
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("lang:"))
-async def handle_lang_select(callback: CallbackQuery) -> None:
+async def handle_lang_change(callback: CallbackQuery) -> None:
     lang = callback.data.split(":")[1]
-    if lang not in ("ru", "en", "kg"):
+    if lang not in ("ru", "kg", "en"):
         await callback.answer()
         return
 
@@ -307,39 +286,6 @@ async def handle_menu_button(callback: CallbackQuery) -> None:
             reply_markup=_main_menu(user.language, admin=admin),
             parse_mode="HTML",
         )
-
-
-@router.callback_query(lambda c: c.data == "action:more")
-async def handle_more_button(callback: CallbackQuery) -> None:
-    user = await get_or_create_user(callback.from_user)
-    await callback.answer()
-    try:
-        await callback.message.edit_reply_markup(reply_markup=_more_menu(user.language))
-    except Exception:
-        await callback.message.answer(
-            "⋯",
-            reply_markup=_more_menu(user.language),
-        )
-
-
-@router.callback_query(lambda c: c.data == "action:radio_menu")
-async def handle_radio_menu_button(callback: CallbackQuery) -> None:
-    user = await get_or_create_user(callback.from_user)
-    await callback.answer()
-    try:
-        await callback.message.edit_reply_markup(reply_markup=_radio_menu(user.language))
-    except Exception:
-        await callback.message.answer(
-            "📻",
-            reply_markup=_radio_menu(user.language),
-        )
-
-
-@router.callback_query(lambda c: c.data == "action:settings")
-async def handle_settings_button(callback: CallbackQuery) -> None:
-    from bot.handlers.settings import cmd_settings_v2
-    await callback.answer()
-    await cmd_settings_v2(callback.message)
 
 
 @router.callback_query(lambda c: c.data == "action:top")
