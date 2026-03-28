@@ -194,6 +194,9 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: Optional[str] = None   # service_role key (NOT anon)
     SUPABASE_AI_ENABLED: bool = True             # Master switch: use Supabase AI (disables local ML)
 
+    # ── Cache Channel (Telegram channel for caching audio files) ──────────
+    CACHE_CHANNEL_ID: Optional[int] = None
+
     # ── Bot Fleet / Sharding (5.2) ────────────────────────────────────────
     NODE_ID: Optional[str] = None  # e.g. "node-1"
     DISPATCHER_TOKEN: Optional[str] = None
