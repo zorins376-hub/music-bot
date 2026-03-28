@@ -349,3 +349,235 @@ def _fmt_dur(sec: int) -> str:
         return "0:00"
     m, s = divmod(sec, 60)
     return f"{m}:{s:02d}"
+
+
+# ── New Last.fm discovery functions ──────────────────────────────────────
+
+async def get_top_by_tag(tag: str, limit: int = 20) -> list[dict]:
+    """Get top tracks for a genre/mood tag (e.g. 'indie', 'lo-fi', 'hip-hop')."""
+    cache_key = f"lfm_tag:{tag}:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    data = await _lastfm_get("tag.getTopTracks", {
+        "tag": tag,
+        "limit": str(limit),
+    })
+    if not data:
+        return []
+
+    tracks = data.get("tracks", {}).get("track", [])
+    if isinstance(tracks, dict):
+        tracks = [tracks]
+
+    results = []
+    seen: set[str] = set()
+    for t in tracks:
+        norm = _normalize_track(t, source="lastfm_tag")
+        if norm:
+            key = f"{norm['artist'].lower()}:{norm['title'].lower()}"
+            if key not in seen:
+                seen.add(key)
+                results.append(norm)
+
+    if results:
+        _cache_set(cache_key, results)
+    return results
+
+
+async def get_geo_top_tracks(country: str = "russia", limit: int = 20) -> list[dict]:
+    """Get trending tracks in a specific country via Last.fm geo data."""
+    cache_key = f"lfm_geo:{country}:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    data = await _lastfm_get("geo.getTopTracks", {
+        "country": country,
+        "limit": str(limit),
+    })
+    if not data:
+        return []
+
+    tracks = data.get("tracks", {}).get("track", [])
+    if isinstance(tracks, dict):
+        tracks = [tracks]
+
+    results = []
+    seen: set[str] = set()
+    for t in tracks:
+        norm = _normalize_track(t, source="lastfm_geo")
+        if norm:
+            key = f"{norm['artist'].lower()}:{norm['title'].lower()}"
+            if key not in seen:
+                seen.add(key)
+                # geo endpoint gives listeners count
+                norm["listeners"] = int(t.get("listeners", 0))
+                results.append(norm)
+
+    if results:
+        _cache_set(cache_key, results)
+    return results
+
+
+async def get_global_chart(limit: int = 20) -> list[dict]:
+    """Get Last.fm global chart — based on 20+ years of listening data."""
+    cache_key = f"lfm_chart:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    data = await _lastfm_get("chart.getTopTracks", {
+        "limit": str(limit),
+    })
+    if not data:
+        return []
+
+    tracks = data.get("tracks", {}).get("track", [])
+    if isinstance(tracks, dict):
+        tracks = [tracks]
+
+    results = []
+    seen: set[str] = set()
+    for t in tracks:
+        norm = _normalize_track(t, source="lastfm_chart")
+        if norm:
+            key = f"{norm['artist'].lower()}:{norm['title'].lower()}"
+            if key not in seen:
+                seen.add(key)
+                norm["playcount"] = int(t.get("playcount", 0))
+                norm["listeners"] = int(t.get("listeners", 0))
+                results.append(norm)
+
+    if results:
+        _cache_set(cache_key, results)
+    return results
+
+
+async def get_top_tags(limit: int = 30) -> list[dict]:
+    """Get top tags/genres from Last.fm for tag cloud / genre picker."""
+    cache_key = f"lfm_toptags:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    data = await _lastfm_get("chart.getTopTags", {
+        "limit": str(limit),
+    })
+    if not data:
+        return []
+
+    tags = data.get("tags", {}).get("tag", [])
+    if isinstance(tags, dict):
+        tags = [tags]
+
+    results = [
+        {"name": t.get("name", ""), "reach": int(t.get("reach", 0)),
+         "count": int(t.get("taggings", 0))}
+        for t in tags if t.get("name")
+    ]
+
+    if results:
+        _cache_set(cache_key, results)
+    return results
+
+
+async def get_artist_info(artist: str) -> Optional[dict]:
+    """Get artist bio, tags, stats from Last.fm."""
+    cache_key = f"lfm_artinfo:{artist}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    data = await _lastfm_get("artist.getInfo", {
+        "artist": artist,
+        "autocorrect": "1",
+    })
+    if not data:
+        return None
+
+    info = data.get("artist", {})
+    tags = info.get("tags", {}).get("tag", [])
+    if isinstance(tags, dict):
+        tags = [tags]
+
+    result = {
+        "name": info.get("name", artist),
+        "listeners": int(info.get("stats", {}).get("listeners", 0)),
+        "playcount": int(info.get("stats", {}).get("playcount", 0)),
+        "tags": [t.get("name", "") for t in tags if t.get("name")],
+        "bio": (info.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip(),
+        "similar": [
+            a.get("name", "")
+            for a in (info.get("similar", {}).get("artist", []) or [])
+            if a.get("name")
+        ][:5],
+    }
+
+    _cache_set(cache_key, result)
+    return result
+
+
+async def get_new_from_favorites(
+    favorite_artists: list[str], limit: int = 15
+) -> list[dict]:
+    """
+    Get fresh/top tracks from user's favorite artists.
+    Uses artist.getTopTracks for each favorite artist and interleaves results.
+    """
+    if not favorite_artists:
+        return []
+
+    tasks = [
+        get_artist_top_tracks(art, limit=5)
+        for art in favorite_artists[:8]  # max 8 artists
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for r in results:
+        if isinstance(r, list):
+            for t in r:
+                key = f"{t['artist'].lower()}:{t['title'].lower()}"
+                if key not in seen:
+                    seen.add(key)
+                    t["source"] = "lastfm_favorites"
+                    merged.append(t)
+
+    # Interleave: don't cluster by artist
+    import random
+    random.shuffle(merged)
+    return merged[:limit]
+
+
+async def get_similar_artists_mix(artist: str, limit: int = 15) -> list[dict]:
+    """
+    Deep artist discovery: get similar artists and their top tracks.
+    Great for "If you like X, try..." sections.
+    """
+    sim_artists = await get_similar_artists(artist, limit=8)
+    if not sim_artists:
+        return []
+
+    tasks = [
+        get_artist_top_tracks(a["name"], limit=3)
+        for a in sim_artists[:8]
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for r in results:
+        if isinstance(r, list):
+            for t in r:
+                key = f"{t['artist'].lower()}:{t['title'].lower()}"
+                if key not in seen:
+                    seen.add(key)
+                    t["source"] = "lastfm_discover"
+                    merged.append(t)
+
+    import random
+    random.shuffle(merged)
+    return merged[:limit]

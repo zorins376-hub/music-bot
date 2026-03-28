@@ -3619,6 +3619,171 @@ async def smart_playlists(user: dict = Depends(get_current_user)):
 
 
 
+# ── Last.fm Discovery Endpoints ────────────────────────────────────────
+
+@app.get("/api/lastfm/tag-top")
+async def lastfm_tag_top(
+    tag: str = "pop",
+    limit: int = 15,
+    user: dict = Depends(get_current_user),
+):
+    """Get top tracks for a genre/mood tag from Last.fm."""
+    if not settings.LASTFM_API_KEY:
+        return {"tracks": []}
+    limit = min(limit, 30)
+    try:
+        from recommender.lastfm_provider import get_top_by_tag, resolve_to_playable
+        raw = await get_top_by_tag(tag, limit=limit + 10)
+        if not raw:
+            return {"tracks": []}
+        resolved = await resolve_to_playable(raw)
+        return {"tracks": resolved[:limit], "tag": tag}
+    except Exception as e:
+        logger.warning("Last.fm tag-top failed: %s", e)
+        return {"tracks": []}
+
+
+@app.get("/api/lastfm/geo-top")
+async def lastfm_geo_top(
+    country: str = "russia",
+    limit: int = 15,
+    user: dict = Depends(get_current_user),
+):
+    """Get trending tracks in a country from Last.fm geo data."""
+    if not settings.LASTFM_API_KEY:
+        return {"tracks": []}
+    limit = min(limit, 30)
+    try:
+        from recommender.lastfm_provider import get_geo_top_tracks, resolve_to_playable
+        raw = await get_geo_top_tracks(country, limit=limit + 10)
+        if not raw:
+            return {"tracks": []}
+        resolved = await resolve_to_playable(raw)
+        return {"tracks": resolved[:limit], "country": country}
+    except Exception as e:
+        logger.warning("Last.fm geo-top failed: %s", e)
+        return {"tracks": []}
+
+
+@app.get("/api/lastfm/chart")
+async def lastfm_chart(
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    """Global Last.fm chart — 20+ years of listening data."""
+    if not settings.LASTFM_API_KEY:
+        return {"tracks": []}
+    limit = min(limit, 30)
+    try:
+        from recommender.lastfm_provider import get_global_chart, resolve_to_playable
+        raw = await get_global_chart(limit=limit + 10)
+        if not raw:
+            return {"tracks": []}
+        resolved = await resolve_to_playable(raw)
+        return {"tracks": resolved[:limit]}
+    except Exception as e:
+        logger.warning("Last.fm chart failed: %s", e)
+        return {"tracks": []}
+
+
+@app.get("/api/lastfm/new-releases")
+async def lastfm_new_releases(
+    limit: int = 15,
+    user: dict = Depends(get_current_user),
+):
+    """New/top tracks from user's most-listened artists."""
+    if not settings.LASTFM_API_KEY:
+        return {"tracks": []}
+    limit = min(limit, 30)
+    uid = int(user.get("id", 0))
+
+    # Get user's top artists from listening history
+    fav_artists: list[str] = []
+    try:
+        from bot.models.base import async_session as _as
+        from bot.models.track import ListeningHistory, Track as TrackModel
+        from sqlalchemy import select, func, desc
+        async with _as() as session:
+            top_q = await session.execute(
+                select(TrackModel.artist, func.count().label("cnt"))
+                .join(ListeningHistory, ListeningHistory.track_id == TrackModel.id)
+                .where(ListeningHistory.user_id == uid, ListeningHistory.action == "play")
+                .group_by(TrackModel.artist)
+                .order_by(desc("cnt"))
+                .limit(8)
+            )
+            fav_artists = [r[0] for r in top_q.all() if r[0]]
+    except Exception:
+        pass
+
+    if not fav_artists:
+        return {"tracks": []}
+
+    try:
+        from recommender.lastfm_provider import get_new_from_favorites, resolve_to_playable
+        raw = await get_new_from_favorites(fav_artists, limit=limit + 10)
+        if not raw:
+            return {"tracks": []}
+        resolved = await resolve_to_playable(raw)
+        return {"tracks": resolved[:limit], "artists": fav_artists[:5]}
+    except Exception as e:
+        logger.warning("Last.fm new-releases failed: %s", e)
+        return {"tracks": []}
+
+
+@app.get("/api/lastfm/artist-mix")
+async def lastfm_artist_mix(
+    artist: str = "",
+    limit: int = 15,
+    user: dict = Depends(get_current_user),
+):
+    """Discover tracks from artists similar to a given artist."""
+    if not settings.LASTFM_API_KEY or not artist:
+        return {"tracks": []}
+    limit = min(limit, 30)
+    try:
+        from recommender.lastfm_provider import get_similar_artists_mix, resolve_to_playable
+        raw = await get_similar_artists_mix(artist, limit=limit + 10)
+        if not raw:
+            return {"tracks": []}
+        resolved = await resolve_to_playable(raw)
+        return {"tracks": resolved[:limit], "seed_artist": artist}
+    except Exception as e:
+        logger.warning("Last.fm artist-mix failed: %s", e)
+        return {"tracks": []}
+
+
+@app.get("/api/lastfm/tags")
+async def lastfm_tags(user: dict = Depends(get_current_user)):
+    """Get popular genre tags for the genre picker."""
+    if not settings.LASTFM_API_KEY:
+        return {"tags": []}
+    try:
+        from recommender.lastfm_provider import get_top_tags
+        tags = await get_top_tags(limit=30)
+        return {"tags": tags}
+    except Exception as e:
+        logger.warning("Last.fm tags failed: %s", e)
+        return {"tags": []}
+
+
+@app.get("/api/lastfm/artist-info")
+async def lastfm_artist_info(
+    artist: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Get artist bio, tags, stats, similar artists from Last.fm."""
+    if not settings.LASTFM_API_KEY or not artist:
+        return {}
+    try:
+        from recommender.lastfm_provider import get_artist_info
+        info = await get_artist_info(artist)
+        return info or {}
+    except Exception as e:
+        logger.warning("Last.fm artist-info failed: %s", e)
+        return {}
+
+
 # ── Live Radio Broadcast (extracted to webapp/routes/broadcast.py) ─────
 from webapp.routes.broadcast import router as broadcast_router
 app.include_router(broadcast_router)

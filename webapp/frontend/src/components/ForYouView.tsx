@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import { memo } from "preact/compat";
 import type { JSX } from "preact";
-import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, type Track, type SmartPlaylist } from "../api";
+import { fetchWave, fetchTrending, fetchSimilar, generateAiPlaylist, fetchTrackOfDay, fetchSmartPlaylists, fetchLastfmTagTop, fetchLastfmGeoTop, fetchLastfmChart, fetchLastfmNewReleases, fetchLastfmArtistMix, fetchLastfmArtistInfo, type Track, type SmartPlaylist, type LastfmArtistInfo } from "../api";
 import { getThemeById, themeColors } from "../themes";
 import { IconWave, IconTrending, IconSimilar, IconSpinner, IconRocket, IconFire, IconPlaySmall, IconMusicNote, IconPlus, IconStar, IconHeart, IconMoon, IconDiscover, IconChart } from "./Icons";
 
@@ -139,6 +139,33 @@ export const ForYouView = memo(function ForYouView({
   const [smartPlaylists, setSmartPlaylists] = useState<SmartPlaylist[]>([]);
   const [smartExpanded, setSmartExpanded] = useState<string | null>(null);
 
+  // --- Last.fm Chart ---
+  const [chartTracks, setChartTracks] = useState<Track[]>([]);
+  const [chartLoading, setChartLoading] = useState(true);
+
+  // --- Last.fm Geo Top ---
+  const [geoTracks, setGeoTracks] = useState<Track[]>([]);
+  const [geoLoading, setGeoLoading] = useState(true);
+  const [geoCountry, setGeoCountry] = useState("russia");
+
+  // --- Last.fm Genre/Tag ---
+  const [tagTracks, setTagTracks] = useState<Track[]>([]);
+  const [tagLoading, setTagLoading] = useState(false);
+  const [activeTag, setActiveTag] = useState("");
+
+  // --- Last.fm New Releases (from favorites) ---
+  const [newRelTracks, setNewRelTracks] = useState<Track[]>([]);
+  const [newRelArtists, setNewRelArtists] = useState<string[]>([]);
+  const [newRelLoading, setNewRelLoading] = useState(true);
+
+  // --- Last.fm Artist Discovery ---
+  const [artistMixTracks, setArtistMixTracks] = useState<Track[]>([]);
+  const [artistMixLoading, setArtistMixLoading] = useState(false);
+  const [artistMixName, setArtistMixName] = useState("");
+
+  // --- Last.fm Artist Info ---
+  const [artistInfo, setArtistInfo] = useState<LastfmArtistInfo | null>(null);
+
   // --- Pull-to-refresh ---
   const [refreshing, setRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
@@ -195,11 +222,14 @@ export const ForYouView = memo(function ForYouView({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(false);
 
-  // --- Fetch Track of Day + Smart Playlists + Wave + Trending + Similar (batched) ---
+  // --- Fetch all data (batched) ---
   useEffect(() => {
     let cancelled = false;
     setWaveLoading(true);
     setTrendingLoading(true);
+    setChartLoading(true);
+    setGeoLoading(true);
+    setNewRelLoading(true);
     if (currentTrack?.video_id) setSimilarLoading(true);
 
     Promise.allSettled([
@@ -208,7 +238,10 @@ export const ForYouView = memo(function ForYouView({
       fetchTrackOfDay(),
       fetchSmartPlaylists(),
       currentTrack?.video_id ? fetchSimilar(currentTrack.video_id, 8) : Promise.resolve([] as Track[]),
-    ]).then(([wave, trending, tod, smart, similar]) => {
+      fetchLastfmChart(15),
+      fetchLastfmGeoTop(geoCountry, 15),
+      fetchLastfmNewReleases(15),
+    ]).then(([wave, trending, tod, smart, similar, chart, geo, newRel]) => {
       if (cancelled) return;
       setWaveTracks(wave.status === "fulfilled" ? wave.value : []);
       setWaveError(wave.status === "rejected");
@@ -221,7 +254,28 @@ export const ForYouView = memo(function ForYouView({
       setSimilarTracks(similar.status === "fulfilled" ? similar.value : []);
       setSimilarError(similar.status === "rejected" && !!currentTrack?.video_id);
       setSimilarLoading(false);
+      setChartTracks(chart.status === "fulfilled" ? chart.value : []);
+      setChartLoading(false);
+      setGeoTracks(geo.status === "fulfilled" ? geo.value : []);
+      setGeoLoading(false);
+      if (newRel.status === "fulfilled") {
+        setNewRelTracks(newRel.value.tracks);
+        setNewRelArtists(newRel.value.artists);
+      }
+      setNewRelLoading(false);
     });
+
+    // Load artist info + artist mix if current track is playing
+    if (currentTrack?.artist) {
+      fetchLastfmArtistInfo(currentTrack.artist).then(info => {
+        if (!cancelled && info) setArtistInfo(info);
+      }).catch(() => {});
+      setArtistMixLoading(true);
+      setArtistMixName(currentTrack.artist);
+      fetchLastfmArtistMix(currentTrack.artist, 10).then(tracks => {
+        if (!cancelled) { setArtistMixTracks(tracks); setArtistMixLoading(false); }
+      }).catch(() => { if (!cancelled) setArtistMixLoading(false); });
+    }
 
     return () => { cancelled = true; };
   }, [userId, currentTrack?.video_id]);
@@ -522,6 +576,240 @@ export const ForYouView = memo(function ForYouView({
           <HorizontalCards tracks={similarTracks} loading={similarLoading} error={similarError} tc={tc} onTrackClick={handlePlayTrack} />
         </div>
       )}
+
+      {/* ===== Artist Info Card (if playing) ===== */}
+      {artistInfo && currentTrack && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+          transform: "translateZ(0)",
+        }}>
+          <SectionHeading icon={<IconStar size={16} color={tc.highlight} filled />} title="Об артисте" tc={tc} />
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: tc.textColor, marginBottom: 4 }}>
+              {artistInfo.name}
+            </div>
+            {artistInfo.bio && (
+              <div style={{
+                fontSize: 12, color: tc.hintColor, lineHeight: 1.5,
+                maxHeight: 60, overflow: "hidden", marginBottom: 8,
+              }}>
+                {artistInfo.bio}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: tc.hintColor }}>
+                <span style={{ fontWeight: 700, color: tc.textColor, fontSize: 14 }}>
+                  {artistInfo.listeners > 1000000 ? `${(artistInfo.listeners / 1000000).toFixed(1)}M` : artistInfo.listeners > 1000 ? `${(artistInfo.listeners / 1000).toFixed(0)}K` : artistInfo.listeners}
+                </span> слушателей
+              </div>
+              <div style={{ fontSize: 11, color: tc.hintColor }}>
+                <span style={{ fontWeight: 700, color: tc.textColor, fontSize: 14 }}>
+                  {artistInfo.playcount > 1000000 ? `${(artistInfo.playcount / 1000000).toFixed(0)}M` : artistInfo.playcount > 1000 ? `${(artistInfo.playcount / 1000).toFixed(0)}K` : artistInfo.playcount}
+                </span> прослушиваний
+              </div>
+            </div>
+            {artistInfo.tags.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {artistInfo.tags.slice(0, 5).map(tag => (
+                  <span key={tag} onClick={() => {
+                    haptic("light");
+                    setActiveTag(tag);
+                    setTagLoading(true);
+                    fetchLastfmTagTop(tag, 15).then(t => { setTagTracks(t); setTagLoading(false); }).catch(() => setTagLoading(false));
+                  }} style={{
+                    padding: "4px 10px", borderRadius: 10, fontSize: 11, cursor: "pointer",
+                    background: `${tc.highlight}20`, color: tc.highlight, border: `1px solid ${tc.highlight}30`,
+                  }}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== Artist Discovery (similar artists' tracks) ===== */}
+      {artistMixName && (artistMixTracks.length > 0 || artistMixLoading) && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+          transform: "translateZ(0)",
+        }}>
+          <SectionHeading icon={<IconDiscover size={16} color={tc.highlight} />} title="Откройте для себя" tc={tc} />
+          <div style={{
+            fontSize: 13, color: tc.textColor, marginBottom: 10, marginTop: -4,
+          }}>
+            Если вам нравится <span style={{ fontWeight: 600, color: tc.highlight }}>{artistMixName}</span>
+          </div>
+          <HorizontalCards tracks={artistMixTracks} loading={artistMixLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+        </div>
+      )}
+
+      {/* ===== New from Favorites ===== */}
+      {(newRelTracks.length > 0 || newRelLoading) && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+          transform: "translateZ(0)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionHeading icon={<IconHeart size={16} color={tc.highlight} filled />} title="От любимых" tc={tc} />
+            {newRelTracks.length > 0 && (
+              <button onClick={() => handlePlayAll(newRelTracks)} style={{
+                padding: "5px 12px", borderRadius: 12, border: "none",
+                background: tc.accentGradient,
+                color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                <IconPlaySmall size={12} color="#fff" />
+                Слушать
+              </button>
+            )}
+          </div>
+          {newRelArtists.length > 0 && (
+            <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 8, marginTop: -4 }}>
+              {newRelArtists.slice(0, 3).join(", ")}{newRelArtists.length > 3 ? ` и ещё ${newRelArtists.length - 3}` : ""}
+            </div>
+          )}
+          <HorizontalCards tracks={newRelTracks} loading={newRelLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+        </div>
+      )}
+
+      {/* ===== Last.fm Global Chart ===== */}
+      {(chartTracks.length > 0 || chartLoading) && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+          transform: "translateZ(0)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <SectionHeading icon={<IconChart size={16} color={tc.highlight} />} title="Мировой чарт" tc={tc} />
+            {chartTracks.length > 0 && (
+              <button onClick={() => handlePlayAll(chartTracks)} style={{
+                padding: "5px 12px", borderRadius: 12, border: "none",
+                background: tc.accentGradient,
+                color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                <IconPlaySmall size={12} color="#fff" />
+                Слушать
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: tc.hintColor, marginBottom: 8, marginTop: -4 }}>
+            На основе 20+ лет данных Last.fm
+          </div>
+          <HorizontalCards tracks={chartTracks} loading={chartLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+        </div>
+      )}
+
+      {/* ===== Geo Trending ===== */}
+      {(geoTracks.length > 0 || geoLoading) && (
+        <div style={{
+          marginBottom: 28, padding: 16, borderRadius: 22,
+          background: tc.cardBg, border: tc.cardBorder,
+          transform: "translateZ(0)",
+        }}>
+          <SectionHeading icon={<IconTrending size={16} color={tc.highlight} />} title="Популярное в регионе" tc={tc} />
+          <div style={{
+            display: "flex", gap: 6, marginBottom: 10, marginTop: -4,
+            overflowX: "auto", scrollbarWidth: "none",
+          }}>
+            {[
+              { code: "russia", label: "🇷🇺 Россия" },
+              { code: "kazakhstan", label: "🇰🇿 Казахстан" },
+              { code: "united states", label: "🇺🇸 США" },
+              { code: "united kingdom", label: "🇬🇧 UK" },
+              { code: "germany", label: "🇩🇪 Германия" },
+              { code: "turkey", label: "🇹🇷 Турция" },
+            ].map(({ code, label }) => (
+              <button key={code} onClick={() => {
+                haptic("light");
+                setGeoCountry(code);
+                setGeoLoading(true);
+                fetchLastfmGeoTop(code, 15).then(t => { setGeoTracks(t); setGeoLoading(false); }).catch(() => setGeoLoading(false));
+              }} style={{
+                padding: "5px 12px", borderRadius: 10, fontSize: 11, fontWeight: 600,
+                border: geoCountry === code ? `1px solid ${tc.highlight}` : `1px solid ${tc.accentBorderAlpha}`,
+                background: geoCountry === code ? `${tc.highlight}20` : "transparent",
+                color: geoCountry === code ? tc.highlight : tc.hintColor,
+                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+              }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <HorizontalCards tracks={geoTracks} loading={geoLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+        </div>
+      )}
+
+      {/* ===== Genre Discovery (tag-based) ===== */}
+      <div style={{
+        marginBottom: 28, padding: 16, borderRadius: 22,
+        background: tc.cardBg, border: tc.cardBorder,
+        transform: "translateZ(0)",
+      }}>
+        <SectionHeading icon={<IconDiscover size={16} color={tc.highlight} />} title="Жанры" tc={tc} />
+        <div style={{
+          display: "flex", gap: 8, flexWrap: "wrap", marginBottom: tagTracks.length > 0 || tagLoading ? 12 : 0,
+        }}>
+          {[
+            { tag: "indie", label: "Indie", grad: "linear-gradient(135deg, #43a047, #66bb6a)" },
+            { tag: "hip-hop", label: "Hip-Hop", grad: "linear-gradient(135deg, #ff6f00, #ffa726)" },
+            { tag: "electronic", label: "Electronic", grad: "linear-gradient(135deg, #7c4dff, #b388ff)" },
+            { tag: "rock", label: "Rock", grad: "linear-gradient(135deg, #d32f2f, #ef5350)" },
+            { tag: "jazz", label: "Jazz", grad: "linear-gradient(135deg, #1565c0, #42a5f5)" },
+            { tag: "classical", label: "Classical", grad: "linear-gradient(135deg, #5d4037, #8d6e63)" },
+            { tag: "r&b", label: "R&B", grad: "linear-gradient(135deg, #ad1457, #ec407a)" },
+            { tag: "pop", label: "Pop", grad: "linear-gradient(135deg, #00bcd4, #26c6da)" },
+            { tag: "metal", label: "Metal", grad: "linear-gradient(135deg, #212121, #616161)" },
+            { tag: "lo-fi", label: "Lo-Fi", grad: "linear-gradient(135deg, #78909c, #b0bec5)" },
+            { tag: "soul", label: "Soul", grad: "linear-gradient(135deg, #e65100, #ff9800)" },
+            { tag: "ambient", label: "Ambient", grad: "linear-gradient(135deg, #004d40, #26a69a)" },
+          ].map(({ tag, label, grad }) => (
+            <button key={tag} onClick={() => {
+              haptic("medium");
+              setActiveTag(tag);
+              setTagLoading(true);
+              setTagTracks([]);
+              fetchLastfmTagTop(tag, 15).then(t => { setTagTracks(t); setTagLoading(false); }).catch(() => setTagLoading(false));
+            }} style={{
+              padding: "7px 14px", borderRadius: 12, border: "none",
+              background: activeTag === tag ? grad : `${tc.highlight}15`,
+              color: activeTag === tag ? "#fff" : tc.hintColor,
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {(tagLoading || tagTracks.length > 0) && (
+          <>
+            {activeTag && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <div style={{ fontSize: 13, color: tc.textColor }}>
+                  Лучшее в <span style={{ fontWeight: 600, color: tc.highlight }}>{activeTag}</span>
+                </div>
+                {tagTracks.length > 0 && (
+                  <button onClick={() => handlePlayAll(tagTracks)} style={{
+                    padding: "4px 10px", borderRadius: 10, border: "none",
+                    background: tc.accentGradient,
+                    color: "#fff", fontSize: 10, fontWeight: 600, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 3,
+                  }}>
+                    <IconPlaySmall size={10} color="#fff" />
+                    Все
+                  </button>
+                )}
+              </div>
+            )}
+            <HorizontalCards tracks={tagTracks} loading={tagLoading} error={false} tc={tc} onTrackClick={handlePlayTrack} />
+          </>
+        )}
+      </div>
 
       {/* ===== AI Playlist Generator ===== */}
       <div style={{

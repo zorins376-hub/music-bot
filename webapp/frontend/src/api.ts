@@ -734,6 +734,72 @@ export async function fetchFavoritesList(limit?: number): Promise<Track[]> {
   return Array.isArray(data.tracks) ? data.tracks : [];
 }
 
+// ── Last.fm Discovery ────────────────────────────────────────────────────
+
+export async function fetchLastfmTagTop(tag: string, limit = 15): Promise<Track[]> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/tag-top?tag=${encodeURIComponent(tag)}&limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks || [];
+}
+
+export async function fetchLastfmGeoTop(country = "russia", limit = 15): Promise<Track[]> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/geo-top?country=${encodeURIComponent(country)}&limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks || [];
+}
+
+export async function fetchLastfmChart(limit = 20): Promise<Track[]> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/chart?limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks || [];
+}
+
+export async function fetchLastfmNewReleases(limit = 15): Promise<{ tracks: Track[]; artists: string[] }> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/new-releases?limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+  if (!r.ok) return { tracks: [], artists: [] };
+  const data = await r.json();
+  return { tracks: data.tracks || [], artists: data.artists || [] };
+}
+
+export async function fetchLastfmArtistMix(artist: string, limit = 15): Promise<Track[]> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/artist-mix?artist=${encodeURIComponent(artist)}&limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tracks || [];
+}
+
+export interface LastfmTag {
+  name: string;
+  reach: number;
+  count: number;
+}
+
+export async function fetchLastfmTags(): Promise<LastfmTag[]> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/tags`, { headers: getHeaders(), retries: 1, timeout: 8000 });
+  if (!r.ok) return [];
+  const data = await r.json();
+  return data.tags || [];
+}
+
+export interface LastfmArtistInfo {
+  name: string;
+  listeners: number;
+  playcount: number;
+  tags: string[];
+  bio: string;
+  similar: string[];
+}
+
+export async function fetchLastfmArtistInfo(artist: string): Promise<LastfmArtistInfo | null> {
+  const r = await fetchWithRetry(`${API_BASE}/lastfm/artist-info?artist=${encodeURIComponent(artist)}`, { headers: getHeaders(), retries: 1, timeout: 8000 });
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data.name ? data as LastfmArtistInfo : null;
+}
+
 // ── Party Playlists ─────────────────────────────────────────────────────
 
 export interface PartyTrack extends Track {
