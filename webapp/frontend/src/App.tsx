@@ -1275,19 +1275,15 @@ export function App() {
         if (s.current_track) {
           setView("player");
         } else {
-          // No track playing — auto-start a smart flow with popular music
+          // No track playing — prepare one track for Flow mode (don't auto-play)
           try {
-            let recs = await fetchWave(userId, 15, null);
-            if (recs.length === 0) recs = await fetchTrending(15);
+            let recs = await fetchWave(userId, 8, null);
+            if (recs.length === 0) recs = await fetchTrending(8);
             if (recs.length > 0) {
-              // Play the first track, add rest to queue
               const first = recs[0];
-              const ns = await sendAction("play", first.video_id, undefined, first);
-              for (let i = 1; i < recs.length; i++) {
-                await sendAction("add", recs[i].video_id, undefined, recs[i]);
-              }
-              const final_s = await fetchPlayerState(userId);
-              setState({ ...final_s, is_playing: false });
+              // Set track directly without adding to queue
+              const ns = await sendAction("play", first.video_id, undefined, first, "direct");
+              setState({ ...ns, is_playing: false });
               setView("player");
             }
           } catch {}
@@ -1428,20 +1424,22 @@ export function App() {
           return;
         }
 
-        // ── Empty queue: auto-fill with recommendations when user presses play ──
+        // ── Empty queue: auto-start Flow mode with one track ──
         if (act === "play" && !trackId && !stateRef.current.current_track && stateRef.current.queue.length === 0) {
           setBuffering(true);
           try {
-            let recs = await fetchWave(userIdRef.current, 15, null);
-            if (recs.length === 0) recs = await fetchTrending(15);
+            let recs = await fetchWave(userIdRef.current, 8, null);
+            if (recs.length === 0) recs = await fetchTrending(8);
             if (recs.length > 0) {
               const first = recs[0];
-              const ns = await sendAction("play", first.video_id, undefined, first);
-              for (let i = 1; i < recs.length; i++) {
-                await sendAction("add", recs[i].video_id, undefined, recs[i]);
-              }
-              const final_s = await fetchPlayerState(userIdRef.current);
-              setState(final_s);
+              // Play just one track directly (no queue pollution)
+              const ns = await sendAction("play", first.video_id, undefined, first, "direct");
+              setState(ns);
+              // Activate Flow mode so next tracks come from AI stream
+              setRadioMode(true);
+              radioModeRef.current = true;
+              radioSeedRef.current = first.video_id;
+              radioPlayedRef.current = [first.video_id];
               setBuffering(false);
               return;
             }
