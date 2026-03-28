@@ -6,6 +6,8 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import case, func, select, update, and_
 
@@ -28,6 +30,11 @@ _USERS_PER_PAGE = 10
 _admin_fwd_state: dict[int, dict] = {}
 
 _LIVE_TRACKS_PER_PAGE = 8
+
+
+class BroadcastState(StatesGroup):
+    waiting_message = State()  # admin sends text/photo/gif for broadcast
+
 
 # Admin rate limiting: max operations per minute
 _ADMIN_RATE_LIMIT = 15
@@ -602,17 +609,23 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await message.answer(f"Пользователь {label} разблокирован.")
         await log_admin_action(message.from_user.id, "unban", target.id)
 
-    # /admin broadcast <текст>
+    # /admin broadcast <текст> — legacy text-only broadcast
     elif subcmd == "broadcast":
         if len(args) < 3:
-            await message.answer("Использование: /admin broadcast <текст>")
+            await message.answer(
+                "📨 <b>Рассылка</b>\n\n"
+                "Для текстовой рассылки: <code>/admin broadcast текст</code>\n\n"
+                "Или нажми кнопку «◈ Рассылка» в админ-панели — "
+                "там можно отправить фото, GIF или видео.",
+                parse_mode="HTML",
+            )
             return
-        text = args[2]
-        # Store pending broadcast for confirmation
+        text = message.text.split(None, 2)[2]  # everything after "/admin broadcast"
+        import json as _json
         await cache.redis.setex(
             f"admin:broadcast_pending:{message.from_user.id}",
-            300,  # 5 min TTL
-            text,
+            300,
+            _json.dumps({"chat_id": message.chat.id, "message_id": message.message_id, "text_only": text}),
         )
         preview = text[:200] + ("..." if len(text) > 200 else "")
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1077,30 +1090,124 @@ async def handle_adm_health(callback: CallbackQuery) -> None:
     await callback.message.answer(text, parse_mode="HTML")
 
 
-@router.callback_query(lambda c: c.data == "adm:broadcast_confirm")
-async def handle_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
+@router.callback_query(lambda c: c.data == "adm:broadcast")
+async def handle_adm_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None:
+    """Enter broadcast FSM: ask admin to send a message (text/photo/GIF)."""
     if not _is_admin(callback.from_user.id):
         return await callback.answer("⛔", show_alert=True)
     await callback.answer()
-    pending_key = f"admin:broadcast_pending:{callback.from_user.id}"
-    text = await cache.redis.get(pending_key)
-    if not text:
-        await callback.message.edit_text("⚠️ Рассылка истекла или уже отправлена.")
+    await state.set_state(BroadcastState.waiting_message)
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="adm:broadcast_cancel")]
+    ])
+    await callback.message.answer(
+        "📨 <b>Рассылка</b>\n\n"
+        "Отправь мне сообщение, которое хочешь разослать всем пользователям.\n\n"
+        "Поддерживается:\n"
+        "• Текст (с HTML-форматированием)\n"
+        "• Фото с подписью\n"
+        "• GIF/анимация с подписью\n"
+        "• Видео с подписью\n\n"
+        "Оформи сообщение красиво — оно будет отправлено <b>как есть</b>.",
+        parse_mode="HTML",
+        reply_markup=cancel_kb,
+    )
+
+
+@router.message(BroadcastState.waiting_message)
+async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot) -> None:
+    """Receive broadcast content from admin, show preview and confirm."""
+    if not _is_admin(message.from_user.id):
+        await state.clear()
         return
-    if isinstance(text, bytes):
-        text = text.decode()
+
+    # Store the message reference for later copy_message
+    await state.update_data(
+        broadcast_chat_id=message.chat.id,
+        broadcast_message_id=message.message_id,
+    )
+
+    # Also store in Redis as backup (FSM might expire)
+    import json as _json
+    await cache.redis.setex(
+        f"admin:broadcast_pending:{message.from_user.id}",
+        300,  # 5 min TTL
+        _json.dumps({"chat_id": message.chat.id, "message_id": message.message_id}),
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Подтвердить рассылку", callback_data="adm:broadcast_confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="adm:broadcast_cancel"),
+        ]
+    ])
+
+    # Count users
+    async with async_session() as session:
+        result = await session.execute(
+            select(func.count(User.id)).where(User.is_banned == False)  # noqa: E712
+        )
+        user_count = result.scalar() or 0
+
+    # Describe content type
+    if message.animation:
+        content_type = "GIF + текст"
+    elif message.photo:
+        content_type = "Фото + текст"
+    elif message.video:
+        content_type = "Видео + текст"
+    else:
+        content_type = "Текст"
+
+    await message.reply(
+        f"⚠️ <b>Подтверди рассылку</b>\n\n"
+        f"Тип: <b>{content_type}</b>\n"
+        f"Получателей: <b>{user_count}</b> пользователей\n\n"
+        f"☝️ Сообщение выше будет отправлено всем. Подтвердить?",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+    # Stay in state until confirm/cancel
+
+
+@router.callback_query(lambda c: c.data == "adm:broadcast_confirm")
+async def handle_broadcast_confirm(callback: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+    if not _is_admin(callback.from_user.id):
+        return await callback.answer("⛔", show_alert=True)
+    await callback.answer()
+
+    import json as _json
+    pending_key = f"admin:broadcast_pending:{callback.from_user.id}"
+    raw = await cache.redis.get(pending_key)
+    if not raw:
+        await callback.message.edit_text("⚠️ Рассылка истекла или уже отправлена.")
+        await state.clear()
+        return
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    data = _json.loads(raw)
+
     await cache.redis.delete(pending_key)
+    await state.clear()
     await callback.message.edit_text("⏳ Рассылка запущена...")
-    await _broadcast(bot, callback.message, text)
-    await log_admin_action(callback.from_user.id, "broadcast", details=text[:200])
+
+    # Legacy text-only broadcast
+    if "text_only" in data:
+        await _broadcast(bot, callback.message, data["text_only"])
+        await log_admin_action(callback.from_user.id, "broadcast", details=data["text_only"][:200])
+    else:
+        # Copy message broadcast (supports photo/GIF/video/text)
+        await _broadcast_copy(bot, callback.message, data["chat_id"], data["message_id"])
+        await log_admin_action(callback.from_user.id, "broadcast", details=f"msg_id={data['message_id']}")
 
 
 @router.callback_query(lambda c: c.data == "adm:broadcast_cancel")
-async def handle_broadcast_cancel(callback: CallbackQuery) -> None:
+async def handle_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(callback.from_user.id):
         return await callback.answer("⛔", show_alert=True)
     await callback.answer()
     await cache.redis.delete(f"admin:broadcast_pending:{callback.from_user.id}")
+    await state.clear()
     await callback.message.edit_text("❌ Рассылка отменена.")
 
 
@@ -1257,7 +1364,7 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         return
     await callback.answer()
     prompts = {
-        "adm:broadcast": "Для рассылки используй:\n<code>/admin broadcast текст</code>",
+        "adm:broadcast": None,  # handled by dedicated FSM handler above
         "adm:premium": "Для выдачи Premium:\n<code>/admin premium @username</code>\nили\n<code>/admin premium user_id</code>",
         "adm:ban": "Для бана:\n<code>/admin ban @username</code>\nДля разбана:\n<code>/admin unban @username</code>\n\nМожно также по ID.",
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
@@ -1594,7 +1701,7 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
 
 
 async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
-    """Broadcast to all users with Telegram-friendly rate limiting."""
+    """Broadcast text to all users with Telegram-friendly rate limiting."""
     import asyncio
     async with async_session() as session:
         result = await session.execute(
@@ -1612,5 +1719,32 @@ async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
         await asyncio.sleep(0.05)  # ~20 msg/sec, safe for Telegram limits
 
     await admin_msg.answer(
-        f"Broadcast done.\nSent: {sent}\nFailed: {failed}"
+        f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
+    )
+
+
+async def _broadcast_copy(bot: Bot, admin_msg: Message, from_chat_id: int, message_id: int) -> None:
+    """Broadcast by copying a message (supports text, photo, GIF, video) to all users."""
+    import asyncio
+    async with async_session() as session:
+        result = await session.execute(
+            select(User.id).where(User.is_banned == False)  # noqa: E712
+        )
+        user_ids = [row[0] for row in result.all()]
+
+    sent, failed = 0, 0
+    for uid in user_ids:
+        try:
+            await bot.copy_message(
+                chat_id=uid,
+                from_chat_id=from_chat_id,
+                message_id=message_id,
+            )
+            sent += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.05)  # ~20 msg/sec, safe for Telegram limits
+
+    await admin_msg.answer(
+        f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
     )
