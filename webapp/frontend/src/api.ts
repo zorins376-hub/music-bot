@@ -263,8 +263,12 @@ export async function playPlaylist(playlistId: number): Promise<PlayerState> {
   return r.json();
 }
 
-export async function fetchLyrics(trackId: string): Promise<string | null> {
-  const r = await fetch(`${API_BASE}/lyrics/${trackId}`, { headers: getHeaders() });
+export async function fetchLyrics(trackId: string, title?: string, artist?: string): Promise<string | null> {
+  const params = new URLSearchParams();
+  if (title) params.set("title", title);
+  if (artist) params.set("artist", artist);
+  const qs = params.toString();
+  const r = await fetch(`${API_BASE}/lyrics/${trackId}${qs ? "?" + qs : ""}`, { headers: getHeaders() });
   if (!r.ok) return null;
   const data = await r.json();
   return data.lyrics;

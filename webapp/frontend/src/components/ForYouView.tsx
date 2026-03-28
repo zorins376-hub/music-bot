@@ -146,7 +146,7 @@ export const ForYouView = memo(function ForYouView({
   // --- Last.fm Geo Top ---
   const [geoTracks, setGeoTracks] = useState<Track[]>([]);
   const [geoLoading, setGeoLoading] = useState(true);
-  const [geoCountry, setGeoCountry] = useState("russia");
+  const [geoCountry, setGeoCountry] = useState("Russian Federation");
 
   // --- Last.fm Genre/Tag ---
   const [tagTracks, setTagTracks] = useState<Track[]>([]);
@@ -880,18 +880,18 @@ export const ForYouView = memo(function ForYouView({
           scrollSnapType: "x mandatory",
         }}>
           {[
-            { code: "russia", flag: "🇷🇺", label: "Россия", grad: "linear-gradient(135deg, #1565c0, #e53935)" },
-            { code: "kazakhstan", flag: "🇰🇿", label: "Казахстан", grad: "linear-gradient(135deg, #00bcd4, #ffd600)" },
-            { code: "kyrgyzstan", flag: "🇰🇬", label: "Кыргызстан", grad: "linear-gradient(135deg, #e53935, #ffd600)" },
-            { code: "united states", flag: "🇺🇸", label: "США", grad: "linear-gradient(135deg, #1565c0, #b71c1c)" },
-            { code: "united kingdom", flag: "🇬🇧", label: "UK", grad: "linear-gradient(135deg, #0d47a1, #c62828)" },
-            { code: "germany", flag: "🇩🇪", label: "Германия", grad: "linear-gradient(135deg, #212121, #ffc107)" },
-            { code: "turkey", flag: "🇹🇷", label: "Турция", grad: "linear-gradient(135deg, #c62828, #e53935)" },
-            { code: "france", flag: "🇫🇷", label: "Франция", grad: "linear-gradient(135deg, #1565c0, #c62828)" },
-            { code: "brazil", flag: "🇧🇷", label: "Бразилия", grad: "linear-gradient(135deg, #2e7d32, #ffd600)" },
-            { code: "japan", flag: "🇯🇵", label: "Япония", grad: "linear-gradient(135deg, #e8eaf6, #c62828)" },
-            { code: "south korea", flag: "🇰🇷", label: "Корея", grad: "linear-gradient(135deg, #1565c0, #c62828)" },
-            { code: "india", flag: "🇮🇳", label: "Индия", grad: "linear-gradient(135deg, #ff9800, #2e7d32)" },
+            { code: "Russian Federation", flag: "🇷🇺", label: "Россия", grad: "linear-gradient(135deg, #1565c0, #e53935)" },
+            { code: "Kazakhstan", flag: "🇰🇿", label: "Казахстан", grad: "linear-gradient(135deg, #00bcd4, #ffd600)" },
+            { code: "Kyrgyzstan", flag: "🇰🇬", label: "Кыргызстан", grad: "linear-gradient(135deg, #e53935, #ffd600)" },
+            { code: "United States", flag: "🇺🇸", label: "США", grad: "linear-gradient(135deg, #1565c0, #b71c1c)" },
+            { code: "United Kingdom", flag: "🇬🇧", label: "UK", grad: "linear-gradient(135deg, #0d47a1, #c62828)" },
+            { code: "Germany", flag: "🇩🇪", label: "Германия", grad: "linear-gradient(135deg, #212121, #ffc107)" },
+            { code: "Turkey", flag: "🇹🇷", label: "Турция", grad: "linear-gradient(135deg, #c62828, #e53935)" },
+            { code: "France", flag: "🇫🇷", label: "Франция", grad: "linear-gradient(135deg, #1565c0, #c62828)" },
+            { code: "Brazil", flag: "🇧🇷", label: "Бразилия", grad: "linear-gradient(135deg, #2e7d32, #ffd600)" },
+            { code: "Japan", flag: "🇯🇵", label: "Япония", grad: "linear-gradient(135deg, #e8eaf6, #c62828)" },
+            { code: "Korea, Republic of", flag: "🇰🇷", label: "Корея", grad: "linear-gradient(135deg, #1565c0, #c62828)" },
+            { code: "India", flag: "🇮🇳", label: "Индия", grad: "linear-gradient(135deg, #ff9800, #2e7d32)" },
           ].map(({ code, flag, label, grad }) => (
             <button key={code} onClick={() => {
               haptic("medium");

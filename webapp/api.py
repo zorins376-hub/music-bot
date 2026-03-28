@@ -1503,7 +1503,12 @@ async def get_playlist_tracks(playlist_id: int, user: dict = Depends(get_current
 
 
 @app.get("/api/lyrics/{track_id}", response_model=LyricsResponse)
-async def get_lyrics(track_id: str, user: dict = Depends(get_current_user)):
+async def get_lyrics(
+    track_id: str,
+    title: str = "",
+    artist: str = "",
+    user: dict = Depends(get_current_user),
+):
     # Try Redis cache first
     r = await _get_redis()
     cache_key = f"lyrics:{track_id}"
@@ -1515,7 +1520,7 @@ async def get_lyrics(track_id: str, user: dict = Depends(get_current_user)):
         return LyricsResponse(track_id=track_id, lyrics=lyrics)
 
     # Fetch from Genius via search
-    lyrics_text = await _fetch_lyrics(track_id)
+    lyrics_text = await _fetch_lyrics(track_id, title=title, artist=artist)
     if lyrics_text:
         await r.setex(cache_key, _LYRICS_CACHE_TTL, lyrics_text)
     else:
@@ -2686,21 +2691,22 @@ async def _db_tracks_to_schemas(tracks) -> list[TrackSchema]:
     return [track for track, _ in hydrated]
 
 
-async def _fetch_lyrics(track_id: str) -> str | None:
+async def _fetch_lyrics(track_id: str, title: str = "", artist: str = "") -> str | None:
     """Fetch lyrics for a track. Tries LRCLIB (synced) → Genius (plain)."""
     from sqlalchemy import select
     from bot.models.base import async_session
     from bot.models.track import Track
 
+    duration = 0
     async with async_session() as session:
         t = (await session.execute(
             select(Track).where(Track.source_id == track_id)
         )).scalar_one_or_none()
-        if not t:
-            return None
+        if t:
+            artist = artist or (t.artist or "").strip()
+            title = title or (t.title or "").strip()
+            duration = t.duration or 0
 
-    artist = (t.artist or "").strip()
-    title = (t.title or "").strip()
     if not title:
         return None
 
@@ -2710,8 +2716,8 @@ async def _fetch_lyrics(track_id: str) -> str | None:
         from bot.services.http_session import get_session
         session = get_session()
         params: dict[str, str | int] = {"track_name": title, "artist_name": artist}
-        if t.duration and t.duration > 0:
-            params["duration"] = t.duration
+        if duration and duration > 0:
+            params["duration"] = duration
         async with session.get(
             "https://lrclib.net/api/get",
             params=params,

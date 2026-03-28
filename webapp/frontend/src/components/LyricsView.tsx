@@ -11,6 +11,8 @@ interface LyricLine {
 
 interface Props {
   trackId: string;
+  trackTitle?: string;
+  trackArtist?: string;
   elapsed: number;  // current playback position in seconds
   onBack: () => void;
   accentColor?: string;
@@ -47,7 +49,7 @@ function parseLines(raw: string): LyricLine[] {
   return result;
 }
 
-export const LyricsView = memo(function LyricsView({ trackId, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
+export const LyricsView = memo(function LyricsView({ trackId, trackTitle, trackArtist, elapsed, onBack, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom" }: Props) {
   const isTequila = themeId === "tequila";
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +59,7 @@ export const LyricsView = memo(function LyricsView({ trackId, elapsed, onBack, a
 
   useEffect(() => {
     setLoading(true);
-    fetchLyrics(trackId)
+    fetchLyrics(trackId, trackTitle, trackArtist)
       .then((text) => {
         setLyrics(text);
         if (text) setLines(parseLines(text));

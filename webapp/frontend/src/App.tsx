@@ -2657,7 +2657,7 @@ export function App() {
       {view === "profile" && <Suspense fallback={null}><ProfileView userId={userId} username={user?.username} firstName={user?.first_name} isPremium={Boolean(userProfile?.is_premium)} onPlayTrack={handlePlayAndOpenPlayer} accentColor={accentColor} themeId={theme.id} /></Suspense>}
 
       {view === "lyrics" && lyricsTrackId && (
-        <Suspense fallback={null}><LyricsView trackId={lyricsTrackId} elapsed={elapsed} onBack={handleLyricsBack} accentColor={accentColor} themeId={theme.id} /></Suspense>
+        <Suspense fallback={null}><LyricsView trackId={lyricsTrackId} trackTitle={state.current_track?.title} trackArtist={state.current_track?.artist} elapsed={elapsed} onBack={handleLyricsBack} accentColor={accentColor} themeId={theme.id} /></Suspense>
       )}
       </div>
 
