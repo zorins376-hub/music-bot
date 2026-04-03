@@ -1705,21 +1705,37 @@ async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
     import asyncio
     async with async_session() as session:
         result = await session.execute(
-            select(User.id).where(User.is_banned == False)  # noqa: E712
+            select(User.id).where(
+                User.is_banned == False,  # noqa: E712
+                User.bot_blocked == False,  # noqa: E712
+            )
         )
         user_ids = [row[0] for row in result.all()]
 
     sent, failed = 0, 0
+    blocked_ids: list[int] = []
     for uid in user_ids:
         try:
             await bot.send_message(uid, text, parse_mode="HTML")
             sent += 1
-        except Exception:
+        except Exception as e:
             failed += 1
-        await asyncio.sleep(0.05)  # ~20 msg/sec, safe for Telegram limits
+            err_str = str(e).lower()
+            if "blocked" in err_str or "deactivated" in err_str or "not found" in err_str:
+                blocked_ids.append(uid)
+        await asyncio.sleep(0.05)
+
+    # Mark blocked users so we skip them next time
+    if blocked_ids:
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id.in_(blocked_ids)).values(bot_blocked=True)
+            )
+            await session.commit()
 
     await admin_msg.answer(
         f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
+        + (f"\n🚫 Заблокировали бота: {len(blocked_ids)}" if blocked_ids else "")
     )
 
 
@@ -1728,11 +1744,15 @@ async def _broadcast_copy(bot: Bot, admin_msg: Message, from_chat_id: int, messa
     import asyncio
     async with async_session() as session:
         result = await session.execute(
-            select(User.id).where(User.is_banned == False)  # noqa: E712
+            select(User.id).where(
+                User.is_banned == False,  # noqa: E712
+                User.bot_blocked == False,  # noqa: E712
+            )
         )
         user_ids = [row[0] for row in result.all()]
 
     sent, failed = 0, 0
+    blocked_ids: list[int] = []
     for uid in user_ids:
         try:
             await bot.copy_message(
@@ -1741,10 +1761,22 @@ async def _broadcast_copy(bot: Bot, admin_msg: Message, from_chat_id: int, messa
                 message_id=message_id,
             )
             sent += 1
-        except Exception:
+        except Exception as e:
             failed += 1
-        await asyncio.sleep(0.05)  # ~20 msg/sec, safe for Telegram limits
+            err_str = str(e).lower()
+            if "blocked" in err_str or "deactivated" in err_str or "not found" in err_str:
+                blocked_ids.append(uid)
+        await asyncio.sleep(0.05)
+
+    # Mark blocked users so we skip them next time
+    if blocked_ids:
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id.in_(blocked_ids)).values(bot_blocked=True)
+            )
+            await session.commit()
 
     await admin_msg.answer(
         f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
+        + (f"\n🚫 Заблокировали бота: {len(blocked_ids)}" if blocked_ids else "")
     )
