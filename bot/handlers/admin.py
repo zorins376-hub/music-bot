@@ -105,6 +105,7 @@ async def _build_detailed_stats() -> str:
                 func.sum(case((User.last_active >= week_ago, 1), else_=0)),
                 func.sum(case((User.last_active >= month_ago, 1), else_=0)),
                 func.sum(case((User.is_banned == True, 1), else_=0)),
+                func.sum(case((User.bot_blocked == True, 1), else_=0)),
                 func.sum(case((User.is_premium == True, 1), else_=0)),
                 func.sum(case((and_(User.is_premium == True, User.premium_until == None), 1), else_=0)),
                 func.coalesce(func.sum(User.request_count), 0),
@@ -118,9 +119,10 @@ async def _build_detailed_stats() -> str:
         wau = int(u[4] or 0)
         mau = int(u[5] or 0)
         banned_count = int(u[6] or 0)
-        premium_total = int(u[7] or 0)
-        admin_premium = int(u[8] or 0)
-        total_requests = int(u[9] or 0)
+        blocked_count = int(u[7] or 0)
+        premium_total = int(u[8] or 0)
+        admin_premium = int(u[9] or 0)
+        total_requests = int(u[10] or 0)
         paid_premium = premium_total - admin_premium
 
         # ── Payments: single combined query ───────
@@ -212,6 +214,8 @@ async def _build_detailed_stats() -> str:
         f"  Новых за неделю: <b>{users_week}</b>",
         f"  DAU: <b>{dau}</b> | WAU: <b>{wau}</b> | MAU: <b>{mau}</b>",
         f"  Забанено: <b>{banned_count}</b>",
+        f"  🚫 Заблокировали бота: <b>{blocked_count}</b>",
+        f"  ✅ Активных: <b>{user_total - blocked_count - banned_count}</b>",
         "",
         "<b>◇ Premium:</b>",
         f"  Всего: <b>{premium_total}</b>",
@@ -1236,6 +1240,9 @@ async def handle_adm_back(callback: CallbackQuery) -> None:
 async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
     async with async_session() as session:
         total = await session.scalar(select(func.count()).select_from(User)) or 0
+        blocked_total = await session.scalar(
+            select(func.count()).select_from(User).where(User.bot_blocked == True)  # noqa: E712
+        ) or 0
         result = await session.execute(
             select(User)
             .order_by(User.created_at.desc())
@@ -1247,7 +1254,15 @@ async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]
     rows = []
     for u in users:
         name = u.username or u.first_name or str(u.id)
-        label = f"{'\u25c7' if u.is_premium else '\u25cb'} @{name}" if u.username else f"{'\u25c7' if u.is_premium else '\u25cb'} {name}"
+        # Status icon: ◇ premium, ○ free, 🚫 blocked bot
+        blocked = getattr(u, "bot_blocked", False)
+        if blocked:
+            icon = "\U0001f6ab"  # 🚫
+        elif u.is_premium:
+            icon = "\u25c7"
+        else:
+            icon = "\u25cb"
+        label = f"{icon} @{name}" if u.username else f"{icon} {name}"
         if u.is_premium:
             btn_text = "\u2717"
             btn_cb = AdmUserCb(act="unprem", uid=u.id, p=page).pack()
@@ -1273,7 +1288,13 @@ async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]
     rows.append(nav)
     rows.append([InlineKeyboardButton(text="\u25c1 \u041d\u0430\u0437\u0430\u0434", callback_data="action:admin")])
 
-    text = f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b> ({total})\n\n\u25c7 = Premium \u00b7 \u25cb = Free\n\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
+    active = total - blocked_total
+    text = (
+        f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b> ({total})\n"
+        f"Активных: <b>{active}</b> · Заблокировали: <b>{blocked_total}</b>\n\n"
+        f"\u25c7 = Premium · \u25cb = Free · \U0001f6ab = Заблокировал бота\n"
+        f"\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
+    )
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
