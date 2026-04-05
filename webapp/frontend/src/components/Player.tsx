@@ -270,8 +270,10 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
       setSwipeOffset(300);
       setTimeout(() => {
         onAction("prev");
-        setSwipeOffset(0);
-        setSwipeExiting(false);
+        setTimeout(() => {
+          setSwipeOffset(0);
+          setSwipeExiting(false);
+        }, 80);
       }, 250);
     } else if (diff < -60) {
       haptic("medium");
@@ -279,8 +281,10 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
       setSwipeOffset(-300);
       setTimeout(() => {
         onAction("next");
-        setSwipeOffset(0);
-        setSwipeExiting(false);
+        setTimeout(() => {
+          setSwipeOffset(0);
+          setSwipeExiting(false);
+        }, 80);
       }, 250);
     } else {
       setSwipeOffset(0);
@@ -575,14 +579,28 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
               transform: "translate(-50%, -50%)",
               pointerEvents: "none", zIndex: 10,
             }} viewBox="0 0 338 338">
-              <circle cx="169" cy="169" r="166" fill="none" stroke="rgba(255,167,38,0.12)" strokeWidth="2.5" />
-              <circle cx="169" cy="169" r="166" fill="none" stroke="#ffa726" strokeWidth="2.5"
-                strokeDasharray={2 * Math.PI * 166}
-                strokeDashoffset={2 * Math.PI * 166 * (1 - elapsed / duration)}
-                strokeLinecap="round"
-                transform="rotate(-90 169 169)"
-                style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
-              />
+              {isRound ? (
+                <>
+                  <circle cx="169" cy="169" r="166" fill="none" stroke="rgba(255,167,38,0.12)" strokeWidth="2.5" />
+                  <circle cx="169" cy="169" r="166" fill="none" stroke="#ffa726" strokeWidth="2.5"
+                    strokeDasharray={2 * Math.PI * 166}
+                    strokeDashoffset={2 * Math.PI * 166 * (1 - elapsed / duration)}
+                    strokeLinecap="round"
+                    transform="rotate(-90 169 169)"
+                    style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
+                  />
+                </>
+              ) : (
+                <>
+                  <path d="M 169 3 H 308 A 27 27 0 0 1 335 30 V 308 A 27 27 0 0 1 308 335 H 30 A 27 27 0 0 1 3 308 V 30 A 27 27 0 0 1 30 3 Z" fill="none" stroke="rgba(255,167,38,0.12)" strokeWidth="2.5" />
+                  <path d="M 169 3 H 308 A 27 27 0 0 1 335 30 V 308 A 27 27 0 0 1 308 335 H 30 A 27 27 0 0 1 3 308 V 30 A 27 27 0 0 1 30 3 Z" fill="none" stroke="#ffa726" strokeWidth="2.5"
+                    strokeDasharray={4 * (332 - 54) + 2 * Math.PI * 27}
+                    strokeDashoffset={(4 * (332 - 54) + 2 * Math.PI * 27) * (1 - elapsed / duration)}
+                    strokeLinecap="round"
+                    style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
+                  />
+                </>
+              )}
             </svg>
           )}
         </div>
@@ -1248,14 +1266,28 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             transform: "translate(-50%, -50%)",
             pointerEvents: "none", zIndex: 10,
           }} viewBox="0 0 318 318">
-            <circle cx="159" cy="159" r="156" fill="none" stroke={`${accentColorAlpha}`} strokeWidth="2.5" />
-            <circle cx="159" cy="159" r="156" fill="none" stroke={accentColor} strokeWidth="2.5"
-              strokeDasharray={2 * Math.PI * 156}
-              strokeDashoffset={2 * Math.PI * 156 * (1 - elapsed / duration)}
-              strokeLinecap="round"
-              transform="rotate(-90 159 159)"
-              style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
-            />
+            {isRound ? (
+              <>
+                <circle cx="159" cy="159" r="156" fill="none" stroke={`${accentColorAlpha}`} strokeWidth="2.5" />
+                <circle cx="159" cy="159" r="156" fill="none" stroke={accentColor} strokeWidth="2.5"
+                  strokeDasharray={2 * Math.PI * 156}
+                  strokeDashoffset={2 * Math.PI * 156 * (1 - elapsed / duration)}
+                  strokeLinecap="round"
+                  transform="rotate(-90 159 159)"
+                  style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
+                />
+              </>
+            ) : (
+              <>
+                <path d="M 159 3 H 292 A 23 23 0 0 1 315 26 V 292 A 23 23 0 0 1 292 315 H 26 A 23 23 0 0 1 3 292 V 26 A 23 23 0 0 1 26 3 Z" fill="none" stroke={`${accentColorAlpha}`} strokeWidth="2.5" />
+                <path d="M 159 3 H 292 A 23 23 0 0 1 315 26 V 292 A 23 23 0 0 1 292 315 H 26 A 23 23 0 0 1 3 292 V 26 A 23 23 0 0 1 26 3 Z" fill="none" stroke={accentColor} strokeWidth="2.5"
+                  strokeDasharray={4 * (312 - 46) + 2 * Math.PI * 23}
+                  strokeDashoffset={(4 * (312 - 46) + 2 * Math.PI * 23) * (1 - elapsed / duration)}
+                  strokeLinecap="round"
+                  style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
+                />
+              </>
+            )}
           </svg>
         )}
       </div>
