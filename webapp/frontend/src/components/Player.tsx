@@ -438,20 +438,6 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             }} />
           )}
 
-          {/* Blur shadow behind disc */}
-          {track?.cover_url && (
-            <div style={{
-              position: "absolute", top: "50%", left: "50%",
-              width: 340, height: 340,
-              transform: "translate(-50%, -50%)",
-              borderRadius: "50%",
-              backgroundImage: `url(${track.cover_url})`,
-              backgroundSize: "cover", backgroundPosition: "center",
-              filter: "blur(40px)", opacity: 0.45,
-              pointerEvents: "none", zIndex: 0,
-            }} />
-          )}
-
           {/* Disc */}
           <div
             onTouchStart={handleTouchStart}
@@ -1155,20 +1141,6 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             border: `1.5px solid ${accentColorAlpha}`,
             boxShadow: `0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)`,
             zIndex: 0, pointerEvents: "none",
-          }} />
-        )}
-
-        {/* Blur shadow behind disc */}
-        {track?.cover_url && (
-          <div style={{
-            position: "absolute", top: "50%", left: "50%",
-            width: 320, height: 320,
-            transform: "translate(-50%, -50%)",
-            borderRadius: "50%",
-            backgroundImage: `url(${track.cover_url})`,
-            backgroundSize: "cover", backgroundPosition: "center",
-            filter: "blur(40px)", opacity: 0.4,
-            pointerEvents: "none", zIndex: 0,
           }} />
         )}
 
