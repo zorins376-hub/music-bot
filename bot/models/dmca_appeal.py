@@ -14,7 +14,7 @@ class DmcaAppeal(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    blocked_track_id: Mapped[int] = mapped_column(Integer, ForeignKey("blocked_tracks.id"))
+    blocked_track_id: Mapped[int] = mapped_column(Integer, ForeignKey("blocked_tracks.id", ondelete="CASCADE"))
     reason: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, approved, rejected
     reviewed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

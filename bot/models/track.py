@@ -26,7 +26,7 @@ class Track(Base):
     language: Mapped[str | None] = mapped_column(String(10))
     bpm: Mapped[int | None] = mapped_column(Integer)
     duration: Mapped[int | None] = mapped_column(Integer)
-    file_id: Mapped[str | None] = mapped_column(String(255))
+    file_id: Mapped[str | None] = mapped_column(String(255), index=True)
     cover_url: Mapped[str | None] = mapped_column(String(500))
     downloads: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
@@ -47,8 +47,8 @@ class ListeningHistory(Base):
     __tablename__ = "listening_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    track_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("tracks.id"), nullable=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    track_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=True)
     query: Mapped[str | None] = mapped_column(String(500))
     # action: play / skip / like / dislike
     action: Mapped[str] = mapped_column(String(20), default="play")
@@ -70,7 +70,7 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     amount: Mapped[int] = mapped_column(Integer)  # Stars amount
     currency: Mapped[str] = mapped_column(String(10), default="XTR")
     payload: Mapped[str | None] = mapped_column(String(100))

@@ -97,7 +97,7 @@ async def prefetch_chart_tracks(
                     if dl_path.exists():
                         schedule_upload(dl_path, video_id)
                 except Exception:
-                    pass
+                    logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
                 return True
             except Exception as e:
                 err_msg = str(e)

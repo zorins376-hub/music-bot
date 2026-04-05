@@ -5,6 +5,8 @@ import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar,
 import { ShareCard } from "./ShareCard";
 import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus, IconShare, IconImage, IconWave, IconSimilar, IconTrending, IconMoon, IconSpinner, IconFire } from "./Icons";
 import { haptic, IconPlay, IconPause, IconSkipForward, IconSkipBack, IconShuffle, IconRepeat, IconLyrics, IconHeart, AudioVisualizer, Marquee, AudioBadge, btnStyle, QUALITY_OPTIONS, EQ_OPTIONS, formatEqPresetLabel } from "./PlayerHelpers";
+import { EQPanel } from "./EQPanel";
+import { LuxuryPanel } from "./LuxuryPanel";
 
 interface Props {
   state: PlayerState;
@@ -237,493 +239,39 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     return `${m}:${sec < 10 ? "0" : ""}${sec}`;
   };
 
-  const qualityLabel = quality === "auto" ? "Auto" : `${quality} kbps`;
-  const eqPresetLabel = formatEqPresetLabel(eqPreset);
   const audioControlsPanel = (warm = false) => canUseAudioControls ? (
-    <div style={{
-      marginTop: 18,
-      padding: warm ? "16px 16px 14px" : "16px",
-      borderRadius: 22,
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
-      background: warm ? "linear-gradient(180deg, rgba(40, 25, 15, 0.78), rgba(28, 18, 12, 0.72))" : "linear-gradient(180deg, rgba(124, 77, 255, 0.12), rgba(32, 24, 50, 0.32))",
-      border: warm ? "1px solid rgba(255, 213, 79, 0.18)" : "1px solid rgba(179, 136, 255, 0.16)",
-      boxShadow: warm ? "0 16px 40px rgba(0,0,0,0.2)" : `0 16px 40px ${accentColorAlpha}`,
-      backdropFilter: "blur(18px)",
-      WebkitBackdropFilter: "blur(18px)",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, textAlign: warm ? "left" : "left" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, color: warm ? "#ffd54f" : accentColor, fontSize: 15, fontWeight: 700, letterSpacing: 0.6 }}>
-            <IconEqualizer size={18} color={warm ? "#ffd54f" : accentColor} animated={false} />
-            <span>Audio Pro</span>
-          </div>
-          <div style={{ fontSize: 12, color: warm ? "#c8a882" : "var(--tg-theme-hint-color, #aaa)" }}>
-            {isAdmin ? "Advanced sound for admin access" : "Premium sound scene with curated EQ presets"}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <AudioBadge label={qualityLabel} active warm={warm} />
-          <AudioBadge label={bypassProcessing ? "RAW" : eqPresetLabel} active warm={warm} />
-        </div>
-      </div>
-
-      {/* Bypass / RAW mode toggle */}
-      <button
-        onClick={() => { haptic("medium"); onBypassToggle?.(!bypassProcessing); }}
-        style={{
-          padding: "10px 16px",
-          borderRadius: 16,
-          border: bypassProcessing
-            ? (warm ? "1px solid #ffd54f" : `1px solid ${accentColor}`)
-            : (warm ? "1px solid rgba(255, 213, 79, 0.18)" : "1px solid rgba(179, 136, 255, 0.16)"),
-          background: bypassProcessing
-            ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,213,79,0.24))" : `linear-gradient(135deg, ${accentColor}, #e040fb)`)
-            : (warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)"),
-          color: bypassProcessing ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
-          fontSize: 12,
-          fontWeight: 700,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-          letterSpacing: 0.8,
-          textTransform: "uppercase",
-          transition: "all 0.3s ease",
-        }}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {bypassProcessing ? (
-            <>
-              <line x1="1" y1="1" x2="23" y2="23"/>
-              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
-              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/>
-              <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
-            </>
-          ) : (
-            <>
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
-            </>
-          )}
-        </svg>
-        {bypassProcessing ? "RAW · Без обработки" : "Включить RAW (без обработки)"}
-      </button>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: warm ? "#c8a882" : "#bca8ff" }}>
-          Stream quality
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-          {QUALITY_OPTIONS.map((value) => {
-            const active = quality === value;
-            return (
-              <button
-                key={value}
-                onClick={() => onQualityChange?.(value)}
-                style={{
-                  padding: warm ? "10px 8px" : "9px 8px",
-                  borderRadius: 16,
-                  border: warm ? "1px solid rgba(255, 213, 79, 0.18)" : `1px solid ${active ? accentColor : accentColorAlpha}`,
-                  background: active
-                    ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,213,79,0.24))" : `linear-gradient(135deg, ${accentColor}, #e040fb)`)
-                    : (warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)"),
-                  color: active ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: active ? 700 : 600,
-                }}
-              >
-                {value === "auto" ? "Auto" : `${value}`}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: warm ? "#c8a882" : "#bca8ff" }}>
-          EQ presets
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-          {EQ_OPTIONS.map((option) => {
-            const active = eqPreset === option.value;
-            return (
-              <button
-                key={option.value}
-                onClick={() => onEqPresetChange?.(option.value)}
-                style={{
-                  padding: warm ? "11px 10px" : "10px",
-                  minHeight: 64,
-                  borderRadius: 18,
-                  border: warm ? "1px solid rgba(255, 213, 79, 0.18)" : `1px solid ${active ? accentColor : accentColorAlpha}`,
-                  background: active
-                    ? (warm ? "linear-gradient(135deg, rgba(255,109,0,0.34), rgba(255,213,79,0.22))" : `linear-gradient(135deg, ${accentColor}, rgba(224,64,251,0.92))`)
-                    : (warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)"),
-                  color: active ? "#fff" : (warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)"),
-                  cursor: "pointer",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  justifyContent: "center",
-                  gap: 4,
-                  textAlign: "left",
-                }}
-              >
-                <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.1 }}>{option.label}</span>
-                <span style={{ fontSize: 10, opacity: active ? 0.95 : 0.72, textTransform: "uppercase", letterSpacing: 0.6 }}>{option.note}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+    <EQPanel
+      quality={quality} eqPreset={eqPreset} bypassProcessing={bypassProcessing}
+      accentColor={accentColor} accentColorAlpha={accentColorAlpha}
+      warm={warm} isAdmin={isAdmin}
+      onQualityChange={onQualityChange} onEqPresetChange={onEqPresetChange}
+      onBypassToggle={onBypassToggle}
+    />
   ) : null;
 
-  const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
-  const MOOD_OPTIONS = [
-    { id: "chill", label: "Chill", icon: (c: string) => <IconMoodChill size={18} color={c} /> },
-    { id: "energy", label: "Energy", icon: (c: string) => <IconMoodEnergy size={18} color={c} /> },
-    { id: "focus", label: "Focus", icon: (c: string) => <IconMoodFocus size={18} color={c} /> },
-    { id: "romance", label: "Romance", icon: (c: string) => <IconMoodRomance size={18} color={c} /> },
-    { id: "melancholy", label: "Melancholy", icon: (c: string) => <IconMoodMelancholy size={18} color={c} /> },
-    { id: "party", label: "Party", icon: (c: string) => <IconMoodParty size={18} color={c} /> },
-  ];
-
-  // ─── LUXURY FEATURES PANEL ─────────────────────────────
-  const luxuryPanel = (warm: boolean) => {
-    const panelBg = warm
-      ? "linear-gradient(180deg, rgba(40, 25, 15, 0.78), rgba(28, 18, 12, 0.72))"
-      : "linear-gradient(180deg, rgba(124, 77, 255, 0.08), rgba(32, 24, 50, 0.28))";
-    const panelBorder = warm
-      ? "1px solid rgba(255, 213, 79, 0.18)"
-      : "1px solid rgba(179, 136, 255, 0.12)";
-    const labelColor = warm ? "#c8a882" : "#bca8ff";
-    const activeGrad = warm
-      ? "linear-gradient(135deg, rgba(255,109,0,0.35), rgba(255,213,79,0.24))"
-      : `linear-gradient(135deg, ${accentColor}, #e040fb)`;
-    const inactiveBg = warm ? "rgba(255, 213, 79, 0.05)" : "rgba(124, 77, 255, 0.07)";
-    const textColor = warm ? "#fef0e0" : "var(--tg-theme-text-color, #eee)";
-    const hlColor = warm ? "#ffd54f" : accentColor;
-
-    return (
-      <div style={{
-        marginTop: 14,
-        padding: warm ? "14px 14px 12px" : "14px",
-        borderRadius: 22,
-        display: "flex",
-        flexDirection: "column",
-        gap: 14,
-        background: panelBg,
-        border: panelBorder,
-        backdropFilter: "blur(18px)",
-        WebkitBackdropFilter: "blur(18px)",
-      }}>
-        {/* Quick Toggles Row */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          {/* Spectrum Visualizer toggle */}
-          <button onClick={onToggleSpectrum} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: showSpectrum ? `1px solid ${hlColor}` : panelBorder,
-            background: showSpectrum ? activeGrad : inactiveBg,
-            color: showSpectrum ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconSpectrum size={14} color={showSpectrum ? "#fff" : hlColor} /> Спектр
-          </button>
-
-          {/* Bass Boost toggle */}
-          <button onClick={() => onBassBoost?.(!bassBoost)} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: bassBoost ? `1px solid ${hlColor}` : panelBorder,
-            background: bassBoost ? activeGrad : inactiveBg,
-            color: bassBoost ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconBassBoost size={14} color={bassBoost ? "#fff" : hlColor} /> Bass+
-          </button>
-
-          {/* Party Mode */}
-          <button onClick={() => onPartyMode?.(!partyMode)} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: partyMode ? `1px solid ${hlColor}` : panelBorder,
-            background: partyMode
-              ? "linear-gradient(135deg, #ff6d00, #e040fb)"
-              : inactiveBg,
-            color: partyMode ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-            animation: partyMode ? "partyPulse 1.5s ease-in-out infinite" : "none",
-          }}>
-            <IconParty size={14} color={partyMode ? "#fff" : hlColor} /> Party
-          </button>
-        </div>
-
-        {/* Luxury Audio Toggles */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          <button onClick={() => onTapeWarmth?.(!tapeWarmth)} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: tapeWarmth ? `1px solid ${hlColor}` : panelBorder,
-            background: tapeWarmth ? (warm ? "linear-gradient(135deg, #ff8f00, #ffb300)" : activeGrad) : inactiveBg,
-            color: tapeWarmth ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconFire size={14} color={tapeWarmth ? "#fff" : hlColor} /> Warmth
-          </button>
-          <button onClick={() => onAirBand?.(!airBand)} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: airBand ? `1px solid ${hlColor}` : panelBorder,
-            background: airBand ? activeGrad : inactiveBg,
-            color: airBand ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconHiRes size={14} color={airBand ? "#fff" : hlColor} /> Air
-          </button>
-          <button onClick={() => onStereoWiden?.(!stereoWiden)} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: stereoWiden ? `1px solid ${hlColor}` : panelBorder,
-            background: stereoWiden ? activeGrad : inactiveBg,
-            color: stereoWiden ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconSpatial size={14} color={stereoWiden ? "#fff" : hlColor} /> Wide
-          </button>
-          <button onClick={() => onSoftClip?.(!softClip)} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: softClip ? `1px solid ${hlColor}` : panelBorder,
-            background: softClip ? activeGrad : inactiveBg,
-            color: softClip ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconMood size={14} color={softClip ? "#fff" : hlColor} /> Limiter
-          </button>
-        </div>
-
-        {/* Pro Audio Effects */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          <button onClick={() => { haptic("medium"); onNightMode?.(!nightMode); }} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: nightMode ? `1px solid ${hlColor}` : panelBorder,
-            background: nightMode ? (warm ? "linear-gradient(135deg, #1a237e, #283593)" : "linear-gradient(135deg, #1a237e, #4527a0)") : inactiveBg,
-            color: nightMode ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconMoon size={14} color={nightMode ? "#fff" : hlColor} /> Night
-          </button>
-          <button onClick={() => { haptic("medium"); onReverb?.(!reverbEnabled); }} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: reverbEnabled ? `1px solid ${hlColor}` : panelBorder,
-            background: reverbEnabled ? activeGrad : inactiveBg,
-            color: reverbEnabled ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconSpatial size={14} color={reverbEnabled ? "#fff" : hlColor} /> Room
-          </button>
-          <button onClick={() => { haptic("medium"); onKaraokeMode?.(!karaokeMode); }} style={{
-            padding: "8px 14px", borderRadius: 16,
-            border: karaokeMode ? `1px solid ${hlColor}` : panelBorder,
-            background: karaokeMode ? (warm ? "linear-gradient(135deg, #ff6d00, #ff9100)" : "linear-gradient(135deg, #e040fb, #7c4dff)") : inactiveBg,
-            color: karaokeMode ? "#fff" : textColor,
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "inline-flex", alignItems: "center", gap: 6,
-          }}>
-            <IconMic size={14} color={karaokeMode ? "#fff" : hlColor} /> Karaoke
-          </button>
-        </div>
-
-        {/* Room Reverb Settings (when active) */}
-        {reverbEnabled && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 0" }}>
-            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-              {(["studio", "concert", "club", "cathedral"] as const).map(preset => {
-                const labels = { studio: "Studio", concert: "Concert", club: "Club", cathedral: "Cathedral" };
-                const active = reverbPreset === preset;
-                return (
-                  <button key={preset} onClick={() => { haptic("light"); onReverbPreset?.(preset); }} style={{
-                    padding: "5px 10px", borderRadius: 12,
-                    border: active ? `1px solid ${hlColor}` : panelBorder,
-                    background: active ? activeGrad : inactiveBg,
-                    color: active ? "#fff" : textColor,
-                    fontSize: 10, fontWeight: 600, cursor: "pointer",
-                  }}>
-                    {labels[preset]}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 10, color: labelColor, fontWeight: 600, minWidth: 28 }}>DRY</span>
-              <input
-                type="range" min={0} max={100} step={5}
-                value={Math.round(reverbMix * 100)}
-                onInput={(e) => { onReverbMix?.(Number((e.target as HTMLInputElement).value) / 100); }}
-                style={{ flex: 1, height: 4, accentColor: hlColor, cursor: "pointer" }}
-              />
-              <span style={{ fontSize: 10, color: labelColor, fontWeight: 600, minWidth: 28 }}>WET</span>
-            </div>
-          </div>
-        )}
-
-        {/* Crossfade Duration */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
-              <IconWave size={14} color={labelColor} /> Crossfade
-            </div>
-            <span style={{ fontSize: 10, color: labelColor, fontVariantNumeric: "tabular-nums" }}>
-              {crossfadeDuration === 0 ? "OFF" : `${crossfadeDuration}s`}
-            </span>
-          </div>
-          <input
-            type="range" min={0} max={12} step={1}
-            value={crossfadeDuration}
-            onInput={(e) => { haptic("light"); onCrossfadeDuration?.(Number((e.target as HTMLInputElement).value)); }}
-            style={{ width: "100%", height: 4, accentColor: hlColor, cursor: "pointer" }}
-          />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: labelColor, opacity: 0.7 }}>
-            <span>OFF</span><span>12 сек</span>
-          </div>
-        </div>
-
-        {/* Cover Mode Selector */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
-            💿 Cover Style
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {(["default", "vinyl", "cd", "case"] as const).map(mode => {
-              const labels = { default: "Обложка", vinyl: "Винил", cd: "CD", case: "Кейс" };
-              const icons = { default: "🖼", vinyl: "🎵", cd: "💿", case: "📀" };
-              const active = coverMode === mode;
-              return (
-                <button key={mode} onClick={() => { haptic("light"); onCoverMode?.(mode); }} style={{
-                  flex: 1, padding: "5px 4px", borderRadius: 10, fontSize: 10, fontWeight: 600, cursor: "pointer",
-                  border: active ? `1px solid ${hlColor}` : panelBorder,
-                  background: active ? activeGrad : inactiveBg,
-                  color: active ? "#fff" : textColor,
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-                }}>
-                  <span style={{ fontSize: 14 }}>{icons[mode]}</span>
-                  {labels[mode]}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 3D Spatial Panner */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
-              <IconSpatial size={14} color={labelColor} /> 3D Spatial
-            </div>
-            <span style={{ fontSize: 10, color: labelColor, fontVariantNumeric: "tabular-nums" }}>
-              {panValue === 0 ? "Center" : panValue < 0 ? `L ${Math.abs(Math.round(panValue * 100))}%` : `R ${Math.round(panValue * 100)}%`}
-            </span>
-          </div>
-          <input
-            type="range" min={-1} max={1} step={0.01}
-            value={panValue}
-            onInput={(e) => onPanChange?.(Number((e.target as HTMLInputElement).value))}
-            style={{ width: "100%", height: 4, accentColor: hlColor, cursor: "pointer" }}
-          />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: labelColor, opacity: 0.7 }}>
-            <span>◀ Left</span><span>Right ▶</span>
-          </div>
-        </div>
-
-        {/* Playback Speed */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
-            <IconSpeed size={14} color={labelColor} /> Скорость
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
-            {SPEED_OPTIONS.map((s) => {
-              const active = playbackSpeed === s;
-              return (
-                <button
-                  key={s}
-                  onClick={() => { haptic("light"); onSpeedChange?.(s); }}
-                  style={{
-                    padding: "7px 4px", borderRadius: 12,
-                    border: active ? `1px solid ${hlColor}` : panelBorder,
-                    background: active ? activeGrad : inactiveBg,
-                    color: active ? "#fff" : textColor,
-                    fontSize: 11, fontWeight: active ? 700 : 500,
-                    cursor: "pointer",
-                  }}
-                >
-                  {s}x
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Mood Filter for AI Wave */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: labelColor, display: "flex", alignItems: "center", gap: 6 }}>
-            <IconMood size={14} color={labelColor} /> Настроение
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-            {MOOD_OPTIONS.map((m) => {
-              const active = moodFilter === m.id;
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => { haptic("light"); onMoodChange?.(active ? null : m.id); }}
-                  style={{
-                    padding: "8px 6px", borderRadius: 14,
-                    border: active ? `1px solid ${hlColor}` : panelBorder,
-                    background: active ? activeGrad : inactiveBg,
-                    color: active ? "#fff" : textColor,
-                    fontSize: 12, fontWeight: active ? 700 : 500,
-                    cursor: "pointer",
-                    display: "flex", flexDirection: "column",
-                    alignItems: "center", gap: 2,
-                  }}
-                >
-                  {m.icon(active ? "#fff" : textColor)}
-                  <span style={{ fontSize: 10 }}>{m.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Hi-Res Badge */}
-        {(quality === "320" || quality === "auto") && (
-          <div style={{
-            display: "flex", justifyContent: "center", gap: 8, marginTop: 2,
-          }}>
-            <span style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              padding: "5px 12px", borderRadius: 999,
-              fontSize: 10, fontWeight: 700, letterSpacing: 1,
-              color: warm ? "#ffd54f" : "#b388ff",
-              background: warm ? "rgba(255, 213, 79, 0.08)" : "rgba(124, 77, 255, 0.08)",
-              border: warm ? "1px solid rgba(255, 213, 79, 0.15)" : "1px solid rgba(179, 136, 255, 0.15)",
-              textTransform: "uppercase",
-            }}>
-              <IconHiRes size={14} color={warm ? "#ffd54f" : "#b388ff"} />
-              HI-RES AUDIO · {quality === "320" ? "320kbps" : "ADAPTIVE"}
-            </span>
-          </div>
-        )}
-      </div>
-    );
-  };
+  const luxuryPanel = (warm: boolean) => (
+    <LuxuryPanel
+      warm={warm} accentColor={accentColor}
+      showSpectrum={showSpectrum} onToggleSpectrum={onToggleSpectrum}
+      bassBoost={bassBoost} onBassBoost={onBassBoost}
+      partyMode={partyMode} onPartyMode={onPartyMode}
+      tapeWarmth={tapeWarmth} onTapeWarmth={onTapeWarmth}
+      airBand={airBand} onAirBand={onAirBand}
+      stereoWiden={stereoWiden} onStereoWiden={onStereoWiden}
+      softClip={softClip} onSoftClip={onSoftClip}
+      nightMode={nightMode} onNightMode={onNightMode}
+      reverbEnabled={reverbEnabled} onReverb={onReverb}
+      reverbPreset={reverbPreset} onReverbPreset={onReverbPreset}
+      reverbMix={reverbMix} onReverbMix={onReverbMix}
+      karaokeMode={karaokeMode} onKaraokeMode={onKaraokeMode}
+      crossfadeDuration={crossfadeDuration} onCrossfadeDuration={onCrossfadeDuration}
+      coverMode={coverMode} onCoverMode={onCoverMode}
+      panValue={panValue} onPanChange={onPanChange}
+      playbackSpeed={playbackSpeed} onSpeedChange={onSpeedChange}
+      moodFilter={moodFilter} onMoodChange={onMoodChange}
+      quality={quality}
+    />
+  );
 
   // ─── TEQUILA LUXURY THEME ───────────────────────────────
   if (isTequila) {
@@ -1499,7 +1047,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           style={{
             position: "relative", width: 240, height: 240, margin: "0 auto",
             borderRadius: isRound ? "50%" : 20,
-            background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : "linear-gradient(135deg, #7c4dff 0%, #e040fb 100%)",
+            background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : `linear-gradient(135deg, ${accentColor} 0%, ${accentColorAlpha} 100%)`,
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 64,
             boxShadow: track ? (isRound ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 2px ${accentColor}, 0 0 0 4px rgba(26,26,46,0.8), 0 0 0 5px ${accentColorAlpha}` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
             overflow: "hidden",

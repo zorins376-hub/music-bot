@@ -454,7 +454,7 @@ export function App() {
     audio.addEventListener("canplay", onBufferingClear);
     audio.addEventListener("error", onError);
 
-    audio.addEventListener("ended", async () => {
+    const onEnded = async () => {
       // DJ crossfade already handled the transition — skip double-advance
       if (djCrossfadeActiveRef.current) return;
 
@@ -503,8 +503,8 @@ export function App() {
 
       if (!isLastTrack) autoplayCountRef.current = 0;
       sendAction("next").then(setState).catch(() => {});
-    });
-    audio.addEventListener("timeupdate", () => {
+    };
+    const onTimeUpdate = () => {
       const t = Math.floor(audio.currentTime);
       elapsedRef.current = t;
       setElapsed(t);
@@ -597,10 +597,10 @@ export function App() {
           }
         }
       }
-    });
+    };
 
     // Update duration from audio metadata if track has no duration
-    audio.addEventListener("loadedmetadata", () => {
+    const onLoadedMetadata = () => {
       updatePositionState();
       if (audio.duration && isFinite(audio.duration)) {
         const realDuration = Math.floor(audio.duration);
@@ -621,7 +621,11 @@ export function App() {
           return prev;
         });
       }
-    });
+    };
+
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("loadedmetadata", onLoadedMetadata);
 
     return () => {
       audio.removeEventListener("playing", updatePositionState);
@@ -632,6 +636,17 @@ export function App() {
       audio.removeEventListener("playing", onPlaying);
       audio.removeEventListener("canplay", onBufferingClear);
       audio.removeEventListener("error", onError);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      if (loudnessTimerRef.current) {
+        clearInterval(loudnessTimerRef.current);
+        loudnessTimerRef.current = null;
+      }
+      if (bufferingTimeoutRef.current) {
+        clearTimeout(bufferingTimeoutRef.current);
+        bufferingTimeoutRef.current = null;
+      }
       audio.pause();
       audio.src = "";
       preload.src = "";
@@ -2188,9 +2203,9 @@ export function App() {
                 height: 34,
                 borderRadius: 999,
                 color: theme.id === "tequila" ? "#1a120b" : "#fff",
-                background: theme.id === "tequila" ? "linear-gradient(135deg, #ffb300, #ffd54f)" : "linear-gradient(135deg, #7c4dff, #e040fb)",
-                border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
-                boxShadow: theme.id === "tequila" ? "0 6px 18px rgba(255, 179, 0, 0.22)" : "0 6px 18px rgba(124, 77, 255, 0.22)",
+                background: `linear-gradient(135deg, ${theme.visualizerGradient[0]}, ${theme.visualizerGradient[1]})`,
+                border: `1px solid ${theme.accentAlpha}`,
+                boxShadow: `0 6px 18px ${theme.accentAlpha}`,
               }}
             >
               <IconCrown size={16} color={theme.id === "tequila" ? "#1a120b" : "#fff"} />
@@ -2207,9 +2222,9 @@ export function App() {
                 height: 34,
                 borderRadius: 999,
                 color: theme.id === "tequila" ? "#1a120b" : "#fff",
-                background: theme.id === "tequila" ? "linear-gradient(135deg, #ff6d00, #ffd54f)" : "linear-gradient(135deg, #5e35b1, #7c4dff)",
-                border: theme.id === "tequila" ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
-                boxShadow: theme.id === "tequila" ? "0 6px 18px rgba(255, 109, 0, 0.2)" : "0 6px 18px rgba(94, 53, 177, 0.24)",
+                background: `linear-gradient(135deg, ${theme.accent}, ${theme.visualizerGradient[0]})`,
+                border: `1px solid ${theme.accentAlpha}`,
+                boxShadow: `0 6px 18px ${theme.accentAlpha}`,
               }}
             >
               <IconShield size={16} color={theme.id === "tequila" ? "#1a120b" : "#fff"} />
@@ -2425,9 +2440,7 @@ export function App() {
               maxWidth: 400,
               width: "100%",
               backdropFilter: "blur(24px)",
-              boxShadow: isTequila
-                ? "0 24px 60px rgba(255,109,0,0.2)"
-                : "0 24px 60px rgba(124,77,255,0.22)",
+              boxShadow: `0 24px 60px ${theme.accentAlpha}`,
               marginBottom: 20,
             }}>
               {/* Rocket Icon */}
@@ -2435,16 +2448,12 @@ export function App() {
                 width: 80,
                 height: 80,
                 borderRadius: "50%",
-                background: isTequila
-                  ? "linear-gradient(135deg, #ff6d00, #ffb300)"
-                  : "linear-gradient(135deg, #7c4dff, #a855f7)",
+                background: `linear-gradient(135deg, ${theme.visualizerGradient[0]}, ${theme.visualizerGradient[1]})`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 margin: "0 auto 20px",
-                boxShadow: isTequila
-                  ? "0 16px 40px rgba(255,109,0,0.4)"
-                  : "0 16px 40px rgba(124,77,255,0.45)",
+                boxShadow: `0 16px 40px ${theme.accentAlpha}`,
               }}>
                 <IconRocket size={40} color="#fff" />
               </div>

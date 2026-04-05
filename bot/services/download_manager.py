@@ -193,6 +193,15 @@ class DownloadManager:
                 self._active_count -= 1
                 await self._maybe_scale_down()
 
+    def _resize_pool(self, new_size: int) -> None:
+        """Recreate thread pool with a new worker count (avoids _max_workers hack)."""
+        old_pool = self._pool
+        self._pool = ThreadPoolExecutor(
+            max_workers=new_size, thread_name_prefix="dl"
+        )
+        self._current_workers = new_size
+        old_pool.shutdown(wait=False)
+
     async def _maybe_scale_up(self) -> None:
         """Grow thread pool if queue is building up."""
         now = time.monotonic()
@@ -203,11 +212,11 @@ class DownloadManager:
         pending = self._queue_depth
         if pending > self._current_workers and self._current_workers < MAX_WORKERS:
             new_size = min(self._current_workers + 2, MAX_WORKERS)
-            self._pool._max_workers = new_size
-            self._current_workers = new_size
+            old_size = self._current_workers
+            self._resize_pool(new_size)
             logger.info(
                 "Auto-scale UP: workers %d → %d (queue=%d, active=%d)",
-                self._current_workers - 2, new_size, pending, self._active_count,
+                old_size, new_size, pending, self._active_count,
             )
 
     async def _maybe_scale_down(self) -> None:
@@ -222,8 +231,7 @@ class DownloadManager:
             and self._queue_depth == 0
             and self._current_workers > MIN_WORKERS
         ):
-            self._pool._max_workers = MIN_WORKERS
-            self._current_workers = MIN_WORKERS
+            self._resize_pool(MIN_WORKERS)
             logger.info("Auto-scale DOWN: workers → %d", MIN_WORKERS)
 
     @staticmethod

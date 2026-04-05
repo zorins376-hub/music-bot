@@ -14,7 +14,7 @@ class SponsoredCampaign(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracks.id"))
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"))
     budget_stars: Mapped[int] = mapped_column(Integer, default=0)
     spent_stars: Mapped[int] = mapped_column(Integer, default=0)
     impressions_total: Mapped[int] = mapped_column(Integer, default=0)
@@ -32,7 +32,7 @@ class SponsoredEvent(Base):
     __tablename__ = "sponsored_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("sponsored_campaigns.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("sponsored_campaigns.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[int] = mapped_column(BigInteger)
     event_type: Mapped[str] = mapped_column(String(20))  # impression, click
     created_at: Mapped[datetime] = mapped_column(

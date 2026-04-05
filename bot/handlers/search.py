@@ -169,12 +169,14 @@ async def _get_bot_setting(key: str, default: str) -> str:
 
 # session_id → {chat_id, user_msg_id, status_msg_id, created_at}
 _group_sessions: dict[str, dict] = {}
+_group_sessions_lock = asyncio.Lock()
 
 
 async def _schedule_group_cleanup(bot, session_id: str) -> None:
     """Delete search messages in group if no track selected within timeout."""
     await asyncio.sleep(_GROUP_CLEANUP_SEC)
-    info = _group_sessions.pop(session_id, None)
+    async with _group_sessions_lock:
+        info = _group_sessions.pop(session_id, None)
     if not info:
         return
     for mid in (info.get("status_msg_id"), info.get("user_msg_id")):
@@ -187,7 +189,8 @@ async def _schedule_group_cleanup(bot, session_id: str) -> None:
 
 async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> None:
     """After track is selected in group: delete original message + search results."""
-    info = _group_sessions.pop(session_id, None)
+    async with _group_sessions_lock:
+        info = _group_sessions.pop(session_id, None)
     # Delete the search results message (the inline keyboard message)
     try:
         await results_msg.delete()
@@ -407,9 +410,11 @@ async def _do_search(message: Message, query: str) -> None:
         _search_source("vk", search_vk, max_results),
         _search_source("youtube", _search_yt, max_results),
     ]
-    source_results = await asyncio.gather(*tasks)
+    source_results = await asyncio.gather(*tasks, return_exceptions=True)
     all_results: list[dict] = []
     for batch in source_results:
+        if isinstance(batch, BaseException):
+            continue
         all_results.extend(batch)
 
     # A-05: If few results and query is mono-language, try transliterated search
@@ -425,8 +430,10 @@ async def _do_search(message: Message, query: str) -> None:
                 _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
                 _search_source("yandex", lambda q, limit=5: search_yandex(alt_query, limit=limit), max_results),
             ]
-            alt_results = await asyncio.gather(*alt_tasks)
+            alt_results = await asyncio.gather(*alt_tasks, return_exceptions=True)
             for batch in alt_results:
+                if isinstance(batch, BaseException):
+                    continue
                 all_results.extend(batch)
 
     # Merge local + external results, then deduplicate

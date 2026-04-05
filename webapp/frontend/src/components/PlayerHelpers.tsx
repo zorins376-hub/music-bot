@@ -157,7 +157,7 @@ export function AudioBadge({ label, active, warm = false }: { label: string; act
       color: warm ? (active ? "#1a120b" : "#ffd54f") : (active ? "#fff" : "#d1c4e9"),
       background: warm
         ? (active ? "linear-gradient(135deg, #ffb300, #ffd54f)" : "rgba(255, 213, 79, 0.08)")
-        : (active ? "linear-gradient(135deg, #7c4dff, #e040fb)" : "rgba(124, 77, 255, 0.12)"),
+        : (active ? "linear-gradient(135deg, var(--theme-accent, #7c4dff), #e040fb)" : "rgba(124, 77, 255, 0.12)"),
       border: warm ? "1px solid rgba(255, 213, 79, 0.22)" : "1px solid rgba(179, 136, 255, 0.22)",
       textTransform: "uppercase",
     }}>{label}</span>

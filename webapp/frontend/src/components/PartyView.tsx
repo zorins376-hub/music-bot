@@ -7,6 +7,7 @@ import {
 } from "../api";
 import { IconMusic, IconSpinner, IconSearch, IconPlus, IconUsers, IconTV, IconHeadphones, IconUpload, IconSparkles, IconRobot, IconSave, IconFlag, IconTrophy, IconFire, IconHeartFilled, IconBolt, IconDisco, IconPicture, IconClipboard, IconClock, IconClose, IconParty, IconSync } from "./Icons";
 import { showToast as globalToast } from "./Toast";
+import { getThemeById } from "../themes";
 
 interface Props {
   userId: number;
@@ -598,13 +599,14 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
       .replace(/'/g, "&apos;");
     const topArtist = recap.top_artists[0]?.label || "Party vibe";
     const topContributor = recap.top_contributors[0]?.label || "Your crew";
+    const svgTheme = getThemeById(themeId);
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600" viewBox="0 0 1200 1600">
         <defs>
           <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#7c4dff"/>
-            <stop offset="55%" stop-color="#311b92"/>
-            <stop offset="100%" stop-color="#ff9100"/>
+            <stop offset="0%" stop-color="${svgTheme.accent}"/>
+            <stop offset="55%" stop-color="${svgTheme.bgColor}"/>
+            <stop offset="100%" stop-color="${svgTheme.visualizerGradient[1]}"/>
           </linearGradient>
         </defs>
         <rect width="1200" height="1600" rx="56" fill="url(#bg)"/>

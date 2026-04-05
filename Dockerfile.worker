@@ -1,23 +1,39 @@
 # Dockerfile для parser + streamer (Pyrogram + pytgcalls + librosa)
 # Используется когда раскомментируешь parser/streamer в docker-compose.yml
+
+# ── Stage 1: Build (gcc needed for C extensions) ─────────────────────────
+FROM python:3.12-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1-dev \
+    libffi-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY requirements.worker.txt requirements.txt ./
+RUN pip install --no-cache-dir --prefix=/install -r requirements.worker.txt
+
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
-    libffi-dev \
-    gcc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Сначала тяжёлые зависимости — кэшируются отдельным слоем
-COPY requirements.worker.txt requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.worker.txt
+COPY --from=builder /install /usr/local
 
 COPY . .
 
 RUN mkdir -p /app/data /app/downloads /app/logs /app/sessions
+
+# Non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 # CMD переопределяется в docker-compose.yml:
 #   parser:   python -m parser.channel_parser

@@ -27,7 +27,7 @@ class PromoActivation(Base):
     __table_args__ = (UniqueConstraint("promo_id", "user_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    promo_id: Mapped[int] = mapped_column(Integer, ForeignKey("promo_codes.id"))
+    promo_id: Mapped[int] = mapped_column(Integer, ForeignKey("promo_codes.id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(BigInteger)
     activated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

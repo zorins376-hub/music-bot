@@ -76,6 +76,7 @@ export const SearchBar = memo(function SearchBar({ onSelect, accentColor = "var(
           onInput={handleInput}
           onKeyDown={(e) => { if (e.key === "Enter") { if (debounceRef.current) clearTimeout(debounceRef.current); doSearch(); } }}
           placeholder="Поиск треков..."
+          aria-label="Поиск треков"
           style={{
             flex: 1,
             padding: isTequila ? "10px 16px" : "8px 14px",
@@ -91,6 +92,7 @@ export const SearchBar = memo(function SearchBar({ onSelect, accentColor = "var(
         <button
           onClick={() => doSearch()}
           disabled={loading}
+          aria-label={loading ? "Загрузка" : "Найти"}
           style={{
             padding: isTequila ? "8px 18px" : "8px 16px",
             borderRadius: 14,

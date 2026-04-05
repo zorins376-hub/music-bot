@@ -463,7 +463,7 @@ export const ForYouView = memo(function ForYouView({
         {[
           { mood: "chill", label: "Chill", gradient: "linear-gradient(135deg, #00bcd4, #26c6da)" },
           { mood: "energy", label: "Энергия", gradient: "linear-gradient(135deg, #ff5722, #ff9800)" },
-          { mood: "focus", label: "Фокус", gradient: "linear-gradient(135deg, #7c4dff, #b388ff)" },
+          { mood: "focus", label: "Фокус", gradient: `linear-gradient(135deg, ${accentColor}, ${theme.accentAlpha})` },
           { mood: "romance", label: "Романтика", gradient: "linear-gradient(135deg, #e91e63, #f48fb1)" },
           { mood: "party", label: "Party", gradient: "linear-gradient(135deg, #ffc107, #ff6d00)" },
           { mood: "melancholy", label: "Грусть", gradient: "linear-gradient(135deg, #546e7a, #90a4ae)" },
@@ -952,7 +952,7 @@ export const ForYouView = memo(function ForYouView({
           {[
             { tag: "indie", label: "Indie", grad: "linear-gradient(135deg, #43a047, #66bb6a)" },
             { tag: "hip-hop", label: "Hip-Hop", grad: "linear-gradient(135deg, #ff6f00, #ffa726)" },
-            { tag: "electronic", label: "Electronic", grad: "linear-gradient(135deg, #7c4dff, #b388ff)" },
+            { tag: "electronic", label: "Electronic", grad: `linear-gradient(135deg, ${accentColor}, ${theme.accentAlpha})` },
             { tag: "rock", label: "Rock", grad: "linear-gradient(135deg, #d32f2f, #ef5350)" },
             { tag: "jazz", label: "Jazz", grad: "linear-gradient(135deg, #1565c0, #42a5f5)" },
             { tag: "classical", label: "Classical", grad: "linear-gradient(135deg, #5d4037, #8d6e63)" },

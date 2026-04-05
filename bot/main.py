@@ -152,10 +152,10 @@ async def on_startup(bot: Bot) -> None:
         await start_heartbeat_loop(app_settings.NODE_ID)
 
     # One-time welcome broadcast for existing users
-    asyncio.create_task(_broadcast_welcome(bot))
+    _fire_task(_broadcast_welcome(bot))
 
     # One-time version broadcast for existing users after deploy
-    asyncio.create_task(_broadcast_version_update(bot))
+    _fire_task(_broadcast_version_update(bot))
 
     # Register bot commands for private chats
     private_commands = [
@@ -451,7 +451,7 @@ async def main() -> None:
         await _run_webhook(bot, dp)
     else:
         # Always start TMA webapp alongside polling (serves frontend + API)
-        tma_task = asyncio.create_task(_run_tma_server())
+        tma_task = _fire_task(_run_tma_server())
         try:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
         finally:

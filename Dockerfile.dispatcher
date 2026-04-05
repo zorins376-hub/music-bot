@@ -9,4 +9,9 @@ COPY bot/ bot/
 COPY recommender/ recommender/
 COPY mixer/ mixer/
 
+# Non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 CMD ["python", "-m", "bot.dispatcher_bot"]

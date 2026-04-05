@@ -71,9 +71,14 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
         _safe(search_spotify(query, limit=3)),
         _safe(search_vk(query, limit=3)),
         _safe(search_tracks(query, max_results=5)),
+        return_exceptions=True,
     )
 
-    all_results = (local_res or []) + (ym_res or []) + (sp_res or []) + (vk_res or []) + (yt_res or [])
+    all_results = []
+    for r in (local_res, ym_res, sp_res, vk_res, yt_res):
+        if isinstance(r, BaseException) or r is None:
+            continue
+        all_results.extend(r)
     script = detect_script(query)
     results_data = deduplicate_results(all_results, lang_hint=script, query=query)[:10]
 

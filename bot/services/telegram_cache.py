@@ -45,7 +45,7 @@ def _read_id3_tags(mp3_path: Path) -> dict:
         duration = int(audio.info.length) if audio.info else None
         return {"title": title, "artist": artist, "duration": duration}
     except Exception:
-        pass
+        logger.debug("ID3 read (mutagen.mp3) failed for %s", mp3_path, exc_info=True)
     try:
         from mutagen import File
         f = File(str(mp3_path), easy=True)
@@ -55,7 +55,7 @@ def _read_id3_tags(mp3_path: Path) -> dict:
             duration = int(f.info.length) if f and f.info else None
             return {"title": title, "artist": artist, "duration": duration}
     except Exception:
-        pass
+        logger.debug("ID3 read (mutagen.File) failed for %s", mp3_path, exc_info=True)
     return {}
 
 
@@ -107,7 +107,7 @@ async def upload_to_cache(
                     from bot.services.cache import cache
                     await cache.set_file_id(source_id, file_id)
                 except Exception:
-                    pass
+                    logger.debug("Redis cache set failed for %s", source_id, exc_info=True)
                 logger.info("Cached %s to Telegram CDN (file_id=%s...)", source_id, file_id[:20])
             return file_id
         except Exception as e:
@@ -143,7 +143,7 @@ async def get_file_id(source_id: str) -> str | None:
         if fid:
             return fid
     except Exception:
-        pass
+        logger.debug("Redis get_file_id failed for %s", source_id, exc_info=True)
     # Fallback to DB
     try:
         from bot.models.base import async_session
@@ -159,10 +159,10 @@ async def get_file_id(source_id: str) -> str | None:
                     from bot.services.cache import cache as _c
                     await _c.set_file_id(source_id, row)
                 except Exception:
-                    pass
+                    logger.debug("Redis cache warm failed for %s", source_id, exc_info=True)
                 return row
     except Exception:
-        pass
+        logger.debug("DB get_file_id failed for %s", source_id, exc_info=True)
     return None
 
 
