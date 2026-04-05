@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import type { EqPreset } from "../api";
 
 // --- Haptic Feedback Helper ---
@@ -215,6 +215,28 @@ export function WaveformSeek({ elapsed, duration, accentColor, onSeek }: {
 
   const progress = duration > 0 ? elapsed / duration : 0;
 
+  // Detect if accent color is too dark/gray — ensure filled bars are always visible
+  const filledColor = useMemo(() => {
+    const m = accentColor.match(/\d+/g);
+    if (!m || m.length < 3) return accentColor;
+    const [r, g, b] = m.map(Number);
+    // Perceived luminance
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+    // Saturation check — gray has r≈g≈b
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    // If too dark or too desaturated, boost it
+    if (lum < 100 || (sat < 0.25 && lum < 160)) {
+      // Lighten by blending toward white
+      const boost = Math.max(0.5, (140 - lum) / 140);
+      const nr = Math.round(r + (255 - r) * boost);
+      const ng = Math.round(g + (255 - g) * boost);
+      const nb = Math.round(b + (255 - b) * boost);
+      return `rgb(${nr}, ${ng}, ${nb})`;
+    }
+    return accentColor;
+  }, [accentColor]);
+
   const handleClick = (e: MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect || duration <= 0) return;
@@ -245,7 +267,7 @@ export function WaveformSeek({ elapsed, duration, accentColor, onSeek }: {
               flex: 1,
               height: `${h * 100}%`,
               borderRadius: 2,
-              background: filled ? accentColor : "rgba(255,255,255,0.15)",
+              background: filled ? filledColor : "rgba(255,255,255,0.15)",
               transition: "background 0.15s ease",
             }}
           />
