@@ -17,14 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # deno (JS-рантайм для yt-dlp signature solving) — pinned version + SHA256 verify
 ENV DENO_VERSION=2.7.11
 RUN set -eux; \
-    curl -fsSL -o /tmp/deno.zip \
+    cd /tmp; \
+    curl -fsSL -o deno-x86_64-unknown-linux-gnu.zip \
       "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip"; \
-    curl -fsSL -o /tmp/deno.zip.sha256sum \
+    curl -fsSL -o deno.sha256 \
       "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip.sha256sum"; \
-    cd /tmp && sha256sum -c deno.zip.sha256sum; \
-    unzip -o /tmp/deno.zip -d /usr/local/bin; \
+    sha256sum -c deno.sha256; \
+    unzip -o deno-x86_64-unknown-linux-gnu.zip -d /usr/local/bin; \
     chmod +x /usr/local/bin/deno; \
-    rm /tmp/deno.zip /tmp/deno.zip.sha256sum; \
+    rm -f deno-x86_64-unknown-linux-gnu.zip deno.sha256; \
     deno --version
 
 # Remove curl/unzip no longer needed at runtime
