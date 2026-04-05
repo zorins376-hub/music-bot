@@ -64,12 +64,15 @@ export const ActivityFeedView = memo(function ActivityFeedView({
     else if (vid.startsWith("sp_")) src = "spotify";
     else if (vid.startsWith("dz_")) src = "deezer";
     else if (vid.startsWith("vk_")) src = "vk";
+    const dur = item.duration || 0;
+    const mins = Math.floor(dur / 60);
+    const secs = dur % 60;
     const track: Track = {
       video_id: vid,
       title: item.track_title,
       artist: item.track_artist,
-      duration: 0,
-      duration_fmt: "0:00",
+      duration: dur,
+      duration_fmt: `${mins}:${secs < 10 ? "0" : ""}${secs}`,
       source: src,
       cover_url: item.cover_url,
     };

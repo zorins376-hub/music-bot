@@ -60,8 +60,9 @@ async def ingest_event(body: IngestEventRequest, user: dict = Depends(get_curren
             source=body.source,
             listen_duration=body.listen_duration,
         )
-    except Exception:
-        pass  # DB errors should never block ingestion
+    except Exception as exc:
+        import logging
+        logging.getLogger("webapp.ingest").warning("ingest DB error user=%s: %s", user_id, exc)
 
     # --- Gamification: award XP for like/dislike (play XP handled in record_listening_event) ---
     try:

@@ -2001,6 +2001,7 @@ async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_us
                 Track.artist,
                 Track.source_id,
                 Track.cover_url,
+                Track.duration,
                 User.first_name,
                 User.username,
             )
@@ -2027,6 +2028,7 @@ async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_us
         if not cover and sid:
             covers_to_resolve.append((len(feed), sid, src, row.title, row.artist))
 
+        dur = row.duration or 0
         feed.append({
             "user_id": row.user_id,
             "user_name": row.first_name or row.username or "User",
@@ -2035,6 +2037,7 @@ async def get_activity_feed(limit: int = 30, user: dict = Depends(get_current_us
             "video_id": sid,
             "cover_url": cover,
             "played_at": row.created_at.isoformat() if row.created_at else None,
+            "duration": dur,
         })
 
     # Resolve missing covers via Deezer search (best-effort)

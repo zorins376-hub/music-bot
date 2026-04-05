@@ -604,6 +604,7 @@ export interface ActivityItem {
   video_id: string;
   cover_url?: string;
   played_at: string | null;
+  duration?: number;
 }
 
 export async function fetchActivityFeed(limit = 30): Promise<ActivityItem[]> {
@@ -611,7 +612,7 @@ export async function fetchActivityFeed(limit = 30): Promise<ActivityItem[]> {
     headers: getHeaders(),
     retries: 1,
   });
-  if (!r.ok) return [];
+  if (!r.ok) await throwApiError(r, "Failed to fetch activity feed");
   const data = await r.json();
   return data.feed;
 }
