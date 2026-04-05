@@ -459,6 +459,15 @@ export function App() {
       // DJ crossfade already handled the transition — skip double-advance
       if (djCrossfadeActiveRef.current) return;
 
+      // Record listen time for the track that just ended
+      const endedTrack = stateRef.current.current_track;
+      if (endedTrack && audioRef.current) {
+        const listened = Math.round(audioRef.current.currentTime);
+        if (listened > 0) {
+          ingestEvent("play", endedTrack, listened, radioModeRef.current ? "flow" : "wave");
+        }
+      }
+
       // ── Flow mode: play next track directly from AI (no queue) ──
       if (radioModeRef.current) {
         const s = stateRef.current;

@@ -44,7 +44,7 @@ async def get_wrapped(user: dict = Depends(get_current_user)):
 
             total_time = (await session.execute(
                 select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
-                .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                .where(ListeningHistory.user_id == user_id)
             )).scalar() or 0
 
             total_favs = (await session.execute(
