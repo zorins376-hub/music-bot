@@ -582,8 +582,14 @@ async def _group_auto_play(
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
         return
 
-    # Redis cache
+    # Redis cache → DB fallback
     file_id = await cache.get_file_id(video_id, bitrate)
+    if not file_id:
+        try:
+            from bot.services.telegram_cache import get_file_id as _tg_get_fid
+            file_id = await _tg_get_fid(video_id)
+        except Exception:
+            pass
     if file_id:
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(

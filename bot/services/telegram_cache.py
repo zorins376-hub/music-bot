@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _bot: Bot | None = None
 _upload_semaphore = asyncio.Semaphore(3)  # max 3 concurrent uploads
+_inflight: set[str] = set()  # source_ids currently being uploaded (dedup)
 
 
 def _get_bot() -> Bot | None:
@@ -74,6 +75,12 @@ async def upload_to_cache(
         return None
     if not mp3_path.exists() or mp3_path.stat().st_size < 10 * 1024:
         return None
+
+    # Skip if already cached (Redis → DB)
+    existing = await get_file_id(source_id)
+    if existing:
+        logger.debug("Skipping upload for %s — already cached (file_id=%s...)", source_id, existing[:20])
+        return existing
 
     # Enrich metadata from ID3 tags if title/artist missing
     if not title or not artist:
@@ -198,13 +205,22 @@ async def _save_file_id(source_id: str, file_id: str, title: str | None = None,
 
 def schedule_upload(mp3_path: Path, source_id: str, title: str | None = None,
                     artist: str | None = None, duration: int | None = None) -> None:
-    """Fire-and-forget upload to cache channel."""
+    """Fire-and-forget upload to cache channel with dedup guard."""
     if not settings.CACHE_CHANNEL_ID:
         return
+    if source_id in _inflight:
+        logger.debug("Skipping schedule_upload for %s — already in-flight", source_id)
+        return
+    _inflight.add(source_id)
+
+    async def _upload_and_release() -> None:
+        try:
+            await upload_to_cache(mp3_path, source_id, title, artist, duration)
+        finally:
+            _inflight.discard(source_id)
+
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(
-            upload_to_cache(mp3_path, source_id, title, artist, duration),
-        )
+        loop.create_task(_upload_and_release())
     except RuntimeError:
-        pass  # no running loop
+        _inflight.discard(source_id)
