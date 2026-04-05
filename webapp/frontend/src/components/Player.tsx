@@ -71,9 +71,10 @@ interface Props {
   onAddToQueue?: (track: Track) => void;
   onPlayTrack?: (track: Track) => void;
   onPlayAll?: (tracks: Track[]) => void;
+  onBgColorsChange?: (colors: [string, string, string]) => void;
 }
 
-export const Player = memo(function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onAddToQueue, onPlayTrack, onPlayAll }: Props) {
+export const Player = memo(function Player({ state, onAction, onShowLyrics, accentColor = "rgb(124, 77, 255)", accentColorAlpha = "rgba(124, 77, 255, 0.4)", onSleepTimer, sleepTimerRemaining, audioDuration = 0, onWave, isWaveLoading = false, elapsed: externalElapsed = 0, buffering = false, themeId = "blackroom", isPremium = false, isAdmin = false, canUseAudioControls = false, quality = "192", eqPreset = "flat", onQualityChange, onEqPresetChange, bassBoost = false, onBassBoost, partyMode = false, onPartyMode, playbackSpeed = 1, onSpeedChange, panValue = 0, onPanChange, showSpectrum = false, onToggleSpectrum, spectrumStyle = "bars", onSpectrumStyleChange, moodFilter = null, onMoodChange, bypassProcessing = false, onBypassToggle, tapeWarmth = false, onTapeWarmth, airBand = false, onAirBand, stereoWiden = false, onStereoWiden, softClip = false, onSoftClip, nightMode = false, onNightMode, reverbEnabled = false, onReverb, reverbPreset = "studio", onReverbPreset, reverbMix = 0.3, onReverbMix, karaokeMode = false, onKaraokeMode, crossfadeDuration = 0, onCrossfadeDuration, coverMode = "vinyl", onCoverMode, onAddToPlaylist, onAddToQueue, onPlayTrack, onPlayAll, onBgColorsChange }: Props) {
   const qualityLabel = quality === "auto" ? "Auto" : `${quality} kbps`;
   const isTequila = themeId === "tequila";
   const vinylSpin = coverMode === "vinyl";
@@ -137,6 +138,9 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     };
     img.src = track.cover_url;
   }, [track?.cover_url, isTequila]);
+
+  // Notify parent about background colors
+  useEffect(() => { onBgColorsChange?.(bgColors); }, [bgColors, onBgColorsChange]);
 
   const handleSimilar = async () => {
     if (!track || isSimilarLoading) return;
@@ -357,10 +361,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     };
 
     return (
-      <div style={{ textAlign: "center", padding: "8px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", borderRadius: 0, transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
-        {/* Edge fades into page bg */}
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, var(--tg-theme-bg-color, #1a120b), transparent)", pointerEvents: "none", zIndex: 1 }} />
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to top, var(--tg-theme-bg-color, #1a120b), transparent)", pointerEvents: "none", zIndex: 1 }} />
+      <div style={{ textAlign: "center", padding: "8px 0", position: "relative" }}>
         <style>{`
           @keyframes bgShift {
             0% { background-position: 0% 50%; }
@@ -1078,10 +1079,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
 
   // ─── DEFAULT BLACK ROOM THEME ──────────────────────────
   return (
-    <div style={{ textAlign: "center", padding: "16px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
-      {/* Edge fades into page bg */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none", zIndex: 1 }} />
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to top, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none", zIndex: 1 }} />
+    <div style={{ textAlign: "center", padding: "16px 0", position: "relative" }}>
       <style>{`
         @keyframes bgShift {
           0% { background-position: 0% 50%; }

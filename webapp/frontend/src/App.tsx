@@ -244,6 +244,7 @@ export function App() {
   const [a2pAdding, setA2pAdding] = useState<number | null>(null);
   // ── Flow Mode (formerly Radio) ──
   const [radioMode, setRadioMode] = useState(false);
+  const [playerBgColors, setPlayerBgColors] = useState<[string, string, string]>(["#1a1a2e", "#0a0a1e", "#1a1a2e"]);
   const radioModeRef = useRef(false);
   const radioSeedRef = useRef<string | null>(null);
   const radioLoadingRef = useRef(false);
@@ -2005,7 +2006,20 @@ export function App() {
           }}
         />
       )}
-      <div style={{ padding: "8px 12px", maxWidth: 480, margin: "0 auto", paddingBottom: view !== "player" && state.current_track ? 72 : 12 }}>
+      <div style={{
+        padding: view === "player" ? "0" : "8px 12px",
+        maxWidth: 480,
+        margin: "0 auto",
+        paddingBottom: view !== "player" && state.current_track ? 72 : 12,
+        ...(view === "player" ? {
+          background: `linear-gradient(135deg, ${playerBgColors[0]}, ${playerBgColors[1]}, ${playerBgColors[2]})`,
+          backgroundSize: "400% 400%",
+          animation: "bgShift 12s ease infinite",
+          transition: "background 1.5s ease",
+          minHeight: "100vh",
+        } : {}),
+      }}>
+      <style>{`@keyframes bgShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }`}</style>
 
       {/* ON AIR Banner */}
       {broadcastLive && view !== "broadcast" && !liveBannerDismissed && (
@@ -2287,7 +2301,7 @@ export function App() {
       {view === "player" && (
         <ViewErrorBoundary viewName="Player" fallbackColor={theme.hintColor}>
         <>
-          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={handleToggleSpectrum} spectrumStyle={spectrumStyle} onSpectrumStyleChange={handleSpectrumStyleChange} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={handleAddToPlaylist} onAddToQueue={handleAddToQueue} onPlayTrack={handlePlayerPlayTrack} onPlayAll={handlePlayerPlayAll} />
+          <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={handleToggleSpectrum} spectrumStyle={spectrumStyle} onSpectrumStyleChange={handleSpectrumStyleChange} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={handleAddToPlaylist} onAddToQueue={handleAddToQueue} onPlayTrack={handlePlayerPlayTrack} onPlayAll={handlePlayerPlayAll} onBgColorsChange={setPlayerBgColors} />
 
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
