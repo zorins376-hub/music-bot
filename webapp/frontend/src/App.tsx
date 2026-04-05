@@ -249,6 +249,7 @@ export function App() {
   const radioSeedRef = useRef<string | null>(null);
   const radioLoadingRef = useRef(false);
   const radioPlayedRef = useRef<string[]>([]);
+  const flowHistoryRef = useRef<Track[]>([]);
   // ── Broadcast live indicator ──
   const [broadcastLive, setBroadcastLive] = useState(false);
   const [broadcastDJ, setBroadcastDJ] = useState("");
@@ -1449,6 +1450,12 @@ export function App() {
           return;
         }
 
+        // ── Flow mode: intercept "prev" to go back in history ──
+        if (act === "prev" && radioModeRef.current && !trackId) {
+          flowPrev();
+          return;
+        }
+
         // ── Empty queue: auto-start Flow mode with one track ──
         if (act === "play" && !trackId && !stateRef.current.current_track && stateRef.current.queue.length === 0) {
           setBuffering(true);
@@ -1549,6 +1556,13 @@ export function App() {
       const seed = radioSeedRef.current || currentId;
       if (!seed) return;
 
+      // Save current track to history before moving forward
+      if (s.current_track) {
+        flowHistoryRef.current.push(s.current_track);
+        // Cap history at 100 entries
+        if (flowHistoryRef.current.length > 100) flowHistoryRef.current.shift();
+      }
+
       // Ingest skip event
       if (s.current_track && audioRef.current) {
         ingestEvent("skip", s.current_track, Math.round(audioRef.current.currentTime), "flow");
@@ -1571,6 +1585,21 @@ export function App() {
       showToast("Ошибка подбора трека", "error");
     } finally {
       radioLoadingRef.current = false;
+    }
+  }, []);
+
+  // ── Flow mode: go back to previous track from history ──
+  const flowPrev = useCallback(async () => {
+    const prev = flowHistoryRef.current.pop();
+    if (!prev) return;
+    try {
+      const ns = await sendAction("play", prev.video_id, undefined, prev);
+      radioSeedRef.current = prev.video_id;
+      setState(ns);
+    } catch {
+      // Put it back if playback failed
+      flowHistoryRef.current.push(prev);
+      showToast("Не удалось вернуться назад", "error");
     }
   }, []);
 
