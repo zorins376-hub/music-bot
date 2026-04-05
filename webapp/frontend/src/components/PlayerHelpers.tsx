@@ -192,3 +192,101 @@ export const EQ_OPTIONS: Array<{ value: EqPreset; label: string; note: string }>
 export function formatEqPresetLabel(preset: EqPreset): string {
   return EQ_OPTIONS.find((option) => option.value === preset)?.label ?? preset.replace(/_/g, " ");
 }
+
+// --- Waveform Seek Bar ---
+export function WaveformSeek({ elapsed, duration, accentColor, onSeek }: {
+  elapsed: number;
+  duration: number;
+  accentColor: string;
+  onSeek: (pos: number) => void;
+}) {
+  const bars = 48;
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Generate stable pseudo-random bar heights from duration
+  const [heights] = useState(() => {
+    const h: number[] = [];
+    let seed = 42;
+    for (let i = 0; i < bars; i++) {
+      seed = (seed * 16807 + 13) % 2147483647;
+      h.push(0.2 + 0.8 * ((seed % 1000) / 1000));
+    }
+    return h;
+  });
+
+  const progress = duration > 0 ? elapsed / duration : 0;
+
+  const handleClick = (e: MouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || duration <= 0) return;
+    const x = (e.clientX - rect.left) / rect.width;
+    onSeek(Math.max(0, Math.min(duration, Math.round(x * duration))));
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onClick={handleClick}
+      style={{
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 1.5,
+        height: 32,
+        cursor: duration > 0 ? "pointer" : "default",
+        opacity: duration > 0 ? 1 : 0.4,
+        padding: "0 2px",
+      }}
+    >
+      {heights.map((h, i) => {
+        const filled = i / bars < progress;
+        return (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              height: `${h * 100}%`,
+              borderRadius: 2,
+              background: filled ? accentColor : "rgba(255,255,255,0.15)",
+              transition: "background 0.15s ease",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// --- Music Particles ---
+const PARTICLE_SYMBOLS = ["♪", "♫", "♬", "✦", "•"];
+
+export function MusicParticles({ isPlaying, accentColor }: { isPlaying: boolean; accentColor: string }) {
+  const count = 8;
+  if (!isPlaying) return null;
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 0 }}>
+      <style>{`
+        @keyframes particleFloat {
+          0% { opacity: 0; transform: translateY(0) scale(0.5); }
+          15% { opacity: 0.7; }
+          100% { opacity: 0; transform: translateY(-120px) scale(1.2) rotate(30deg); }
+        }
+      `}</style>
+      {Array.from({ length: count }).map((_, i) => (
+        <span
+          key={i}
+          style={{
+            position: "absolute",
+            left: `${10 + (i * 80 / count) + (i % 3) * 5}%`,
+            bottom: `${5 + (i % 4) * 8}%`,
+            fontSize: 12 + (i % 3) * 4,
+            color: accentColor,
+            opacity: 0,
+            animation: `particleFloat ${2.5 + (i % 3) * 0.8}s ease-out ${i * 0.4}s infinite`,
+            willChange: "transform, opacity",
+          }}
+        >
+          {PARTICLE_SYMBOLS[i % PARTICLE_SYMBOLS.length]}
+        </span>
+      ))}
+    </div>
+  );
+}

@@ -4,7 +4,7 @@ import type { EqPreset, PlayerState } from "../api";
 import { toggleFavorite, checkFavorite, sendFeedback, ingestEvent, fetchSimilar, generateAiPlaylist, fetchTrending, searchTracks, type Track } from "../api";
 import { ShareCard } from "./ShareCard";
 import { IconEqualizer, IconMusic, IconMusicNote, IconSpectrum, IconSpatial, IconSpeed, IconBassBoost, IconParty, IconMood, IconMic, IconHiRes, IconMoodChill, IconMoodEnergy, IconMoodFocus, IconMoodRomance, IconMoodMelancholy, IconMoodParty, IconPlus, IconShare, IconImage, IconWave, IconSimilar, IconTrending, IconMoon, IconSpinner, IconFire } from "./Icons";
-import { haptic, IconPlay, IconPause, IconSkipForward, IconSkipBack, IconShuffle, IconRepeat, IconLyrics, IconHeart, AudioVisualizer, Marquee, AudioBadge, btnStyle, QUALITY_OPTIONS, EQ_OPTIONS, formatEqPresetLabel } from "./PlayerHelpers";
+import { haptic, IconPlay, IconPause, IconSkipForward, IconSkipBack, IconShuffle, IconRepeat, IconLyrics, IconHeart, AudioVisualizer, Marquee, AudioBadge, btnStyle, QUALITY_OPTIONS, EQ_OPTIONS, formatEqPresetLabel, WaveformSeek, MusicParticles } from "./PlayerHelpers";
 import { EQPanel } from "./EQPanel";
 import { LuxuryPanel } from "./LuxuryPanel";
 
@@ -100,6 +100,43 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
   const [showTrending, setShowTrending] = useState(false);
   const [isTrendingLoading, setIsTrendingLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+
+  // ── Animated gradient background from cover art colors ──
+  const [bgColors, setBgColors] = useState<[string, string, string]>(["#1a1a2e", "#0a0a1e", "#1a1a2e"]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!track?.cover_url) {
+      setBgColors(isTequila ? ["#2d1a0a", "#1a0f04", "#2d1a0a"] : ["#1a1a2e", "#0a0a1e", "#1a1a2e"]);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const c = canvasRef.current || document.createElement("canvas");
+        canvasRef.current = c;
+        c.width = 16;
+        c.height = 16;
+        const ctx = c.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, 16, 16);
+        const d = ctx.getImageData(0, 0, 16, 16).data;
+        const px = (x: number, y: number) => {
+          const i = (y * 16 + x) * 4;
+          return [d[i], d[i + 1], d[i + 2]] as [number, number, number];
+        };
+        // Sample corners + center, darken for background
+        const samples = [px(2, 2), px(13, 2), px(2, 13), px(13, 13), px(8, 8)];
+        const darken = (rgb: [number, number, number], f: number) =>
+          `rgb(${Math.round(rgb[0] * f)}, ${Math.round(rgb[1] * f)}, ${Math.round(rgb[2] * f)})`;
+        setBgColors([darken(samples[0], 0.25), darken(samples[4], 0.15), darken(samples[3], 0.25)]);
+      } catch {
+        // CORS or canvas error — keep defaults
+      }
+    };
+    img.src = track.cover_url;
+  }, [track?.cover_url, isTequila]);
 
   const handleSimilar = async () => {
     if (!track || isSimilarLoading) return;
@@ -231,6 +268,33 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     setSwipeOffset(0);
   };
 
+  // ── Double-tap ±15s seek ──
+  const lastTapTime = useRef<number>(0);
+  const lastTapX = useRef<number>(0);
+  const [doubleTapIndicator, setDoubleTapIndicator] = useState<"left" | "right" | null>(null);
+
+  const handleCoverDoubleTap = (e: MouseEvent | TouchEvent) => {
+    if (!track || !duration) return;
+    const now = Date.now();
+    const clientX = "touches" in e ? e.changedTouches[0].clientX : e.clientX;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const isLeft = clientX < rect.left + rect.width / 2;
+
+    if (now - lastTapTime.current < 300 && Math.abs(clientX - lastTapX.current) < 60) {
+      // Double tap detected
+      const seekDelta = isLeft ? -15 : 15;
+      const newPos = Math.max(0, Math.min(duration, elapsed + seekDelta));
+      haptic("medium");
+      onAction("seek", track.video_id, newPos);
+      setDoubleTapIndicator(isLeft ? "left" : "right");
+      setTimeout(() => setDoubleTapIndicator(null), 600);
+      lastTapTime.current = 0;
+    } else {
+      lastTapTime.current = now;
+      lastTapX.current = clientX;
+    }
+  };
+
   // Reset seek value on track change
   useEffect(() => { setSeekValue(null); }, [track?.video_id]);
 
@@ -293,8 +357,18 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     };
 
     return (
-      <div style={{ textAlign: "center", padding: "8px 0" }}>
+      <div style={{ textAlign: "center", padding: "8px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", borderRadius: 0, minHeight: "100vh", transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
+        <MusicParticles isPlaying={!!state.is_playing && !!track} accentColor={gold} />
         <style>{`
+          @keyframes bgShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+          @keyframes dtFade {
+            0% { opacity: 1; transform: translateY(-50%) scale(1); }
+            100% { opacity: 0; transform: translateY(-50%) scale(1.3); }
+          }
           @keyframes vinylSpin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
@@ -316,7 +390,19 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           }
         `}</style>
         {/* ── Cover Area ── */}
-        <div style={{ position: "relative", width: 280, margin: "0 auto 20px" }}>
+        <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 280, margin: "0 auto 20px", cursor: "pointer", perspective: 800 }}>
+          {/* Double-tap indicator */}
+          {doubleTapIndicator && (
+            <div style={{
+              position: "absolute", top: "50%", [doubleTapIndicator === "left" ? "left" : "right"]: 20,
+              transform: "translateY(-50%)", zIndex: 20, pointerEvents: "none",
+              animation: "dtFade 0.6s ease forwards",
+            }}>
+              <div style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", borderRadius: 16, padding: "8px 14px", color: "#fff", fontSize: 16, fontWeight: 700 }}>
+                {doubleTapIndicator === "left" ? "−15s" : "+15s"}
+              </div>
+            </div>
+          )}
           {/* Tonearm — vinyl mode only */}
           {vinylSpin && (
             <svg viewBox="0 0 60 130" style={{
@@ -371,7 +457,8 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
               animation: isDiscSpin && state.is_playing && track ? `vinylSpin ${cdMode ? "6s" : "4s"} linear infinite` : (state.is_playing && coverMode === "default" ? "tequilaGlow 3.6s ease-in-out infinite" : "none"),
               overflow: "hidden",
               transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-              transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !isRound ? 1.03 : 1})`,
+              transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !isRound ? 1.03 : 1}) rotateX(${state.is_playing ? 4 : 0}deg)`,
+              transformStyle: "preserve-3d",
               willChange: "transform", touchAction: "pan-y", userSelect: "none",
             }}
           >
@@ -481,42 +568,14 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           />
         </div>
 
-        {/* Seek slider — warm */}
+        {/* Seek slider — warm waveform */}
         {track && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 24px", marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: "#c8a882", minWidth: 36, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
               {fmtTime(elapsed)}
             </span>
-            <div style={{ flex: 1, padding: "12px 0", touchAction: "none" }}>
-              <input
-                type="range"
-                min={0}
-                max={duration || 1}
-                value={elapsed}
-                disabled={duration === 0}
-                onInput={(e) => {
-                  if (duration > 0) {
-                    setSeeking(true);
-                    setSeekValue(Number((e.target as HTMLInputElement).value));
-                  }
-                }}
-                onChange={(e) => {
-                  if (duration > 0) {
-                    const pos = Number((e.target as HTMLInputElement).value);
-                    setSeekValue(null);
-                    setSeeking(false);
-                    haptic("light");
-                    onAction("seek", track.video_id, pos);
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  height: 5,
-                  accentColor: "#ffa726",
-                  cursor: duration > 0 ? "pointer" : "default",
-                  opacity: duration > 0 ? 1 : 0.5,
-                }}
-              />
+            <div style={{ flex: 1, touchAction: "none" }}>
+              <WaveformSeek elapsed={elapsed} duration={duration} accentColor="#ffa726" onSeek={(pos) => { haptic("light"); onAction("seek", track.video_id, pos); }} />
             </div>
             <span style={{ fontSize: 11, color: "#c8a882", minWidth: 36, fontVariantNumeric: "tabular-nums" }}>
               {duration > 0 ? fmtTime(duration) : "-:--"}
@@ -998,15 +1057,37 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
 
   // ─── DEFAULT BLACK ROOM THEME ──────────────────────────
   return (
-    <div style={{ textAlign: "center", padding: "16px 0" }}>
+    <div style={{ textAlign: "center", padding: "16px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", minHeight: "100vh", transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
+      <MusicParticles isPlaying={!!state.is_playing && !!track} accentColor={accentColor} />
       <style>{`
+        @keyframes bgShift {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        @keyframes dtFade {
+          0% { opacity: 1; transform: translateY(-50%) scale(1); }
+          100% { opacity: 0; transform: translateY(-50%) scale(1.3); }
+        }
         @keyframes vinylSpin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
       `}</style>
       {/* ── Cover Area ── */}
-      <div style={{ position: "relative", width: 268, margin: "0 auto 24px" }}>
+      <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 268, margin: "0 auto 24px", cursor: "pointer", perspective: 800 }}>
+        {/* Double-tap indicator */}
+        {doubleTapIndicator && (
+          <div style={{
+            position: "absolute", top: "50%", [doubleTapIndicator === "left" ? "left" : "right"]: 20,
+            transform: "translateY(-50%)", zIndex: 20, pointerEvents: "none",
+            animation: "dtFade 0.6s ease forwards",
+          }}>
+            <div style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", borderRadius: 16, padding: "8px 14px", color: "#fff", fontSize: 16, fontWeight: 700 }}>
+              {doubleTapIndicator === "left" ? "−15s" : "+15s"}
+            </div>
+          </div>
+        )}
         {/* Tonearm — vinyl only */}
         {vinylSpin && (
           <svg viewBox="0 0 60 130" style={{
@@ -1053,7 +1134,8 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             boxShadow: track ? (isRound ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 2px ${accentColor}, 0 0 0 4px rgba(26,26,46,0.8), 0 0 0 5px ${accentColorAlpha}` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
             overflow: "hidden",
             transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !isRound ? 1.02 : 1})`,
+            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !isRound ? 1.02 : 1}) rotateX(${state.is_playing ? 4 : 0}deg)`,
+            transformStyle: "preserve-3d",
             animation: isDiscSpin && state.is_playing && track ? `vinylSpin ${cdMode ? "6s" : "4s"} linear infinite` : "none",
             willChange: "transform", touchAction: "pan-y", userSelect: "none",
           }}
@@ -1134,42 +1216,14 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         />
       </div>
 
-      {/* Seek slider - improved touch area */}
+      {/* Seek waveform bar */}
       {track && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 24px", marginBottom: 8 }}>
           <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", minWidth: 36, textAlign: "right" }}>
             {fmtTime(elapsed)}
           </span>
-          <div style={{ flex: 1, padding: "12px 0", touchAction: "none" }}>
-            <input
-              type="range"
-              min={0}
-              max={duration || 1}
-              value={elapsed}
-              disabled={duration === 0}
-              onInput={(e) => {
-                if (duration > 0) {
-                  setSeeking(true);
-                  setSeekValue(Number((e.target as HTMLInputElement).value));
-                }
-              }}
-              onChange={(e) => {
-                if (duration > 0) {
-                  const pos = Number((e.target as HTMLInputElement).value);
-                  setSeekValue(null);
-                  setSeeking(false);
-                  haptic("light");
-                  onAction("seek", track.video_id, pos);
-                }
-              }}
-              style={{
-                width: "100%",
-                height: 6,
-                accentColor: "var(--tg-theme-button-color, #7c4dff)",
-                cursor: duration > 0 ? "pointer" : "default",
-                opacity: duration > 0 ? 1 : 0.5,
-              }}
-            />
+          <div style={{ flex: 1, touchAction: "none" }}>
+            <WaveformSeek elapsed={elapsed} duration={duration} accentColor={accentColor} onSeek={(pos) => { haptic("light"); onAction("seek", track.video_id, pos); }} />
           </div>
           <span style={{ fontSize: 11, color: "var(--tg-theme-hint-color, #aaa)", minWidth: 36 }}>
             {duration > 0 ? fmtTime(duration) : "-:--"}
