@@ -56,6 +56,8 @@ class ScoringContext:
     recent_source_ids: list[str] = field(default_factory=list)  # for embedding (source_id strings)
     listened_ids: set[int] = field(default_factory=set)          # all-time history (track_ids)
     preferred_hours: list[int] | None = None                     # user's active hours
+    skip_track_ids: set[int] = field(default_factory=set)        # tracks skipped in last 30 days
+    dislike_track_ids: set[int] = field(default_factory=set)     # tracks explicitly disliked
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -164,6 +166,14 @@ class HybridScorer:
                     time_boost = 0.5
             components["time"] = time_boost
 
+            # ── Negative feedback penalty ────────────────────────────────
+            penalty = 0.0
+            if track_id in ctx.dislike_track_ids:
+                penalty = -1.0  # strong penalty
+            elif track_id in ctx.skip_track_ids:
+                penalty = -0.4  # moderate penalty
+            components["penalty"] = penalty
+
             # ── Weighted sum ─────────────────────────────────────────────
             final_score = (
                 self.weights.als * components["als"]
@@ -171,6 +181,7 @@ class HybridScorer:
                 + self.weights.popularity * components["popularity"]
                 + self.weights.freshness * components["freshness"]
                 + self.weights.time * components["time"]
+                + penalty
             )
 
             results.append(ScoredTrack(

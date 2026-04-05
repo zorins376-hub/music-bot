@@ -251,6 +251,29 @@ async def _build_recommendations(
         # ── Content-based filtering ──────────────────────────────
         content_tracks = await _content_based(session, user_obj, listened_ids, limit)
 
+        # ── Cold start boost: trending + Deezer discovery ────────
+        if play_count < _MIN_PLAYS_FOR_COLLAB and len(content_tracks) < limit:
+            try:
+                trending = await _popular_fallback(session, listened_ids, limit)
+                # Also try Deezer mood discovery for variety
+                from recommender.deezer_discovery import discover_by_mood
+                moods = ["pop", "chill", "dance"]
+                import random as _rnd
+                dz_cold = await discover_by_mood(_rnd.choice(moods), limit=limit // 2)
+                # Interleave: content first, then trending, then deezer
+                cold_pool = content_tracks + trending + dz_cold
+                # Deduplicate
+                seen_cs: set[str] = set()
+                deduped: list[dict] = []
+                for t in cold_pool:
+                    sid = t.get("video_id", "")
+                    if sid and sid not in seen_cs:
+                        seen_cs.add(sid)
+                        deduped.append(t)
+                return deduped[:limit]
+            except Exception:
+                pass
+
         # ── Merge: 60 % collaborative + 40 % content-based ──────
         if collab_tracks and content_tracks:
             n_collab = max(1, int(limit * 0.6))
@@ -525,6 +548,29 @@ async def _ml_recommendations(user_id: int, limit: int) -> list[dict]:
         if len(listened_ids) < _MIN_PLAYS_FOR_COLLAB:
             return []
 
+        # Get negative feedback (skips/dislikes in last 30 days)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        skip_r = await session.execute(
+            select(ListeningHistory.track_id)
+            .where(
+                ListeningHistory.user_id == user_id,
+                ListeningHistory.action == "skip",
+                ListeningHistory.track_id.is_not(None),
+                ListeningHistory.created_at >= thirty_days_ago,
+            )
+        )
+        skip_ids = {row[0] for row in skip_r.all()}
+
+        dislike_r = await session.execute(
+            select(ListeningHistory.track_id)
+            .where(
+                ListeningHistory.user_id == user_id,
+                ListeningHistory.action == "dislike",
+                ListeningHistory.track_id.is_not(None),
+            )
+        )
+        dislike_ids = {row[0] for row in dislike_r.all()}
+
         # Get candidate pool: all tracks with file_id, include metadata
         candidates_r = await session.execute(
             select(
@@ -559,6 +605,8 @@ async def _ml_recommendations(user_id: int, limit: int) -> list[dict]:
             recent_source_ids=recent_source_ids,
             listened_ids=listened_ids,
             preferred_hours=preferred_hours,
+            skip_track_ids=skip_ids,
+            dislike_track_ids=dislike_ids,
         )
 
         # Score with HybridScorer
@@ -568,6 +616,23 @@ async def _ml_recommendations(user_id: int, limit: int) -> list[dict]:
 
         if not filtered:
             return []
+
+        # ── Serendipity mix: replace ~20% with exploration picks ─────
+        import random as _rnd
+        n_serendipity = max(1, limit // 5)
+        # Get user's familiar artists/genres
+        familiar_artists = {r[2].lower() for r in candidates[:100] if r[2]} & {
+            row[1].lower() if row[1] else "" for row in history[:100]
+        }
+        # Pick from scored tracks ranked 10-40 that are NOT from familiar artists
+        exploration_pool = [
+            t for t in scored[10:40]
+            if t.artist.lower() not in familiar_artists and t.score > 0
+        ]
+        if exploration_pool:
+            picks = _rnd.sample(exploration_pool, min(n_serendipity, len(exploration_pool)))
+            # Replace last N items of filtered with exploration picks
+            filtered = filtered[:limit * 2 - len(picks)] + picks
 
         # Load full track objects for result
         ranked_ids = [t.track_id for t in filtered]

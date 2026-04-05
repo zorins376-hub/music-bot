@@ -1630,10 +1630,17 @@ async def get_wave(
             )
             top_artists = [row[0] for row in artist_r.all() if row[0]]
 
+            # Only exclude tracks played in last 7 days (anti-repeat)
+            from datetime import timedelta as _td
+            seven_days_ago = datetime.now(timezone.utc) - _td(days=7)
             vid_r = await session.execute(
                 select(Track.source_id)
                 .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-                .where(ListeningHistory.user_id == user_id)
+                .where(
+                    ListeningHistory.user_id == user_id,
+                    ListeningHistory.action == "play",
+                    ListeningHistory.created_at >= seven_days_ago,
+                )
             )
             listened_vids = {row[0] for row in vid_r.all() if row[0]}
     except Exception:
@@ -1647,14 +1654,14 @@ async def get_wave(
         except Exception:
             pass
 
-    # Mix: DB recs first, then fill with Deezer discovery (deduped)
+    # Mix: DB recs first, then fill with Deezer discovery (deduped + anti-repeat)
     seen_ids: set[str] = set()
     merged: list[dict] = []
 
-    # Add DB recs
+    # Add DB recs (skip recently played)
     for r in db_recs:
         vid = r.get("video_id", r.get("source_id", ""))
-        if vid and vid not in seen_ids:
+        if vid and vid not in seen_ids and vid not in listened_vids:
             seen_ids.add(vid)
             merged.append(r)
 

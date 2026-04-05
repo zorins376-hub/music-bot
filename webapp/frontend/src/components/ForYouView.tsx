@@ -25,9 +25,52 @@ function SectionHeading({ icon, title, tc }: { icon: JSX.Element; title: string;
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
       {icon}
       <span style={{
-        fontSize: 11, fontWeight: 700, color: tc.hintColor,
+        fontSize: 11, fontWeight: 700,
+        background: `linear-gradient(90deg, ${tc.highlight}, ${tc.textColor})`,
+        WebkitBackgroundClip: "text",
+        WebkitTextFillColor: "transparent",
         textTransform: "uppercase", letterSpacing: 2,
       }}>{title}</span>
+      <div style={{
+        flex: 1, height: 1, marginLeft: 6,
+        background: `linear-gradient(90deg, ${tc.highlight}40, transparent)`,
+      }} />
+    </div>
+  );
+}
+
+function SkeletonCards({ count = 4, tc }: { count?: number; tc: ThemeColors }) {
+  return (
+    <div style={{
+      display: "flex", gap: 12, overflowX: "auto",
+      padding: "8px 0", scrollbarWidth: "none",
+    }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} style={{
+          minWidth: 156, maxWidth: 156,
+          borderRadius: 16, overflow: "hidden",
+          background: tc.cardBg,
+          border: tc.cardBorder,
+        }}>
+          <div style={{
+            width: 156, height: 156,
+            background: `linear-gradient(110deg, ${tc.coverPlaceholderBg} 30%, ${tc.highlight}10 50%, ${tc.coverPlaceholderBg} 70%)`,
+            backgroundSize: "200% 100%",
+            animation: "shimmer 1.5s ease-in-out infinite",
+          }} />
+          <div style={{ padding: "10px 12px" }}>
+            <div style={{
+              height: 12, borderRadius: 6, marginBottom: 6,
+              background: `${tc.hintColor}25`, width: "80%",
+            }} />
+            <div style={{
+              height: 10, borderRadius: 5,
+              background: `${tc.hintColor}15`, width: "55%",
+            }} />
+          </div>
+        </div>
+      ))}
+      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
     </div>
   );
 }
@@ -46,11 +89,7 @@ function HorizontalCards({
   onTrackClick: (track: Track) => void;
 }) {
   if (loading) {
-    return (
-      <div style={{ textAlign: "center", padding: 24 }}>
-        <IconSpinner size={22} color={tc.hintColor} />
-      </div>
-    );
+    return <SkeletonCards count={4} tc={tc} />;
   }
   if (error) {
     return (
@@ -74,29 +113,29 @@ function HorizontalCards({
     }}>
       {tracks.map(t => (
         <div key={t.video_id} onClick={() => onTrackClick(t)} style={{
-          minWidth: 130, maxWidth: 130, cursor: "pointer",
+          minWidth: 156, maxWidth: 156, cursor: "pointer",
           borderRadius: 16, overflow: "hidden",
           background: tc.cardBg,
           border: tc.cardBorder,
           transition: "transform 0.15s ease",
         }}>
           <div style={{
-            width: 130, height: 130, overflow: "hidden",
+            width: 156, height: 156, overflow: "hidden",
             background: tc.coverPlaceholderBg,
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
             {t.cover_url
-              ? <img src={t.cover_url} alt="" style={{ width: 130, height: 130, objectFit: "cover", display: "block" }} />
-              : <IconMusicNote size={32} color={tc.hintColor} />
+              ? <img src={t.cover_url} alt="" style={{ width: 156, height: 156, objectFit: "cover", display: "block" }} />
+              : <IconMusicNote size={36} color={tc.hintColor} />
             }
           </div>
-          <div style={{ padding: "8px 10px" }}>
+          <div style={{ padding: "10px 12px" }}>
             <div style={{
-              fontSize: 12, fontWeight: 600, color: tc.textColor,
+              fontSize: 13, fontWeight: 600, color: tc.textColor,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>{t.title}</div>
             <div style={{
-              fontSize: 10, color: tc.hintColor,
+              fontSize: 11, color: tc.hintColor,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>{t.artist}</div>
           </div>
