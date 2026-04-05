@@ -393,7 +393,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           }
         `}</style>
         {/* ── Cover Area ── */}
-        <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 280, margin: "0 auto 20px", cursor: "pointer", perspective: 800 }}>
+        <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 340, margin: "0 auto 20px", cursor: "pointer", perspective: 800 }}>
           {/* Double-tap indicator */}
           {doubleTapIndicator && (
             <div style={{
@@ -439,6 +439,20 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             }} />
           )}
 
+          {/* Blur shadow behind disc */}
+          {track?.cover_url && (
+            <div style={{
+              position: "absolute", top: "50%", left: "50%",
+              width: 340, height: 340,
+              transform: "translate(-50%, -50%)",
+              borderRadius: "50%",
+              backgroundImage: `url(${track.cover_url})`,
+              backgroundSize: "cover", backgroundPosition: "center",
+              filter: "blur(40px)", opacity: 0.45,
+              pointerEvents: "none", zIndex: 0,
+            }} />
+          )}
+
           {/* Disc */}
           <div
             onTouchStart={handleTouchStart}
@@ -446,7 +460,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             onTouchEnd={handleTouchEnd}
             style={{
               position: "relative",
-              width: 260, height: 260, margin: "0 auto",
+              width: 320, height: 320, margin: "0 auto",
               borderRadius: isRound ? "50%" : 24,
               background: track
                 ? `linear-gradient(135deg, rgba(255,167,38,0.15), rgba(255,213,79,0.08))`
@@ -491,7 +505,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             {/* Case mode — static disc overlay */}
             {caseMode && track && (
               <div style={{
-                position: "absolute", width: 200, height: 200, borderRadius: "50%",
+                position: "absolute", width: 240, height: 240, borderRadius: "50%",
                 border: `2px solid ${borderGold}`,
                 boxShadow: "0 4px 20px rgba(0,0,0,0.4), inset 0 0 30px rgba(0,0,0,0.3)",
                 overflow: "hidden", zIndex: 2,
@@ -502,7 +516,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
                 )}
                 {/* CD hole */}
                 <div style={{
-                  position: "absolute", width: 24, height: 24, borderRadius: "50%",
+                  position: "absolute", width: 32, height: 32, borderRadius: "50%",
                   background: "radial-gradient(circle, rgba(26,18,11,0.95) 40%, transparent 100%)",
                   border: `1.5px solid ${borderGold}`, boxShadow: "0 0 8px rgba(0,0,0,0.6)",
                 }} />
@@ -517,7 +531,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             {/* Vinyl center label */}
             {vinylSpin && track && (
               <div style={{
-                position: "absolute", width: 86, height: 86, borderRadius: "50%",
+                position: "absolute", width: 100, height: 100, borderRadius: "50%",
                 background: "radial-gradient(circle at 35% 35%, #2a1f10, #1a120b 70%)",
                 border: `1.5px solid ${borderGold}`,
                 boxShadow: "0 0 16px rgba(0,0,0,0.7), inset 0 1px 3px rgba(255,213,79,0.15)",
@@ -534,7 +548,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             {/* CD center hole */}
             {cdMode && track && (
               <div style={{
-                position: "absolute", width: 28, height: 28, borderRadius: "50%",
+                position: "absolute", width: 34, height: 34, borderRadius: "50%",
                 background: "radial-gradient(circle, #1a120b 35%, rgba(26,18,11,0.9) 60%, transparent 100%)",
                 border: `2px solid ${borderGold}`, boxShadow: "0 0 12px rgba(0,0,0,0.6)", zIndex: 2,
               }} />
@@ -549,6 +563,25 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
               <div style={{ position: "absolute", top: -20, left: -60, width: 120, height: 320, background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,244,200,0.26), rgba(255,255,255,0))", transform: "rotate(18deg)", animation: "tequilaShimmer 2.8s ease-in-out infinite", pointerEvents: "none" }} />
             )}
           </div>
+
+          {/* Progress ring */}
+          {track && duration > 0 && (
+            <svg style={{
+              position: "absolute", top: "50%", left: "50%",
+              width: 338, height: 338,
+              transform: "translate(-50%, -50%)",
+              pointerEvents: "none", zIndex: 10,
+            }} viewBox="0 0 338 338">
+              <circle cx="169" cy="169" r="166" fill="none" stroke="rgba(255,167,38,0.12)" strokeWidth="2.5" />
+              <circle cx="169" cy="169" r="166" fill="none" stroke="#ffa726" strokeWidth="2.5"
+                strokeDasharray={2 * Math.PI * 166}
+                strokeDashoffset={2 * Math.PI * 166 * (1 - elapsed / duration)}
+                strokeLinecap="round"
+                transform="rotate(-90 169 169)"
+                style={{ transition: "stroke-dashoffset 0.5s linear" }}
+              />
+            </svg>
+          )}
         </div>
 
         {/* Glass info card */}
@@ -620,8 +653,8 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
               color: "#1a120b",
               borderRadius: "50%",
               padding: 14,
-              width: 72,
-              height: 72,
+              width: 80,
+              height: 80,
               boxShadow: `0 6px 24px rgba(255, 109, 0, 0.45), 0 0 0 3px rgba(255, 213, 79, 0.15)`,
               transition: "all 0.4s ease",
               position: "relative",
@@ -1081,7 +1114,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         }
       `}</style>
       {/* ── Cover Area ── */}
-      <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 268, margin: "0 auto 24px", cursor: "pointer", perspective: 800 }}>
+      <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 320, margin: "0 auto 24px", cursor: "pointer", perspective: 800 }}>
         {/* Double-tap indicator */}
         {doubleTapIndicator && (
           <div style={{
@@ -1127,13 +1160,27 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           }} />
         )}
 
+        {/* Blur shadow behind disc */}
+        {track?.cover_url && (
+          <div style={{
+            position: "absolute", top: "50%", left: "50%",
+            width: 320, height: 320,
+            transform: "translate(-50%, -50%)",
+            borderRadius: "50%",
+            backgroundImage: `url(${track.cover_url})`,
+            backgroundSize: "cover", backgroundPosition: "center",
+            filter: "blur(40px)", opacity: 0.4,
+            pointerEvents: "none", zIndex: 0,
+          }} />
+        )}
+
         {/* Disc */}
         <div
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           style={{
-            position: "relative", width: 240, height: 240, margin: "0 auto",
+            position: "relative", width: 300, height: 300, margin: "0 auto",
             borderRadius: isRound ? "50%" : 20,
             background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : `linear-gradient(135deg, ${accentColor} 0%, ${accentColorAlpha} 100%)`,
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 64,
@@ -1171,13 +1218,13 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           {/* Case — static disc overlay */}
           {caseMode && track && (
             <div style={{
-              position: "absolute", width: 190, height: 190, borderRadius: "50%",
+              position: "absolute", width: 230, height: 230, borderRadius: "50%",
               border: `2px solid ${accentColorAlpha}`,
               boxShadow: "0 4px 20px rgba(0,0,0,0.4), inset 0 0 30px rgba(0,0,0,0.3)",
               overflow: "hidden", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center",
             }}>
               {track.cover_url && <img src={track.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%", opacity: 0.85 }} draggable={false} />}
-              <div style={{ position: "absolute", width: 22, height: 22, borderRadius: "50%", background: "radial-gradient(circle, #1a1a2e 35%, transparent 100%)", border: `1.5px solid ${accentColor}`, boxShadow: "0 0 8px rgba(0,0,0,0.6)" }} />
+              <div style={{ position: "absolute", width: 28, height: 28, borderRadius: "50%", background: "radial-gradient(circle, #1a1a2e 35%, transparent 100%)", border: `1.5px solid ${accentColor}`, boxShadow: "0 0 8px rgba(0,0,0,0.6)" }} />
               <div style={{ position: "absolute", inset: 0, borderRadius: "50%", pointerEvents: "none", background: `conic-gradient(from 45deg, transparent 0deg, rgba(124,77,255,0.06) 90deg, rgba(224,64,251,0.04) 180deg, rgba(50,200,255,0.06) 270deg, transparent 360deg)` }} />
             </div>
           )}
@@ -1185,7 +1232,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           {/* Vinyl center label */}
           {vinylSpin && track && (
             <div style={{
-              position: "absolute", width: 80, height: 80, borderRadius: "50%",
+              position: "absolute", width: 94, height: 94, borderRadius: "50%",
               background: "radial-gradient(circle at 35% 35%, #2a2a3e, #1a1a2e 70%)",
               border: `1.5px solid ${accentColor}`, boxShadow: `0 0 16px rgba(0,0,0,0.7), inset 0 1px 3px ${accentColorAlpha}`,
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -1200,25 +1247,50 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
 
           {/* CD center hole */}
           {cdMode && track && (
-            <div style={{ position: "absolute", width: 26, height: 26, borderRadius: "50%", background: "radial-gradient(circle, #1a1a2e 35%, rgba(26,26,46,0.9) 60%, transparent 100%)", border: `2px solid ${accentColor}`, boxShadow: "0 0 12px rgba(0,0,0,0.6)", zIndex: 2 }} />
+            <div style={{ position: "absolute", width: 32, height: 32, borderRadius: "50%", background: "radial-gradient(circle, #1a1a2e 35%, rgba(26,26,46,0.9) 60%, transparent 100%)", border: `2px solid ${accentColor}`, boxShadow: "0 0 12px rgba(0,0,0,0.6)", zIndex: 2 }} />
           )}
 
           {/* Audio Visualizer */}
           {track && <AudioVisualizer isPlaying={state.is_playing} accentColor={accentColor} />}
         </div>
+
+        {/* Progress ring */}
+        {track && duration > 0 && (
+          <svg style={{
+            position: "absolute", top: "50%", left: "50%",
+            width: 318, height: 318,
+            transform: "translate(-50%, -50%)",
+            pointerEvents: "none", zIndex: 10,
+          }} viewBox="0 0 318 318">
+            <circle cx="159" cy="159" r="156" fill="none" stroke={`${accentColorAlpha}`} strokeWidth="2.5" />
+            <circle cx="159" cy="159" r="156" fill="none" stroke={accentColor} strokeWidth="2.5"
+              strokeDasharray={2 * Math.PI * 156}
+              strokeDashoffset={2 * Math.PI * 156 * (1 - elapsed / duration)}
+              strokeLinecap="round"
+              transform="rotate(-90 159 159)"
+              style={{ transition: "stroke-dashoffset 0.5s linear" }}
+            />
+          </svg>
+        )}
       </div>
 
-      {/* Track info with Marquee */}
-      <div style={{ padding: "0 24px", marginBottom: 4 }}>
+      {/* Glass info card */}
+      <div style={{
+        margin: "0 16px 16px",
+        padding: "14px 20px",
+        borderRadius: 20,
+        background: "rgba(255,255,255,0.06)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        border: `1px solid ${accentColorAlpha}`,
+      }}>
         <Marquee
           text={track?.title ?? "Ничего не играет"}
           style={{ fontSize: 18, fontWeight: 600 }}
         />
-      </div>
-      <div style={{ padding: "0 24px", fontSize: 14, color: "var(--tg-theme-hint-color, #aaa)", marginBottom: 16 }}>
         <Marquee
-          text={track ? `${track.artist} • ${track.duration_fmt} • ${qualityLabel}` : "—"}
-          style={{}}
+          text={track ? `${track.artist}  ·  ${track.duration_fmt}  ·  ${qualityLabel}` : "—"}
+          style={{ fontSize: 13, color: "var(--tg-theme-hint-color, #aaa)", marginTop: 4 }}
         />
       </div>
 
@@ -1246,7 +1318,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           <IconSkipBack />
         </button>
         <button
-          style={{ ...btnStyle, background: accentColor, color: "#fff", borderRadius: "50%", padding: 12, width: 64, height: 64, boxShadow: `0 4px 12px ${accentColorAlpha}`, transition: "background 0.5s ease, box-shadow 0.5s ease", position: "relative" }}
+          style={{ ...btnStyle, background: accentColor, color: "#fff", borderRadius: "50%", padding: 14, width: 76, height: 76, boxShadow: `0 4px 12px ${accentColorAlpha}`, transition: "background 0.5s ease, box-shadow 0.5s ease", position: "relative" }}
           onClick={() => { haptic("heavy"); onAction(state.is_playing ? "pause" : "play"); }}
           aria-label={state.is_playing ? "Pause" : "Play"}
         >
