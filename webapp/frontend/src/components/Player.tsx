@@ -273,14 +273,13 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
       swipeEntryDir.current = -300;
       lastSwipeTrackId.current = track?.video_id;
       setTimeout(() => { onAction("prev"); }, 250);
+      // Ultimate fallback — if track never changes (end of queue, error)
       setTimeout(() => {
-        if (swipeEntryDir.current !== 0) {
-          swipeEntryDir.current = 0;
-          lastSwipeTrackId.current = undefined;
-          setSwipeExiting(false);
-          setSwipeOffset(0);
-        }
-      }, 2000);
+        swipeEntryDir.current = 0;
+        lastSwipeTrackId.current = undefined;
+        setSwipeExiting(false);
+        setSwipeOffset(0);
+      }, 8000);
     } else if (diff < -60) {
       haptic("medium");
       setSwipeExiting(true);
@@ -289,21 +288,19 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
       lastSwipeTrackId.current = track?.video_id;
       setTimeout(() => { onAction("next"); }, 250);
       setTimeout(() => {
-        if (swipeEntryDir.current !== 0) {
-          swipeEntryDir.current = 0;
-          lastSwipeTrackId.current = undefined;
-          setSwipeExiting(false);
-          setSwipeOffset(0);
-        }
-      }, 2000);
+        swipeEntryDir.current = 0;
+        lastSwipeTrackId.current = undefined;
+        setSwipeExiting(false);
+        setSwipeOffset(0);
+      }, 8000);
     } else {
       setSwipeOffset(0);
     }
   };
 
-  // Carousel fly-in: animate new cover from opposite side after swipe
+  // Carousel fly-in: when track changes during a swipe, fly new cover in from opposite side
   useEffect(() => {
-    if (swipeEntryDir.current === 0) return;
+    if (!swipeExiting) return;
     if (!track?.video_id || track.video_id === lastSwipeTrackId.current) return;
 
     const entryOffset = swipeEntryDir.current;
@@ -314,27 +311,34 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     const doFlyIn = () => {
       if (done) return;
       done = true;
-      skipTransition.current = true;
-      setSwipeOffset(entryOffset);
-      requestAnimationFrame(() => {
-        skipTransition.current = false;
+      if (entryOffset !== 0) {
+        // Fly in from opposite side
+        skipTransition.current = true;
+        setSwipeOffset(entryOffset);
         requestAnimationFrame(() => {
-          setSwipeExiting(false);
-          setSwipeOffset(0);
+          skipTransition.current = false;
+          requestAnimationFrame(() => {
+            setSwipeExiting(false);
+            setSwipeOffset(0);
+          });
         });
-      });
+      } else {
+        // Direction already cleared by fallback — just fade in at center
+        setSwipeExiting(false);
+        setSwipeOffset(0);
+      }
     };
 
-    if (track.cover_url) {
+    if (track.cover_url && entryOffset !== 0) {
       const img = new Image();
       img.onload = doFlyIn;
       img.onerror = doFlyIn;
       img.src = track.cover_url;
-      setTimeout(doFlyIn, 500);
+      setTimeout(doFlyIn, 600);
     } else {
       doFlyIn();
     }
-  }, [track?.video_id]);
+  }, [track?.video_id, swipeExiting]);
 
   // ── Double-tap ±15s seek ──
   const lastTapTime = useRef<number>(0);
