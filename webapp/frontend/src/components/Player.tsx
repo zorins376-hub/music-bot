@@ -357,7 +357,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     };
 
     return (
-      <div style={{ textAlign: "center", padding: "8px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", borderRadius: 0, minHeight: "100vh", transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
+      <div style={{ textAlign: "center", padding: "8px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", borderRadius: 0, transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
         {/* Edge fades into page bg */}
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, var(--tg-theme-bg-color, #1a120b), transparent)", pointerEvents: "none", zIndex: 1 }} />
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to top, var(--tg-theme-bg-color, #1a120b), transparent)", pointerEvents: "none", zIndex: 1 }} />
@@ -1078,7 +1078,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
 
   // ─── DEFAULT BLACK ROOM THEME ──────────────────────────
   return (
-    <div style={{ textAlign: "center", padding: "16px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", minHeight: "100vh", transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
+    <div style={{ textAlign: "center", padding: "16px 0", background: `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1]}, ${bgColors[2]})`, backgroundSize: "400% 400%", animation: "bgShift 12s ease infinite", transition: "background 1.5s ease", position: "relative", overflow: "hidden" }}>
       {/* Edge fades into page bg */}
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none", zIndex: 1 }} />
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to top, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none", zIndex: 1 }} />
