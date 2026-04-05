@@ -2529,15 +2529,46 @@ async def check_favorite(video_id: str, user: dict = Depends(get_current_user)):
 
 @app.post("/api/favorites/{video_id}")
 async def toggle_favorite(video_id: str, user: dict = Depends(get_current_user)):
-    """Toggle track in user's favorites."""
+    """Toggle track in user's favorites (Redis + PostgreSQL)."""
     r = await _get_redis()
     key = _favorites_key(user["id"])
+    user_id = user["id"]
     is_member = await r.sismember(key, video_id)
     if is_member:
         await r.srem(key, video_id)
+        # Also remove from DB
+        try:
+            from bot.models.base import async_session
+            from bot.models.track import Track as TrackModel
+            from bot.models.favorite import FavoriteTrack
+            from sqlalchemy import select as sa_select
+            async with async_session() as session:
+                t = (await session.execute(sa_select(TrackModel).where(TrackModel.source_id == video_id))).scalar_one_or_none()
+                if t:
+                    fav = (await session.execute(sa_select(FavoriteTrack).where(FavoriteTrack.user_id == user_id, FavoriteTrack.track_id == t.id))).scalar_one_or_none()
+                    if fav:
+                        await session.delete(fav)
+                        await session.commit()
+        except Exception:
+            pass
         return {"liked": False}
     else:
         await r.sadd(key, video_id)
+        # Also add to DB
+        try:
+            from bot.models.base import async_session
+            from bot.models.track import Track as TrackModel
+            from bot.models.favorite import FavoriteTrack
+            from sqlalchemy import select as sa_select
+            async with async_session() as session:
+                t = (await session.execute(sa_select(TrackModel).where(TrackModel.source_id == video_id))).scalar_one_or_none()
+                if t:
+                    exists = (await session.execute(sa_select(FavoriteTrack).where(FavoriteTrack.user_id == user_id, FavoriteTrack.track_id == t.id))).scalar_one_or_none()
+                    if not exists:
+                        session.add(FavoriteTrack(user_id=user_id, track_id=t.id))
+                        await session.commit()
+        except Exception:
+            pass
         return {"liked": True}
 
 

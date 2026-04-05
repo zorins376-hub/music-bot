@@ -52,7 +52,7 @@ async def user_stats(user_id: int, user: dict = Depends(get_current_user)):
             try:
                 total_time = (await session.execute(
                     select(func.coalesce(func.sum(ListeningHistory.listen_duration), 0))
-                    .where(ListeningHistory.user_id == user_id, ListeningHistory.action == "play")
+                    .where(ListeningHistory.user_id == user_id)
                 )).scalar() or 0
             except Exception:
                 pass

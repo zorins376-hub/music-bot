@@ -1493,10 +1493,11 @@ export function App() {
               });
             }
           }
-          // Ingest play event for AI learning
+          // Ingest play event for AI learning (include previous track listen time)
           const playTrack = track || state.current_track;
           if (playTrack) {
-            ingestEvent("play", playTrack, undefined, "wave");
+            const prevListened = audioRef.current ? Math.round(audioRef.current.currentTime) : 0;
+            ingestEvent("play", playTrack, prevListened > 0 ? prevListened : undefined, "wave");
           }
         } else if (act === "pause") {
           if (audioRef.current && !audioRef.current.paused) {
