@@ -209,6 +209,9 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
   const touchEndX = useRef<number>(0);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [swipeExiting, setSwipeExiting] = useState(false);
+  const swipeEntryDir = useRef<number>(0);
+  const lastSwipeTrackId = useRef<string | undefined>(undefined);
+  const skipTransition = useRef(false);
 
   // Check if current track is liked
   useEffect(() => {
@@ -265,31 +268,73 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     const diff = touchEndX.current - touchStartX.current;
     if (diff > 60) {
       haptic("medium");
-      // Fly-away animation before action
       setSwipeExiting(true);
       setSwipeOffset(300);
+      swipeEntryDir.current = -300;
+      lastSwipeTrackId.current = track?.video_id;
+      setTimeout(() => { onAction("prev"); }, 250);
       setTimeout(() => {
-        onAction("prev");
-        setTimeout(() => {
-          setSwipeOffset(0);
+        if (swipeEntryDir.current !== 0) {
+          swipeEntryDir.current = 0;
+          lastSwipeTrackId.current = undefined;
           setSwipeExiting(false);
-        }, 80);
-      }, 250);
+          setSwipeOffset(0);
+        }
+      }, 2000);
     } else if (diff < -60) {
       haptic("medium");
       setSwipeExiting(true);
       setSwipeOffset(-300);
+      swipeEntryDir.current = 300;
+      lastSwipeTrackId.current = track?.video_id;
+      setTimeout(() => { onAction("next"); }, 250);
       setTimeout(() => {
-        onAction("next");
-        setTimeout(() => {
-          setSwipeOffset(0);
+        if (swipeEntryDir.current !== 0) {
+          swipeEntryDir.current = 0;
+          lastSwipeTrackId.current = undefined;
           setSwipeExiting(false);
-        }, 80);
-      }, 250);
+          setSwipeOffset(0);
+        }
+      }, 2000);
     } else {
       setSwipeOffset(0);
     }
   };
+
+  // Carousel fly-in: animate new cover from opposite side after swipe
+  useEffect(() => {
+    if (swipeEntryDir.current === 0) return;
+    if (!track?.video_id || track.video_id === lastSwipeTrackId.current) return;
+
+    const entryOffset = swipeEntryDir.current;
+    swipeEntryDir.current = 0;
+    lastSwipeTrackId.current = undefined;
+
+    let done = false;
+    const doFlyIn = () => {
+      if (done) return;
+      done = true;
+      skipTransition.current = true;
+      setSwipeOffset(entryOffset);
+      requestAnimationFrame(() => {
+        skipTransition.current = false;
+        requestAnimationFrame(() => {
+          setSwipeExiting(false);
+          setSwipeOffset(0);
+        });
+      });
+    };
+
+    if (track.cover_url) {
+      const img = new Image();
+      img.onload = doFlyIn;
+      img.onerror = doFlyIn;
+      img.src = track.cover_url;
+      setTimeout(doFlyIn, 500);
+    } else {
+      doFlyIn();
+    }
+  }, [track?.video_id]);
 
   // ── Double-tap ±15s seek ──
   const lastTapTime = useRef<number>(0);
@@ -479,7 +524,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
                 : "0 8px 24px rgba(255,109,0,0.3)",
               animation: isDiscSpin && state.is_playing && track ? `vinylSpin ${cdMode ? "6s" : "4s"} linear infinite` : (state.is_playing && coverMode === "default" ? "tequilaGlow 3.6s ease-in-out infinite" : "none"),
               overflow: "hidden",
-              transition: swipeExiting ? "transform 0.25s ease-in, opacity 0.25s ease-in" : (swipeOffset === 0 ? "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease" : "none"),
+              transition: skipTransition.current ? "none" : (swipeExiting ? "transform 0.25s ease-in, opacity 0.25s ease-in" : (swipeOffset === 0 ? "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease" : "none")),
               transform: `translate3d(${swipeOffset}px, 0, 0) scale(${swipeExiting ? 0.92 : (state.is_playing && !isRound ? 1.03 : 1)}) rotateX(${state.is_playing ? 4 : 0}deg)`,
               opacity: swipeExiting ? 0 : 1,
               transformStyle: "preserve-3d",
@@ -1189,7 +1234,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 64,
             boxShadow: track ? (isRound ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 2px ${accentColor}, 0 0 0 4px rgba(26,26,46,0.8), 0 0 0 5px ${accentColorAlpha}` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
             overflow: "hidden",
-            transition: swipeExiting ? "transform 0.25s ease-in, opacity 0.25s ease-in" : (swipeOffset === 0 ? "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease" : "none"),
+            transition: skipTransition.current ? "none" : (swipeExiting ? "transform 0.25s ease-in, opacity 0.25s ease-in" : (swipeOffset === 0 ? "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease" : "none")),
             transform: `translate3d(${swipeOffset}px, 0, 0) scale(${swipeExiting ? 0.92 : (state.is_playing && !isRound ? 1.02 : 1)}) rotateX(${state.is_playing ? 4 : 0}deg)`,
             opacity: swipeExiting ? 0 : 1,
             transformStyle: "preserve-3d",
