@@ -361,7 +361,6 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         {/* Edge fades into page bg */}
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, var(--tg-theme-bg-color, #1a120b), transparent)", pointerEvents: "none", zIndex: 1 }} />
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to top, var(--tg-theme-bg-color, #1a120b), transparent)", pointerEvents: "none", zIndex: 1 }} />
-        <MusicParticles isPlaying={!!state.is_playing && !!track} accentColor={gold} />
         <style>{`
           @keyframes bgShift {
             0% { background-position: 0% 50%; }
@@ -1097,7 +1096,6 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
       {/* Edge fades into page bg */}
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none", zIndex: 1 }} />
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to top, var(--tg-theme-bg-color, #1a1a2e), transparent)", pointerEvents: "none", zIndex: 1 }} />
-      <MusicParticles isPlaying={!!state.is_playing && !!track} accentColor={accentColor} />
       <style>{`
         @keyframes bgShift {
           0% { background-position: 0% 50%; }
