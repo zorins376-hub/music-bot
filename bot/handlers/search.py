@@ -864,6 +864,12 @@ async def handle_track_select(
 
         # Проверяем Redis кэш
         file_id = await cache.get_file_id(video_id, bitrate)
+        if not file_id:
+            try:
+                from bot.services.telegram_cache import get_file_id as _tg_get_fid
+                file_id = await _tg_get_fid(video_id)
+            except Exception:
+                pass
         if file_id:
             cache_hits.inc()
             caption = _track_caption(lang, track_info, bitrate, ad_free=_af)

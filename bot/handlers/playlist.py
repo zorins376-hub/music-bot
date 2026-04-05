@@ -352,7 +352,7 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
         )
         return True
 
-    # 2) Try file_id cache by common bitrates
+    # 2) Try file_id cache by common bitrates, then DB fallback
     for br in (192, 320, 128):
         fid = await cache.get_file_id(track.source_id, br)
         if fid:
@@ -371,6 +371,21 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
                 return True
             except Exception:
                 continue
+    # DB fallback (Redis might have expired)
+    if not track.file_id:
+        try:
+            from bot.services.telegram_cache import get_file_id as _tg_get_fid
+            db_fid = await _tg_get_fid(track.source_id)
+            if db_fid:
+                await message.answer_audio(
+                    audio=db_fid,
+                    title=track.title,
+                    performer=track.artist,
+                    duration=track.duration,
+                )
+                return True
+        except Exception:
+            pass
 
     # 3) Lazy download (for youtube-like source_id), then send and persist file_id
     source_id = (track.source_id or "").strip()

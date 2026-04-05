@@ -92,8 +92,14 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
         source = track.get("source", "youtube")
         icon = _SOURCE_ICON.get(source, "♪")
 
-        # Use file_id from track dict (local DB) or Redis cache
+        # Use file_id from track dict (local DB) or Redis cache or DB fallback
         fid = track.get("file_id") or await cache.get_file_id(video_id)
+        if not fid:
+            try:
+                from bot.services.telegram_cache import get_file_id as _tg_get_fid
+                fid = await _tg_get_fid(video_id)
+            except Exception:
+                pass
         if fid:
             results.append(
                 InlineQueryResultCachedAudio(
