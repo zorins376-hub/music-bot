@@ -506,7 +506,7 @@ export function App() {
       sendAction("next").then(setState).catch(() => {});
     };
     const onTimeUpdate = () => {
-      const t = Math.floor(audio.currentTime);
+      const t = audio.currentTime;
       elapsedRef.current = t;
       setElapsed(t);
       const s = stateRef.current;
@@ -2012,9 +2012,11 @@ export function App() {
         margin: "0 auto",
         paddingBottom: view !== "player" && state.current_track ? 72 : 12,
         ...(view === "player" ? {
-          background: `linear-gradient(135deg, ${playerBgColors[0]}, ${playerBgColors[1]}, ${playerBgColors[2]})`,
-          backgroundSize: "400% 400%",
-          animation: "bgShift 12s ease infinite",
+          background: isTequila
+            ? "transparent"
+            : `linear-gradient(135deg, ${playerBgColors[0]}, ${playerBgColors[1]}, ${playerBgColors[2]})`,
+          backgroundSize: isTequila ? undefined : "400% 400%",
+          animation: isTequila ? undefined : "bgShift 12s ease infinite",
           transition: "background 1.5s ease",
           minHeight: "100vh",
         } : {}),

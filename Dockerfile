@@ -19,9 +19,9 @@ ENV DENO_VERSION=2.7.11
 RUN set -eux; \
     cd /tmp; \
     curl -fsSL -o deno-x86_64-unknown-linux-gnu.zip \
-      "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip"; \
+    "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip"; \
     curl -fsSL -o deno.sha256 \
-      "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip.sha256sum"; \
+    "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip.sha256sum"; \
     sha256sum -c deno.sha256; \
     unzip -o deno-x86_64-unknown-linux-gnu.zip -d /usr/local/bin; \
     chmod +x /usr/local/bin/deno; \

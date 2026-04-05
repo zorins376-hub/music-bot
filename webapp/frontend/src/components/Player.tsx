@@ -208,6 +208,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
   const touchStartX = useRef<number>(0);
   const touchEndX = useRef<number>(0);
   const [swipeOffset, setSwipeOffset] = useState(0);
+  const [swipeExiting, setSwipeExiting] = useState(false);
 
   // Check if current track is liked
   useEffect(() => {
@@ -256,20 +257,34 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     touchEndX.current = e.touches[0].clientX;
     const raw = touchEndX.current - touchStartX.current;
     // Rubber-band damping: resistance increases as you drag further
-    const damped = Math.sign(raw) * Math.pow(Math.abs(raw), 0.75);
-    setSwipeOffset(Math.max(-100, Math.min(100, damped)));
+    const damped = Math.sign(raw) * Math.pow(Math.abs(raw), 0.7);
+    setSwipeOffset(Math.max(-120, Math.min(120, damped)));
   };
 
   const handleTouchEnd = () => {
     const diff = touchEndX.current - touchStartX.current;
     if (diff > 60) {
       haptic("medium");
-      onAction("prev");
+      // Fly-away animation before action
+      setSwipeExiting(true);
+      setSwipeOffset(300);
+      setTimeout(() => {
+        onAction("prev");
+        setSwipeOffset(0);
+        setSwipeExiting(false);
+      }, 250);
     } else if (diff < -60) {
       haptic("medium");
-      onAction("next");
+      setSwipeExiting(true);
+      setSwipeOffset(-300);
+      setTimeout(() => {
+        onAction("next");
+        setSwipeOffset(0);
+        setSwipeExiting(false);
+      }, 250);
+    } else {
+      setSwipeOffset(0);
     }
-    setSwipeOffset(0);
   };
 
   // ── Double-tap ±15s seek ──
@@ -303,8 +318,9 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
   useEffect(() => { setSeekValue(null); }, [track?.video_id]);
 
   const fmtTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
+    const total = Math.floor(s);
+    const m = Math.floor(total / 60);
+    const sec = total % 60;
     return `${m}:${sec < 10 ? "0" : ""}${sec}`;
   };
 
@@ -459,10 +475,11 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
                 : "0 8px 24px rgba(255,109,0,0.3)",
               animation: isDiscSpin && state.is_playing && track ? `vinylSpin ${cdMode ? "6s" : "4s"} linear infinite` : (state.is_playing && coverMode === "default" ? "tequilaGlow 3.6s ease-in-out infinite" : "none"),
               overflow: "hidden",
-              transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-              transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !isRound ? 1.03 : 1}) rotateX(${state.is_playing ? 4 : 0}deg)`,
+              transition: swipeExiting ? "transform 0.25s ease-in, opacity 0.25s ease-in" : (swipeOffset === 0 ? "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease" : "none"),
+              transform: `translate3d(${swipeOffset}px, 0, 0) scale(${swipeExiting ? 0.92 : (state.is_playing && !isRound ? 1.03 : 1)}) rotateX(${state.is_playing ? 4 : 0}deg)`,
+              opacity: swipeExiting ? 0 : 1,
               transformStyle: "preserve-3d",
-              willChange: "transform", touchAction: "pan-y", userSelect: "none",
+              willChange: "transform, opacity", touchAction: "pan-y", userSelect: "none",
             }}
           >
             {/* Cover image */}
@@ -564,7 +581,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
                 strokeDashoffset={2 * Math.PI * 166 * (1 - elapsed / duration)}
                 strokeLinecap="round"
                 transform="rotate(-90 169 169)"
-                style={{ transition: "stroke-dashoffset 0.5s linear" }}
+                style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
               />
             </svg>
           )}
@@ -1154,11 +1171,12 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 64,
             boxShadow: track ? (isRound ? `0 8px 24px rgba(0,0,0,0.4), 0 0 0 2px ${accentColor}, 0 0 0 4px rgba(26,26,46,0.8), 0 0 0 5px ${accentColorAlpha}` : "0 8px 24px rgba(0,0,0,0.3)") : "none",
             overflow: "hidden",
-            transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" : "none",
-            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${state.is_playing && !isRound ? 1.02 : 1}) rotateX(${state.is_playing ? 4 : 0}deg)`,
+            transition: swipeExiting ? "transform 0.25s ease-in, opacity 0.25s ease-in" : (swipeOffset === 0 ? "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease" : "none"),
+            transform: `translate3d(${swipeOffset}px, 0, 0) scale(${swipeExiting ? 0.92 : (state.is_playing && !isRound ? 1.02 : 1)}) rotateX(${state.is_playing ? 4 : 0}deg)`,
+            opacity: swipeExiting ? 0 : 1,
             transformStyle: "preserve-3d",
             animation: isDiscSpin && state.is_playing && track ? `vinylSpin ${cdMode ? "6s" : "4s"} linear infinite` : "none",
-            willChange: "transform", touchAction: "pan-y", userSelect: "none",
+            willChange: "transform, opacity", touchAction: "pan-y", userSelect: "none",
           }}
         >
           {track?.cover_url ? (
@@ -1236,7 +1254,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
               strokeDashoffset={2 * Math.PI * 156 * (1 - elapsed / duration)}
               strokeLinecap="round"
               transform="rotate(-90 159 159)"
-              style={{ transition: "stroke-dashoffset 0.5s linear" }}
+              style={{ transition: "stroke-dashoffset 0.3s linear", willChange: "stroke-dashoffset" }}
             />
           </svg>
         )}
