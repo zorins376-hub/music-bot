@@ -212,6 +212,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
   const swipeEntryDir = useRef<number>(0);
   const lastSwipeTrackId = useRef<string | undefined>(undefined);
   const skipTransition = useRef(false);
+  const swipeGen = useRef(0);
 
   // Check if current track is liked
   useEffect(() => {
@@ -268,13 +269,14 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     const diff = touchEndX.current - touchStartX.current;
     if (diff > 60) {
       haptic("medium");
+      const gen = ++swipeGen.current;
       setSwipeExiting(true);
       setSwipeOffset(300);
       swipeEntryDir.current = -300;
       lastSwipeTrackId.current = track?.video_id;
       setTimeout(() => { onAction("prev"); }, 250);
-      // Ultimate fallback — if track never changes (end of queue, error)
       setTimeout(() => {
+        if (swipeGen.current !== gen) return;
         swipeEntryDir.current = 0;
         lastSwipeTrackId.current = undefined;
         setSwipeExiting(false);
@@ -282,12 +284,14 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
       }, 8000);
     } else if (diff < -60) {
       haptic("medium");
+      const gen = ++swipeGen.current;
       setSwipeExiting(true);
       setSwipeOffset(-300);
       swipeEntryDir.current = 300;
       lastSwipeTrackId.current = track?.video_id;
       setTimeout(() => { onAction("next"); }, 250);
       setTimeout(() => {
+        if (swipeGen.current !== gen) return;
         swipeEntryDir.current = 0;
         lastSwipeTrackId.current = undefined;
         setSwipeExiting(false);
@@ -306,13 +310,13 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
     const entryOffset = swipeEntryDir.current;
     swipeEntryDir.current = 0;
     lastSwipeTrackId.current = undefined;
+    ++swipeGen.current; // invalidate any pending fallback
 
     let done = false;
     const doFlyIn = () => {
       if (done) return;
       done = true;
       if (entryOffset !== 0) {
-        // Fly in from opposite side
         skipTransition.current = true;
         setSwipeOffset(entryOffset);
         requestAnimationFrame(() => {
@@ -323,7 +327,6 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           });
         });
       } else {
-        // Direction already cleared by fallback — just fade in at center
         setSwipeExiting(false);
         setSwipeOffset(0);
       }
