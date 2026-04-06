@@ -484,9 +484,11 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
 
   const handleJoinParty = async (code: string) => {
     haptic("light");
+    const cleanCode = code.replace(/^#/, "").trim();
+    if (!cleanCode) return;
     setLoading(true);
     try {
-      const p = await fetchParty(code);
+      const p = await fetchParty(cleanCode);
       setParty(p);
       connectSSE(code);
     } catch {
@@ -730,7 +732,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
 <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{readOnlyMode ? <><IconTV size={13} /> Режим витрины — только просмотр live room</> : (isDJ ? <><IconHeadphones size={13} /> Ты DJ — управляй очередью</> : "Добавляй треки в общую очередь")}</span>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.16)", color: "#fff", fontSize: 11, fontWeight: 700 }}>#{party.invite_code}</div>
+              <div onClick={() => { navigator.clipboard?.writeText(party.invite_code).then(() => { haptic("light"); showToast("Код скопирован"); }).catch(() => {}); }} style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.16)", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>#{party.invite_code} <IconClipboard size={11} /></div>
               <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconMusic size={13} /> {party.tracks.length} треков</div>
               <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}>{readOnlyMode ? <><IconTV size={12} /> read-only</> : (isDJ ? <><IconTrophy size={12} /> DJ mode</> : <><IconSparkles size={12} /> listener</>)}</div>
             </div>
@@ -1499,7 +1501,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
         <div style={{ ...sectionLabel, marginBottom: 10, fontSize: 10 }}>Присоединиться по коду</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input type="text" placeholder="Вставь код пати" maxLength={16} value={joinCode}
-            onInput={(e) => setJoinCode(((e.target as HTMLInputElement).value).trim())}
+            onInput={(e) => setJoinCode(((e.target as HTMLInputElement).value).replace(/^#/, "").trim())}
             onKeyDown={(e) => { if (e.key === "Enter" && joinCode) handleJoinParty(joinCode); }}
             style={{ flex: 1, padding: "10px 12px", borderRadius: 12, border: warm ? "1px solid rgba(255,213,79,0.2)" : "1px solid rgba(124,77,255,0.2)", background: "rgba(255,255,255,0.03)", color: textColor, fontSize: 14, outline: "none", fontFamily: "monospace" }} />
           <button onClick={() => { if (joinCode) handleJoinParty(joinCode); }} disabled={!joinCode} style={{
