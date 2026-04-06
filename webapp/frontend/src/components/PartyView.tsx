@@ -557,16 +557,14 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
   const handleShare = () => {
     if (!party) return;
     haptic("light");
-    const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(`🎉 Заходи на пати «${party.name}»! Добавляй свои треки 🎶`)}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/TSmymusicbot_bot?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(`🎉 Заходи на пати «${party.name}»! Добавляй свои треки 🎶`)}`;
     window.open(shareUrl, "_blank");
   };
 
   const handleShareTv = () => {
     if (!party) return;
     haptic("light");
-    const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?startapp=partytv_${party.invite_code}`)}&text=${encodeURIComponent(`📺 Смотри Party TV «${party.name}» в live-режиме`)}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/TSmymusicbot_bot?startapp=partytv_${party.invite_code}`)}&text=${encodeURIComponent(`📺 Смотри Party TV «${party.name}» в live-режиме`)}`;
     window.open(shareUrl, "_blank");
   };
 
@@ -582,8 +580,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
       recap.top_artists[0] ? `Топ артист: ${recap.top_artists[0].label}` : null,
       `#${party.invite_code}`,
     ].filter(Boolean).join("\n");
-    const botUsername = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || "musicbot";
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(summary)}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/TSmymusicbot_bot?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(summary)}`;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(summary);
