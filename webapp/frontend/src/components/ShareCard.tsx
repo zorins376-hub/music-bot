@@ -206,51 +206,28 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
     };
   }, [generateCard]);
 
-  const handleShare = useCallback(async () => {
-    if (!cardUrl) return;
-
-    // 1) Try native Web Share API (works in real browsers, not in TG WebView)
-    try {
-      if (navigator.share && navigator.canShare) {
-        const response = await fetch(cardUrl);
-        const blob = await response.blob();
-        const file = new File([blob], `${track.title}.png`, { type: "image/png" });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: `${track.artist} — ${track.title}`,
-            text: isTequila ? "Listen on TEQUILA MUSIC" : "Listen on BLACK ROOM",
-          });
-          return;
-        }
-      }
-    } catch {
-      // Web Share not supported or user cancelled
-    }
-
-    // 2) Fallback: share as Telegram message with link
+  const handleShare = useCallback(() => {
     const appLink = `https://t.me/TSmymusicbot_bot/app?startapp=play_${track.video_id || ""}`;
-    const text = `🎵 ${track.artist} — ${track.title}\n${appLink}`;
+    const text = encodeURIComponent(`🎵 ${track.artist} — ${track.title}`);
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${text}`;
     try {
-      const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${encodeURIComponent(`🎵 ${track.artist} — ${track.title}`)}`;
-      window.Telegram?.WebApp?.openTelegramLink?.(tgShareUrl);
+      window.Telegram?.WebApp?.openTelegramLink?.(shareUrl);
     } catch {
-      window.open(`https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${encodeURIComponent(`🎵 ${track.artist} — ${track.title}`)}`, "_blank");
+      window.open(shareUrl, "_blank");
     }
-  }, [cardUrl, track, isTequila]);
+  }, [track]);
 
   const handleDownload = useCallback(() => {
-    // In TG WebView, <a download>.click() silently fails.
-    // If we have a server-side story card URL, open it so user can long-press → Save.
-    // Otherwise fall back to opening the canvas blob URL.
-    const url = track.video_id ? getStoryCardUrl(track.video_id) : cardUrl;
-    if (!url) return;
+    // openLink requires an absolute https:// URL
+    const path = track.video_id ? getStoryCardUrl(track.video_id) : null;
+    if (!path) return;
+    const absUrl = path.startsWith("http") ? path : `${window.location.origin}${path}`;
     try {
-      window.Telegram?.WebApp?.openLink?.(url);
+      window.Telegram?.WebApp?.openLink?.(absUrl);
     } catch {
-      window.open(url, "_blank");
+      window.open(absUrl, "_blank");
     }
-  }, [cardUrl, track.video_id]);
+  }, [track.video_id]);
 
   return (
     <div
