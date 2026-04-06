@@ -743,35 +743,25 @@ async def handle_text(message: Message) -> None:
 
     is_group = message.chat.type in ("group", "supergroup")
 
-    matched_prefix = False
-
-    # Handle @bot_username mentions in groups — simple text-based detection
+    # Groups: ONLY respond to "трек <query>" — ignore everything else
     if is_group:
-        bot_me = await message.bot.me()
-        if bot_me.username:
-            at_tag = f"@{bot_me.username}"
-            # Case-insensitive check
-            idx = lower.find(at_tag.lower())
-            if idx != -1:
-                text = (text[:idx] + text[idx + len(at_tag):]).strip()
-                lower = text.lower()
-                matched_prefix = True
-
-    # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
-    _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
-    if not matched_prefix:
-        for prefix in _PREFIXES:
-            if lower.startswith(prefix):
-                text = text[len(prefix):].strip()
-                matched_prefix = True
-                break
-
-    # In groups: auto-convert YouTube/Spotify/Yandex links even without trigger prefix
-    if is_group and not matched_prefix:
-        if is_youtube_url(text) or is_spotify_url(text) or is_yandex_music_url(text):
-            await _do_search(message, text)
+        _GROUP_PREFIX = "трек "
+        if lower.startswith(_GROUP_PREFIX):
+            text = text[len(_GROUP_PREFIX):].strip()
+            if text:
+                await _do_search(message, text)
             return
         return
+
+    matched_prefix = False
+
+    # Natural language triggers (private chats only)
+    _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
+    for prefix in _PREFIXES:
+        if lower.startswith(prefix):
+            text = text[len(prefix):].strip()
+            matched_prefix = True
+            break
 
     if not text:
         return
