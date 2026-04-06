@@ -313,7 +313,7 @@ async def handle_automix_go(callback: CallbackQuery, callback_data: MixCb) -> No
 
 
 # Триггер "что играет" / "что за трек"
-@router.message(lambda m: m.text and any(
+@router.message(lambda m: m.text and m.chat.type == "private" and any(
     phrase in m.text.lower() for phrase in ("что играет", "что за трек", "what's playing")
 ))
 async def handle_whats_playing(message: Message) -> None:
@@ -336,7 +336,7 @@ async def handle_whats_playing(message: Message) -> None:
 
 
 # Триггеры управления радио: "стоп", "пауза", "дальше", "скип", "next", "stop", "pause"
-@router.message(lambda m: m.text and m.text.strip().lower() in (
+@router.message(lambda m: m.text and m.chat.type == "private" and m.text.strip().lower() in (
     "стоп", "stop", "пауза", "pause", "дальше", "скип", "next", "skip", "выключи"
 ))
 async def handle_radio_control(message: Message) -> None:

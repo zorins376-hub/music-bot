@@ -766,7 +766,7 @@ async def cb_clone_playlist(callback: CallbackQuery, callback_data: PlCb) -> Non
 # ── Import playlist from JSON file (C-05) ───────────────────────────────
 
 
-@router.message(F.document)
+@router.message(F.document, F.chat.type == "private")
 async def handle_playlist_import(message: Message) -> None:
     """Import a playlist from a JSON file sent by the user."""
     doc = message.document

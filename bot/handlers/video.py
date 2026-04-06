@@ -114,7 +114,7 @@ async def handle_video_button(callback: CallbackQuery) -> None:
         )
 
 
-@router.message(lambda m: m.text and not m.text.startswith("/") and m.from_user and m.from_user.id in _video_wait)
+@router.message(lambda m: m.text and m.chat.type == "private" and not m.text.startswith("/") and m.from_user and m.from_user.id in _video_wait)
 async def handle_video_query(message: Message) -> None:
     _video_wait.pop(message.from_user.id, None)
     # Purge stale entries older than 5 minutes
