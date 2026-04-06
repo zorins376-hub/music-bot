@@ -743,25 +743,19 @@ async def handle_text(message: Message) -> None:
 
     is_group = message.chat.type in ("group", "supergroup")
 
-    # Groups: ONLY respond to "трек <query>" — ignore everything else
-    if is_group:
-        _GROUP_PREFIX = "трек "
-        if lower.startswith(_GROUP_PREFIX):
-            text = text[len(_GROUP_PREFIX):].strip()
-            if text:
-                await _do_search(message, text)
-            return
-        return
-
     matched_prefix = False
 
-    # Natural language triggers (private chats only)
+    # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
     _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
     for prefix in _PREFIXES:
         if lower.startswith(prefix):
             text = text[len(prefix):].strip()
             matched_prefix = True
             break
+
+    # In groups: only respond to prefix triggers — ignore links and bare text
+    if is_group and not matched_prefix:
+        return
 
     if not text:
         return
