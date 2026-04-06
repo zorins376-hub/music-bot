@@ -67,30 +67,46 @@ export const LiveRadioView = memo(function LiveRadioView({
   const playTrackLocally = useCallback((videoId: string, seekTo?: number) => {
     if (!audioRef.current) return;
     const audio = audioRef.current;
-    // Avoid reloading the same track
+    // Avoid reloading the same track (unless seeking)
     if (currentVideoIdRef.current === videoId && !audio.paused && !seekTo) return;
     currentVideoIdRef.current = videoId;
     audio.src = getStreamUrl(videoId);
     audio.load();
 
     if (seekTo && seekTo > 1) {
-      // For mid-track sync: wait for metadata (duration known), then seek, then play
-      const onMeta = () => {
-        audio.removeEventListener("loadedmetadata", onMeta);
+      // Mid-track sync: wait for enough data, seek, then play
+      let resolved = false;
+      const doSeekAndPlay = () => {
+        if (resolved) return;
+        resolved = true;
         audio.currentTime = seekTo;
-        const onSeeked = () => {
-          audio.removeEventListener("seeked", onSeeked);
-          audio.play().catch(() => {});
-        };
-        audio.addEventListener("seeked", onSeeked, { once: true });
+        audio.play().catch(() => {});
       };
-      audio.addEventListener("loadedmetadata", onMeta, { once: true });
-    } else {
+      // Try seeked path first (most reliable)
       const onCanPlay = () => {
+        audio.removeEventListener("canplay", onCanPlay);
+        doSeekAndPlay();
+      };
+      audio.addEventListener("canplay", onCanPlay, { once: true });
+      // Timeout fallback: if canplay never fires, force play anyway
+      setTimeout(() => {
+        audio.removeEventListener("canplay", onCanPlay);
+        doSeekAndPlay();
+      }, 6000);
+    } else {
+      let started = false;
+      const onCanPlay = () => {
+        if (started) return;
+        started = true;
         audio.removeEventListener("canplay", onCanPlay);
         audio.play().catch(() => {});
       };
       audio.addEventListener("canplay", onCanPlay, { once: true });
+      // Timeout fallback
+      setTimeout(() => {
+        audio.removeEventListener("canplay", onCanPlay);
+        if (!started) { started = true; audio.play().catch(() => {}); }
+      }, 6000);
     }
     setIsPlaying(true);
   }, []);
@@ -394,12 +410,26 @@ export const LiveRadioView = memo(function LiveRadioView({
           return;
         }
         if (msg.event === "playback_sync") {
+          const syncAction = typeof msg.data?.action === "string" ? msg.data.action : null;
+          const syncSeek = typeof msg.data?.seek_pos === "number" ? msg.data.seek_pos : null;
           setBroadcast(prev => prev ? {
             ...prev,
-            action: typeof msg.data?.action === "string" ? msg.data.action : prev.action,
-            seek_pos: typeof msg.data?.seek_pos === "number" ? msg.data.seek_pos : prev.seek_pos,
+            action: syncAction ?? prev.action,
+            seek_pos: syncSeek ?? prev.seek_pos,
             current_idx: typeof msg.data?.current_idx === "number" ? msg.data.current_idx : prev.current_idx,
           } : null);
+          // Sync audio playback for listeners
+          const audio = audioRef.current;
+          if (audio) {
+            if (syncAction === "pause") {
+              audio.pause();
+            } else if (syncAction === "play") {
+              if (syncSeek !== null && syncSeek > 1) audio.currentTime = syncSeek;
+              audio.play().catch(() => {});
+            } else if (syncAction === "seek" && syncSeek !== null) {
+              audio.currentTime = syncSeek;
+            }
+          }
           return;
         }
         if (msg.event === "voice" && msg.data?.url) {
