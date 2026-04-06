@@ -47,62 +47,66 @@ def _dominant_color(cover_bytes: bytes) -> tuple[int, int, int]:
 
 
 def _build_background(cover_bytes: bytes | None, dominant: tuple[int, int, int] | None) -> "Image.Image":
-    """Build a premium background: blurred cover + dark overlay + bokeh circles."""
+    """Build a premium background: blurred cover + dark overlay + bokeh circles + dither."""
+    import numpy as np
+
     img = Image.new("RGBA", (_WIDTH, _HEIGHT), (10, 10, 18, 255))
 
     # Layer 1: Blurred & stretched cover as background
     if cover_bytes:
         try:
             bg_cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-            # Stretch to fill, then heavy blur
             bg_cover = bg_cover.resize((_WIDTH, _HEIGHT), Image.LANCZOS)
             bg_cover = bg_cover.filter(ImageFilter.GaussianBlur(radius=60))
             img.paste(bg_cover, (0, 0))
         except Exception:
             pass
 
-    # Layer 2: Dark gradient overlay (top-to-bottom, more opaque at edges)
-    overlay = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
-    odraw = ImageDraw.Draw(overlay)
+    # Layer 2: Dark gradient overlay — built via numpy for smooth result
+    alpha_arr = np.zeros((_HEIGHT, _WIDTH), dtype=np.float64)
     for y in range(_HEIGHT):
         ratio = y / _HEIGHT
-        # Darker at top & bottom, lighter in middle
         if ratio < 0.15:
-            alpha = int(220 - ratio / 0.15 * 60)
+            alpha_arr[y, :] = 220 - ratio / 0.15 * 60
         elif ratio > 0.75:
-            alpha = int(160 + (ratio - 0.75) / 0.25 * 80)
+            alpha_arr[y, :] = 160 + (ratio - 0.75) / 0.25 * 80
         else:
-            alpha = 160
-        odraw.line([(0, y), (_WIDTH, y)], fill=(0, 0, 0, alpha))
+            alpha_arr[y, :] = 160
+    # Add ±2 noise to break banding
+    noise = np.random.default_rng(seed=7).uniform(-2.0, 2.0, alpha_arr.shape)
+    alpha_arr = np.clip(alpha_arr + noise, 0, 255).astype(np.uint8)
+    overlay = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
+    overlay.putalpha(Image.fromarray(alpha_arr, mode="L"))
+    # Set RGB channels to black
+    black = Image.new("RGB", (_WIDTH, _HEIGHT), (0, 0, 0))
+    overlay = Image.merge("RGBA", (*black.split(), overlay.split()[3]))
     img = Image.alpha_composite(img, overlay)
 
-    # Layer 3: Radial glow behind cover area
+    # Layer 3: Radial glow behind cover area — numpy for smooth gradient
     if dominant:
-        glow = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
-        gdraw = ImageDraw.Draw(glow)
-        cx, cy = _WIDTH // 2, 620
-        for r in range(500, 0, -2):
-            alpha = int(40 * (r / 500))
-            dr, dg, db = dominant
-            gdraw.ellipse(
-                [(cx - r, cy - r), (cx + r, cy + r)],
-                fill=(dr, dg, db, alpha),
-            )
+        dr, dg, db = dominant
+        cx, cy, max_r = _WIDTH // 2, 620, 500
+        ys = np.arange(_HEIGHT, dtype=np.float64)
+        xs = np.arange(_WIDTH, dtype=np.float64)
+        yy, xx = np.meshgrid(ys, xs, indexing="ij")
+        dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+        glow_alpha = np.where(dist < max_r, 40.0 * (1.0 - dist / max_r), 0.0)
+        glow_noise = np.random.default_rng(seed=13).uniform(-1.5, 1.5, glow_alpha.shape)
+        glow_alpha = np.clip(glow_alpha + glow_noise, 0, 255).astype(np.uint8)
+        glow = Image.new("RGBA", (_WIDTH, _HEIGHT), (dr, dg, db, 0))
+        glow.putalpha(Image.fromarray(glow_alpha, mode="L"))
         img = Image.alpha_composite(img, glow)
 
-    # Layer 4: Bokeh circles (random semi-transparent circles)
+    # Layer 4: Bokeh circles
     bokeh = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
     bdraw = ImageDraw.Draw(bokeh)
-    rng = random.Random(42)  # Deterministic for same card
+    rng = random.Random(42)
     for _ in range(18):
         bx = rng.randint(-100, _WIDTH + 100)
         by = rng.randint(-100, _HEIGHT + 100)
         br = rng.randint(30, 180)
         ba = rng.randint(8, 30)
-        if dominant:
-            bc = (*dominant, ba)
-        else:
-            bc = (200, 160, 255, ba)
+        bc = (*dominant, ba) if dominant else (200, 160, 255, ba)
         bdraw.ellipse([(bx - br, by - br), (bx + br, by + br)], fill=bc)
     try:
         bokeh = bokeh.filter(ImageFilter.GaussianBlur(radius=15))
@@ -110,7 +114,12 @@ def _build_background(cover_bytes: bytes | None, dominant: tuple[int, int, int] 
         pass
     img = Image.alpha_composite(img, bokeh)
 
-    return img.convert("RGB")
+    # Final dither pass: add ±1 noise to the whole RGB to eliminate any remaining banding
+    arr = np.array(img.convert("RGB"), dtype=np.int16)
+    final_noise = np.random.default_rng(seed=21).integers(-2, 3, arr.shape, dtype=np.int16)
+    arr = np.clip(arr + final_noise, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(arr, "RGB")
 
 
 def _get_font(size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
