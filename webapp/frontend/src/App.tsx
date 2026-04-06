@@ -2485,7 +2485,7 @@ export function App() {
 
       {view === "party" && (
         <Suspense fallback={null}><ViewErrorBoundary viewName="Party" fallbackColor={theme.hintColor}>
-        userProfile?.is_admin ? (
+        {userProfile?.is_admin ? (
           <PartyView userId={userId} onPlayTrack={handlePartyPlayTrack} onPlaybackAction={handlePartyPlaybackAction} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />
         ) : (
           /* Coming Soon Banner for non-admins */
@@ -2711,7 +2711,7 @@ export function App() {
               </div>
             </div>
           </div>
-        )
+        )}
         </ViewErrorBoundary></Suspense>
       )}
 
