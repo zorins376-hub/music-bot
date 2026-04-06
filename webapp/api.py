@@ -1955,7 +1955,7 @@ async def get_story_card(
     if user is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
     from bot.services.story_cards import generate_track_card
-    import httpx
+    import aiohttp
 
     # Resolve track info
     title, artist, duration_fmt, cover_bytes = "Unknown", "Unknown", "", None
@@ -1973,10 +1973,10 @@ async def get_story_card(
                 duration_fmt = f"{dur // 60}:{dur % 60:02d}"
                 if t.cover_url:
                     try:
-                        async with httpx.AsyncClient(timeout=5) as client:
-                            resp = await client.get(t.cover_url)
-                            if resp.status_code == 200:
-                                cover_bytes = resp.content
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as client:
+                            async with client.get(t.cover_url) as resp:
+                                if resp.status == 200:
+                                    cover_bytes = await resp.read()
                     except Exception:
                         pass
     except Exception:
