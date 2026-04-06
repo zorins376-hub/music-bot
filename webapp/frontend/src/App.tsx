@@ -249,7 +249,9 @@ export function App() {
   const radioSeedRef = useRef<string | null>(null);
   const radioLoadingRef = useRef(false);
   const radioPlayedRef = useRef<string[]>([]);
-  const flowHistoryRef = useRef<Track[]>([]);
+  const playHistoryRef = useRef<Track[]>([]);
+  const prevTrackRef = useRef<Track | null>(null);
+  const navigatingBackRef = useRef(false);
   // ── Broadcast live indicator ──
   const [broadcastLive, setBroadcastLive] = useState(false);
   const [broadcastDJ, setBroadcastDJ] = useState("");
@@ -1026,7 +1028,16 @@ export function App() {
         } else if (action === "next") {
           if (radioModeRef.current) { flowNext(); } else { sendAction("next").then(setState).catch(() => {}); }
         } else if (action === "prev") {
-          sendAction("prev").then(setState).catch(() => {});
+          if (playHistoryRef.current.length > 0) {
+            navigatingBackRef.current = true;
+            const prev = playHistoryRef.current.pop()!;
+            sendAction("play", prev.video_id, undefined, prev).then(setState).catch(() => {
+              playHistoryRef.current.push(prev);
+              navigatingBackRef.current = false;
+            });
+          } else {
+            sendAction("prev").then(setState).catch(() => {});
+          }
         }
       }
     };
@@ -1219,7 +1230,16 @@ export function App() {
         sendAction("pause").then(setState).catch(() => {});
       });
       navigator.mediaSession.setActionHandler("previoustrack", () => {
-        sendAction("prev").then(setState).catch(() => {});
+        if (playHistoryRef.current.length > 0) {
+          navigatingBackRef.current = true;
+          const prev = playHistoryRef.current.pop()!;
+          sendAction("play", prev.video_id, undefined, prev).then(setState).catch(() => {
+            playHistoryRef.current.push(prev);
+            navigatingBackRef.current = false;
+          });
+        } else {
+          sendAction("prev").then(setState).catch(() => {});
+        }
       });
       navigator.mediaSession.setActionHandler("nexttrack", () => {
         sendAction("next").then(setState).catch(() => {});
@@ -1387,6 +1407,15 @@ export function App() {
     elapsedRef.current = 0;
     setElapsed(0);
     setAudioDuration(state.current_track?.duration ?? 0);
+    // Universal play history: track every track change
+    const cur = state.current_track;
+    const prev = prevTrackRef.current;
+    if (cur && prev && cur.video_id !== prev.video_id && !navigatingBackRef.current) {
+      playHistoryRef.current.push(prev);
+      if (playHistoryRef.current.length > 100) playHistoryRef.current.shift();
+    }
+    navigatingBackRef.current = false;
+    prevTrackRef.current = cur ?? null;
   }, [state.current_track?.video_id]);
 
   // Sleep Timer countdown
@@ -1450,9 +1479,17 @@ export function App() {
           return;
         }
 
-        // ── Flow mode: intercept "prev" to go back in history ──
-        if (act === "prev" && radioModeRef.current && !trackId) {
-          flowPrev();
+        // ── Universal prev: go back in play history (all modes) ──
+        if (act === "prev" && !trackId && playHistoryRef.current.length > 0) {
+          navigatingBackRef.current = true;
+          const prev = playHistoryRef.current.pop()!;
+          try {
+            const ns = await sendAction("play", prev.video_id, undefined, prev);
+            setState(ns);
+          } catch {
+            playHistoryRef.current.push(prev);
+            navigatingBackRef.current = false;
+          }
           return;
         }
 
@@ -1556,13 +1593,6 @@ export function App() {
       const seed = radioSeedRef.current || currentId;
       if (!seed) return;
 
-      // Save current track to history before moving forward
-      if (s.current_track) {
-        flowHistoryRef.current.push(s.current_track);
-        // Cap history at 100 entries
-        if (flowHistoryRef.current.length > 100) flowHistoryRef.current.shift();
-      }
-
       // Ingest skip event
       if (s.current_track && audioRef.current) {
         ingestEvent("skip", s.current_track, Math.round(audioRef.current.currentTime), "flow");
@@ -1585,21 +1615,6 @@ export function App() {
       showToast("Ошибка подбора трека", "error");
     } finally {
       radioLoadingRef.current = false;
-    }
-  }, []);
-
-  // ── Flow mode: go back to previous track from history ──
-  const flowPrev = useCallback(async () => {
-    const prev = flowHistoryRef.current.pop();
-    if (!prev) return;
-    try {
-      const ns = await sendAction("play", prev.video_id, undefined, prev);
-      radioSeedRef.current = prev.video_id;
-      setState(ns);
-    } catch {
-      // Put it back if playback failed
-      flowHistoryRef.current.push(prev);
-      showToast("Не удалось вернуться назад", "error");
     }
   }, []);
 
