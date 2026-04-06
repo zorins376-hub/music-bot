@@ -28,8 +28,11 @@ _PREFETCH_INTERVAL = 3600
 # Minimum file size to consider track already cached (10KB)
 _MIN_CACHED_SIZE = 10 * 1024
 
-# YouTube video ID pattern (exclude ym_ Yandex prefix)
+# YouTube video ID pattern
 _YT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+# Yandex Music video ID pattern (ym_<digits>)
+_YM_ID_PATTERN = re.compile(r"^ym_\d+$")
 
 # Permanently failed video IDs (age-restricted, geo-blocked, etc.)
 # Maps video_id -> timestamp when it was blacklisted
@@ -51,11 +54,16 @@ _PERMANENT_ERROR_PATTERNS = [
 ]
 
 def _is_youtube_id(video_id: str) -> bool:
-    """Check if ID is a valid YouTube video ID (not Yandex)."""
+    """Check if ID is a valid YouTube video ID."""
     return bool(
         _YT_ID_PATTERN.match(video_id)
         and not video_id.startswith("ym_")
     )
+
+
+def _is_yandex_id(video_id: str) -> bool:
+    """Check if ID is a Yandex Music track (ym_<digits>)."""
+    return bool(_YM_ID_PATTERN.match(video_id))
 
 
 async def prefetch_chart_tracks(
@@ -110,8 +118,38 @@ async def prefetch_chart_tracks(
                 stats["failed"] += 1
                 return False
 
+    async def download_one_ym(video_id: str) -> bool:
+        """Download single Yandex track. Returns True if downloaded."""
+        mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+        if mp3_path.exists() and mp3_path.stat().st_size > _MIN_CACHED_SIZE:
+            return False
+        async with semaphore:
+            try:
+                from bot.services.yandex_provider import download_yandex
+                track_id = int(video_id[3:])  # strip "ym_" prefix
+                await asyncio.wait_for(
+                    download_yandex(track_id, mp3_path),
+                    timeout=120,
+                )
+                try:
+                    from bot.services.telegram_cache import schedule_upload, get_file_id as _get_cache_fid
+                    if mp3_path.exists() and not await _get_cache_fid(video_id):
+                        schedule_upload(mp3_path, video_id)
+                except Exception:
+                    logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
+                return True
+            except asyncio.TimeoutError:
+                logger.warning("Prefetch: timeout downloading ym track %s", video_id)
+                stats["failed"] += 1
+                return False
+            except Exception as e:
+                logger.debug("Prefetch failed for %s: %s", video_id, e)
+                stats["failed"] += 1
+                return False
+
     # Collect all unique video IDs from all charts
-    all_video_ids: set[str] = set()
+    yt_video_ids: set[str] = set()
+    ym_video_ids: set[str] = set()
     
     for source in _CHART_FETCHERS:
         try:
@@ -121,21 +159,25 @@ async def prefetch_chart_tracks(
             
             for track in tracks[:max_per_chart]:
                 video_id = track.get("video_id", "").strip()
-                # Only YouTube IDs (skip Yandex which needs special handling)
                 if video_id and _is_youtube_id(video_id):
-                    all_video_ids.add(video_id)
+                    yt_video_ids.add(video_id)
+                elif video_id and _is_yandex_id(video_id):
+                    ym_video_ids.add(video_id)
                     
         except Exception as e:
             logger.warning("Prefetch: failed to get chart %s: %s", source, e)
     
-    if not all_video_ids:
+    total = len(yt_video_ids) + len(ym_video_ids)
+    if not total:
         logger.info("Prefetch: no tracks to download")
         return stats
     
-    logger.info("Prefetch: starting download of %d unique tracks", len(all_video_ids))
+    logger.info("Prefetch: starting download of %d unique tracks (%d yt, %d ym)",
+                total, len(yt_video_ids), len(ym_video_ids))
     
     # Download all tracks concurrently (limited by semaphore)
-    tasks = [download_one(vid) for vid in all_video_ids]
+    tasks = [download_one(vid) for vid in yt_video_ids]
+    tasks += [download_one_ym(vid) for vid in ym_video_ids]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
     for r in results:
