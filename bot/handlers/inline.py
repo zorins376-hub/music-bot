@@ -61,8 +61,9 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
                 "duration_fmt": fmt_duration(tr.duration) if tr.duration else "?:??",
                 "source": tr.source or "channel",
                 "file_id": tr.file_id,
+                "_provider_pos": i,
             }
-            for tr in tracks
+            for i, tr in enumerate(tracks)
         ]
 
     local_res, ym_res, sp_res, vk_res, yt_res = await asyncio.gather(
@@ -78,6 +79,9 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
     for r in (local_res, ym_res, sp_res, vk_res, yt_res):
         if isinstance(r, BaseException) or r is None:
             continue
+        # Stamp provider position so ranking preserves provider relevance order
+        for i, track in enumerate(r):
+            track["_provider_pos"] = i
         all_results.extend(r)
     script = detect_script(query)
     results_data = deduplicate_results(all_results, lang_hint=script, query=query)[:10]

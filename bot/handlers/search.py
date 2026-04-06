@@ -363,7 +363,7 @@ async def _do_search(message: Message, query: str) -> None:
     # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
     local_tracks = await search_local_tracks(query, limit=max_results)
     local_results = []
-    for tr in (local_tracks or []):
+    for idx, tr in enumerate(local_tracks or []):
         local_results.append({
             "video_id": tr.source_id,
             "title": tr.title or "Unknown",
@@ -372,6 +372,7 @@ async def _do_search(message: Message, query: str) -> None:
             "duration_fmt": _fmt_duration(tr.duration) if tr.duration else "?:??",
             "source": tr.source or "channel",
             "file_id": tr.file_id,
+            "_provider_pos": idx,
         })
 
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
@@ -415,6 +416,9 @@ async def _do_search(message: Message, query: str) -> None:
     for batch in source_results:
         if isinstance(batch, BaseException):
             continue
+        # Stamp provider position so ranking preserves provider relevance order
+        for i, track in enumerate(batch):
+            track["_provider_pos"] = i
         all_results.extend(batch)
 
     # A-05: If few results and query is mono-language, try transliterated search

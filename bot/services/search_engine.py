@@ -122,8 +122,8 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
-def _relevance_score(query_norm: str, artist: str, title: str) -> float:
-    """Score how relevant a track is to the search query (0.0 - 2.0+).
+def _relevance_score(query_norm: str, artist: str, title: str, position: int = 0) -> float:
+    """Score how relevant a track is to the search query (0.0 - 2.5+).
 
     Multi-signal scoring:
     1. Word overlap (exact + substring)
@@ -131,6 +131,7 @@ def _relevance_score(query_norm: str, artist: str, title: str) -> float:
     3. Position bonus (match at start of title/artist)
     4. RapidFuzz token_sort_ratio (catches typos & word reorder)
     5. Title brevity bonus (shorter = less junk = more precise)
+    6. Provider position bonus (earlier results from each provider are better)
     """
     query_words = query_norm.split()
     if not query_words:
@@ -150,14 +151,14 @@ def _relevance_score(query_norm: str, artist: str, title: str) -> float:
             substring += 0.5
     word_score = (exact + substring) / len(query_words)
 
-    # 2. Artist match bonus (0.0 - 0.3)
+    # 2. Artist match bonus (0.0 - 0.4)
     # If the query contains the artist name or vice versa — boost
     artist_bonus = 0.0
     artist_words = set(artist_lower.split())
     if artist_words and query_set:
         artist_overlap = len(query_set & artist_words) / max(len(artist_words), len(query_set))
-        if artist_overlap >= 0.5:
-            artist_bonus = 0.3 * artist_overlap
+        if artist_overlap >= 0.4:
+            artist_bonus = 0.4 * artist_overlap
 
     # 3. Position bonus (0.0 - 0.15): query found at start of artist or title
     position_bonus = 0.0
@@ -166,11 +167,11 @@ def _relevance_score(query_norm: str, artist: str, title: str) -> float:
     elif track_text.startswith(query_norm):
         position_bonus = 0.1
 
-    # 4. RapidFuzz bonus (0.0 - 0.4): catches typos and word reorder
+    # 4. RapidFuzz bonus (0.0 - 0.5): catches typos and word reorder
     fuzz_bonus = 0.0
     if _rf_fuzz is not None:
         ratio = float(_rf_fuzz.token_sort_ratio(query_norm, track_text)) / 100.0
-        fuzz_bonus = ratio * 0.4
+        fuzz_bonus = ratio * 0.5
 
     # 5. Title brevity bonus (0.0 - 0.1): shorter titles = more precise match
     total_words = len(track_text.split())
@@ -180,7 +181,10 @@ def _relevance_score(query_norm: str, artist: str, title: str) -> float:
     else:
         brevity_bonus = 0.0
 
-    return word_score + artist_bonus + position_bonus + fuzz_bonus + brevity_bonus
+    # 6. Provider position bonus (0.0 - 0.3): first results from provider are more relevant
+    provider_bonus = max(0.0, 0.3 - position * 0.03)
+
+    return word_score + artist_bonus + position_bonus + fuzz_bonus + brevity_bonus + provider_bonus
 
 
 def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: str = "mixed", query: str = "") -> list[dict]:
@@ -227,7 +231,12 @@ def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: 
         query_norm = normalize_query(query)
         kept.sort(
             key=lambda t: (
-                _relevance_score(query_norm, t.get("uploader", ""), t.get("title", "")),
+                _relevance_score(
+                    query_norm,
+                    t.get("uploader", ""),
+                    t.get("title", ""),
+                    position=t.get("_provider_pos", 5),
+                ),
                 rank.get(t.get("source", ""), 0),
             ),
             reverse=True,
@@ -329,6 +338,8 @@ async def perform_search(query: str, limit: int = 10) -> list[dict]:
     merged: list[dict] = []
     for result in results_lists:
         if isinstance(result, list):
+            for i, track in enumerate(result):
+                track["_provider_pos"] = i
             merged.extend(result)
 
     if not merged:

@@ -432,6 +432,10 @@ def is_spotify_url(text: str) -> bool:
     return bool(_SPOTIFY_RE.search(text))
 
 
+# Patterns that signal the query already targets a specific track
+_ARTIST_SEP_RE = re.compile(r'\s+[-\u2013\u2014]\s+')
+
+
 def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[dict]:
     # Request extra results to compensate for filtered out 0-duration tracks
     fetch_count = max_results + 5
@@ -439,6 +443,11 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         search_prefix = f"scsearch{fetch_count}"
     else:
         search_prefix = f"ytsearch{fetch_count}"
+
+    # Bias YouTube toward music content when query is generic (no artist-title separator)
+    search_query = query
+    if source == "youtube" and not _ARTIST_SEP_RE.search(query):
+        search_query = f"{query} audio"
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -453,7 +462,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=False)
+            info = ydl.extract_info(search_query, download=False)
             # Convert to list INSIDE context to avoid I/O errors after close
             entries = list(info.get("entries", [])) if info else []
 
