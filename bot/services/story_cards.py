@@ -45,7 +45,8 @@ def _gradient_bg() -> "Image.Image":
 
 
 def _get_font(size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
-    """Load font with fallback to default."""
+    """Load font with fallback to system DejaVu."""
+    # 1) Custom bundled fonts
     try:
         from pathlib import Path
         font_dir = Path(__file__).parent.parent / "assets" / "fonts"
@@ -54,6 +55,16 @@ def _get_font(size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
             return ImageFont.truetype(str(font_file), size)
     except Exception:
         logger.debug("custom font load failed", exc_info=True)
+    # 2) System DejaVu (installed via fonts-dejavu-core in Docker)
+    for path in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ):
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    # 3) arial / any truetype
     try:
         return ImageFont.truetype("arial.ttf", size)
     except Exception:

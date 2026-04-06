@@ -82,11 +82,15 @@ async def _send_recaps(bot) -> None:
 
     # Batch queries for all active users at once
     async with async_session() as session:
-        # Fetch user languages
+        # Fetch user languages and names
         users_r = await session.execute(
-            select(User.id, User.language).where(User.id.in_(user_ids))
+            select(User.id, User.language, User.first_name, User.username).where(User.id.in_(user_ids))
         )
-        user_langs = {row[0]: row[1] or "ru" for row in users_r.all()}
+        user_langs = {}
+        user_names = {}
+        for row in users_r.all():
+            user_langs[row[0]] = row[1] or "ru"
+            user_names[row[0]] = row[2] or (f"@{row[3]}" if row[3] else f"User #{row[0]}")
 
         # Top artists per user (batch: top 5 per user via window function)
         from sqlalchemy import literal_column
@@ -198,7 +202,7 @@ async def _send_recaps(bot) -> None:
                 top_artist_names = [a for a, _ in artists]
                 top_track_str = f"{top_track[0]} — {top_track[1]}" if top_track else ""
                 card_bytes = generate_recap_card(
-                    user_name=f"@{user_id}",
+                    user_name=user_names.get(user_id, f"User #{user_id}"),
                     play_count=play_count,
                     top_artists=top_artist_names,
                     top_track=top_track_str,

@@ -9,9 +9,9 @@ RUN npm run build
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# ffmpeg (аудио) + curl (deno) — build-essential/cmake убраны (ML на Supabase)
+# ffmpeg (аудио) + curl (deno) + fonts (Pillow story cards)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl unzip \
+    ffmpeg curl unzip fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # deno (JS-рантайм для yt-dlp signature solving) — pinned version + SHA256 verify
