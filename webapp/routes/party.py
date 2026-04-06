@@ -238,6 +238,16 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
             if viewer_member:
                 viewer_role = viewer_member.role
 
+    # Compute real-time seek position: stored position + elapsed time since last sync
+    _raw_seek = (playback.seek_position if playback is not None else 0) or 0
+    if (
+        playback is not None
+        and playback.action == "play"
+        and playback.updated_at is not None
+    ):
+        elapsed = (datetime.now(timezone.utc) - playback.updated_at.replace(tzinfo=timezone.utc)).total_seconds()
+        _raw_seek = _raw_seek + max(0, elapsed)
+
     return PartySchema(
         id=party.id,
         invite_code=party.invite_code,
@@ -279,16 +289,6 @@ async def _build_party_schema(session, party: PartySession, viewer_id: int | Non
             )
             for message in chat_messages
         ],
-        # Compute real-time seek position: stored position + elapsed time since last sync
-        _raw_seek = (playback.seek_position if playback is not None else 0) or 0
-        if (
-            playback is not None
-            and playback.action == "play"
-            and playback.updated_at is not None
-        ):
-            elapsed = (datetime.now(timezone.utc) - playback.updated_at.replace(tzinfo=timezone.utc)).total_seconds()
-            _raw_seek = _raw_seek + max(0, elapsed)
-
         playback=PartyPlaybackStateSchema(
             track_position=playback.track_position if playback is not None else 0,
             action=playback.action if playback is not None else "idle",
