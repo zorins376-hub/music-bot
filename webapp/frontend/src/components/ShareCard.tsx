@@ -172,25 +172,30 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
     ctx.fillText("♫", canvas.width - 150, 1600);
 
     // Convert to blob URL
-    canvas.toBlob((blob) => {
-      if (generationId !== generationRef.current) {
-        return;
-      }
+    try {
+      canvas.toBlob((blob) => {
+        if (generationId !== generationRef.current) {
+          return;
+        }
 
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
 
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        objectUrlRef.current = url;
-        setCardUrl(url);
-      } else {
-        setCardUrl(null);
-      }
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          objectUrlRef.current = url;
+          setCardUrl(url);
+        } else {
+          setCardUrl(null);
+        }
+        setIsGenerating(false);
+      }, "image/png");
+    } catch {
+      // Canvas tainted (CORS) — toBlob throws SecurityError
       setIsGenerating(false);
-    }, "image/png");
+    }
   }, [track, accentColor, isTequila]);
 
   useEffect(() => {
@@ -206,25 +211,30 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
     };
   }, [generateCard]);
 
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback((e: Event) => {
+    e.stopPropagation();
     const appLink = `https://t.me/TSmymusicbot_bot/app?startapp=play_${track.video_id || ""}`;
     const text = encodeURIComponent(`🎵 ${track.artist} — ${track.title}`);
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${text}`;
-    try {
-      window.Telegram?.WebApp?.openTelegramLink?.(shareUrl);
-    } catch {
+    // openTelegramLink is the most reliable in TG WebView, window.open as fallback
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(shareUrl);
+    } else {
       window.open(shareUrl, "_blank");
     }
   }, [track]);
 
-  const handleDownload = useCallback(() => {
-    // openLink requires an absolute https:// URL
+  const handleDownload = useCallback((e: Event) => {
+    e.stopPropagation();
     const path = track.video_id ? getStoryCardUrl(track.video_id) : null;
     if (!path) return;
     const absUrl = path.startsWith("http") ? path : `${window.location.origin}${path}`;
-    try {
-      window.Telegram?.WebApp?.openLink?.(absUrl);
-    } catch {
+    // openLink opens external browser; window.open as fallback
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.openLink) {
+      tg.openLink(absUrl);
+    } else {
       window.open(absUrl, "_blank");
     }
   }, [track.video_id]);
@@ -297,6 +307,7 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
         ) : (
           <>
             <button
+              type="button"
               onClick={handleShare}
               style={{
                 padding: "12px 28px",
@@ -308,11 +319,14 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
                 fontWeight: 600,
                 cursor: "pointer",
                 boxShadow: isTequila ? "0 8px 24px rgba(255, 109, 0, 0.3)" : "none",
+                WebkitTapHighlightColor: "transparent",
+                touchAction: "manipulation",
               }}
             >
               <IconUpload size={16} /> Share
             </button>
             <button
+              type="button"
               onClick={handleDownload}
               style={{
                 padding: "12px 28px",
@@ -323,6 +337,8 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
                 fontSize: 16,
                 fontWeight: 600,
                 cursor: "pointer",
+                WebkitTapHighlightColor: "transparent",
+                touchAction: "manipulation",
               }}
             >
               ⬇ Download
