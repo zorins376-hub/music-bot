@@ -1,20 +1,21 @@
 """
 story_cards.py — Generate shareable story cards (1080×1920).
 
-Creates branded images with track info, gradient background, and QR code deep-link.
-Used for track sharing and Weekly Recap stories.
+Creates branded images with track info, blurred cover background,
+bokeh effects, and QR code deep-link.
 """
 import hashlib
 import io
 import logging
+import math
+import random
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Lazy imports to avoid import-time failures if Pillow not installed
 _PIL_AVAILABLE = False
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
     import qrcode
     _PIL_AVAILABLE = True
 except ImportError:
@@ -22,34 +23,10 @@ except ImportError:
 
 _WIDTH = 1080
 _HEIGHT = 1920
-_ACCENT = (200, 160, 255)   # Purple accent
+_ACCENT = (200, 160, 255)
 _WHITE = (255, 255, 255)
 _GREY = (180, 180, 180)
-
 _BOT_USERNAME = "TSmymusicbot_bot"
-
-
-def _gradient_bg(dominant_rgb: tuple[int, int, int] | None = None) -> "Image.Image":
-    """Create a vertical gradient 1080×1920 based on dominant cover colour."""
-    img = Image.new("RGB", (_WIDTH, _HEIGHT))
-    draw = ImageDraw.Draw(img)
-
-    if dominant_rgb:
-        r0, g0, b0 = dominant_rgb
-        # Darken for top and extra-darken for bottom
-        top = (max(r0 // 2, 8), max(g0 // 2, 8), max(b0 // 2, 8))
-        bot = (max(r0 // 6, 4), max(g0 // 6, 4), max(b0 // 6, 4))
-    else:
-        top = (15, 15, 25)
-        bot = (30, 10, 45)
-
-    for y in range(_HEIGHT):
-        ratio = y / _HEIGHT
-        r = int(top[0] + (bot[0] - top[0]) * ratio)
-        g = int(top[1] + (bot[1] - top[1]) * ratio)
-        b = int(top[2] + (bot[2] - top[2]) * ratio)
-        draw.line([(0, y), (_WIDTH, y)], fill=(r, g, b))
-    return img
 
 
 def _dominant_color(cover_bytes: bytes) -> tuple[int, int, int]:
@@ -58,7 +35,6 @@ def _dominant_color(cover_bytes: bytes) -> tuple[int, int, int]:
         cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
         small = cover.resize((40, 40), Image.LANCZOS)
         pixels = list(small.getdata())
-        # Filter out near-black/near-white
         filtered = [(r, g, b) for r, g, b in pixels if (r + g + b) > 60 and (r + g + b) < 700]
         if not filtered:
             filtered = pixels
@@ -68,6 +44,73 @@ def _dominant_color(cover_bytes: bytes) -> tuple[int, int, int]:
         return (avg_r, avg_g, avg_b)
     except Exception:
         return (100, 60, 180)
+
+
+def _build_background(cover_bytes: bytes | None, dominant: tuple[int, int, int] | None) -> "Image.Image":
+    """Build a premium background: blurred cover + dark overlay + bokeh circles."""
+    img = Image.new("RGBA", (_WIDTH, _HEIGHT), (10, 10, 18, 255))
+
+    # Layer 1: Blurred & stretched cover as background
+    if cover_bytes:
+        try:
+            bg_cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
+            # Stretch to fill, then heavy blur
+            bg_cover = bg_cover.resize((_WIDTH, _HEIGHT), Image.LANCZOS)
+            bg_cover = bg_cover.filter(ImageFilter.GaussianBlur(radius=60))
+            img.paste(bg_cover, (0, 0))
+        except Exception:
+            pass
+
+    # Layer 2: Dark gradient overlay (top-to-bottom, more opaque at edges)
+    overlay = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    for y in range(_HEIGHT):
+        ratio = y / _HEIGHT
+        # Darker at top & bottom, lighter in middle
+        if ratio < 0.15:
+            alpha = int(220 - ratio / 0.15 * 60)
+        elif ratio > 0.75:
+            alpha = int(160 + (ratio - 0.75) / 0.25 * 80)
+        else:
+            alpha = 160
+        odraw.line([(0, y), (_WIDTH, y)], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img, overlay)
+
+    # Layer 3: Radial glow behind cover area
+    if dominant:
+        glow = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
+        gdraw = ImageDraw.Draw(glow)
+        cx, cy = _WIDTH // 2, 620
+        for r in range(500, 0, -2):
+            alpha = int(40 * (r / 500))
+            dr, dg, db = dominant
+            gdraw.ellipse(
+                [(cx - r, cy - r), (cx + r, cy + r)],
+                fill=(dr, dg, db, alpha),
+            )
+        img = Image.alpha_composite(img, glow)
+
+    # Layer 4: Bokeh circles (random semi-transparent circles)
+    bokeh = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
+    bdraw = ImageDraw.Draw(bokeh)
+    rng = random.Random(42)  # Deterministic for same card
+    for _ in range(18):
+        bx = rng.randint(-100, _WIDTH + 100)
+        by = rng.randint(-100, _HEIGHT + 100)
+        br = rng.randint(30, 180)
+        ba = rng.randint(8, 30)
+        if dominant:
+            bc = (*dominant, ba)
+        else:
+            bc = (200, 160, 255, ba)
+        bdraw.ellipse([(bx - br, by - br), (bx + br, by + br)], fill=bc)
+    try:
+        bokeh = bokeh.filter(ImageFilter.GaussianBlur(radius=15))
+    except Exception:
+        pass
+    img = Image.alpha_composite(img, bokeh)
+
+    return img.convert("RGB")
 
 
 def _get_font(size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
@@ -98,12 +141,17 @@ def _get_font(size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
 
 
 def _make_qr(url: str, size: int = 200) -> "Image.Image":
-    """Generate QR code image."""
-    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    """Generate a crisp QR code image at target size."""
+    qr = qrcode.QRCode(version=1, box_size=20, border=2, error_correction=qrcode.constants.ERROR_CORRECT_H)
     qr.add_data(url)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="white", back_color="transparent")
-    return img.resize((size, size), Image.LANCZOS)
+    qr_img = qr.make_image(fill_color="white", back_color="black").convert("RGBA")
+    # Make black pixels transparent
+    data = qr_img.getdata()
+    new_data = [(r, g, b, a) if r > 128 else (0, 0, 0, 0) for r, g, b, a in data]
+    qr_img.putdata(new_data)
+    # Resize with NEAREST to keep crisp pixels
+    return qr_img.resize((size, size), Image.NEAREST)
 
 
 def generate_track_card(
@@ -118,111 +166,129 @@ def generate_track_card(
         logger.warning("Pillow not installed, cannot generate story card")
         return None
 
-    # Extract dominant colour from cover for dynamic gradient
     dominant = _dominant_color(cover_bytes) if cover_bytes else None
-    img = _gradient_bg(dominant)
+    img = _build_background(cover_bytes, dominant)
     draw = ImageDraw.Draw(img)
 
-    # --- Accent colour derived from cover ---
+    # Accent colour from cover
     if dominant:
         dr, dg, db = dominant
-        # Brighten for accent text
         accent = (min(dr + 80, 255), min(dg + 80, 255), min(db + 80, 255))
     else:
         accent = _ACCENT
 
-    # --- Large cover image (640×640) ---
+    # ── Cover image (640×640) with glow ring ──
     cover_size = 640
     cover_x = (_WIDTH - cover_size) // 2
-    cover_y = 300
+    cover_y = 320
 
     if cover_bytes:
         try:
-            cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
+            cover = Image.open(io.BytesIO(cover_bytes)).convert("RGBA")
             cover = cover.resize((cover_size, cover_size), Image.LANCZOS)
 
-            # Round corners mask
+            # Rounded corners
             mask = Image.new("L", (cover_size, cover_size), 0)
             mask_draw = ImageDraw.Draw(mask)
-            mask_draw.rounded_rectangle([(0, 0), (cover_size, cover_size)], radius=40, fill=255)
+            mask_draw.rounded_rectangle([(0, 0), (cover_size, cover_size)], radius=36, fill=255)
 
-            # Drop shadow
-            shadow_offset = 12
-            shadow = Image.new("RGBA", (cover_size + 40, cover_size + 40), (0, 0, 0, 0))
-            shadow_draw = ImageDraw.Draw(shadow)
-            shadow_draw.rounded_rectangle(
-                [(20, 20), (cover_size + 20, cover_size + 20)],
-                radius=40, fill=(0, 0, 0, 100),
+            # Glowing border ring behind cover
+            ring = Image.new("RGBA", (cover_size + 16, cover_size + 16), (0, 0, 0, 0))
+            ring_draw = ImageDraw.Draw(ring)
+            ring_draw.rounded_rectangle(
+                [(0, 0), (cover_size + 15, cover_size + 15)],
+                radius=40, outline=(*accent, 120), width=4,
             )
             try:
-                from PIL import ImageFilter
-                shadow = shadow.blur(radius=20) if hasattr(shadow, "blur") else shadow.filter(ImageFilter.GaussianBlur(20))
+                ring = ring.filter(ImageFilter.GaussianBlur(radius=6))
             except Exception:
                 pass
-            img.paste(shadow, (cover_x - 20 + shadow_offset, cover_y - 20 + shadow_offset), shadow)
+            img.paste(ring, (cover_x - 8, cover_y - 8), ring)
 
-            img.paste(cover, (cover_x, cover_y), mask)
+            # Paste cover
+            temp = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            temp.paste(cover, (cover_x, cover_y), mask)
+            img = Image.alpha_composite(img.convert("RGBA"), temp).convert("RGB")
+            draw = ImageDraw.Draw(img)
         except Exception:
             _draw_placeholder(draw, cover_y, cover_size)
     else:
         _draw_placeholder(draw, cover_y, cover_size)
 
-    # --- Track info ---
-    font_title = _get_font(56, bold=True)
-    font_artist = _get_font(42)
-    font_dur = _get_font(34)
+    # ── Track info ──
+    font_title = _get_font(58, bold=True)
+    font_artist = _get_font(44)
 
-    text_y = cover_y + cover_size + 60
+    text_y = cover_y + cover_size + 65
 
-    # Title (truncate with ellipsis)
     display_title = title[:35] + "…" if len(title) > 35 else title
     draw.text((_WIDTH // 2, text_y), display_title, fill=_WHITE, font=font_title, anchor="mm")
 
-    # Artist
     display_artist = artist[:35] + "…" if len(artist) > 35 else artist
-    draw.text((_WIDTH // 2, text_y + 70), display_artist, fill=_GREY, font=font_artist, anchor="mm")
+    draw.text((_WIDTH // 2, text_y + 72), display_artist, fill=_GREY, font=font_artist, anchor="mm")
 
     # Duration pill
     if duration:
-        pill_y = text_y + 135
-        pill_text = f"  {duration}  "
+        pill_y = text_y + 145
         font_pill = _get_font(30)
+        pill_text = f"♪  {duration}"
         bbox = font_pill.getbbox(pill_text)
-        pw = bbox[2] - bbox[0] + 30
-        ph = bbox[3] - bbox[1] + 16
+        pw = bbox[2] - bbox[0] + 48
+        ph = bbox[3] - bbox[1] + 20
         px = (_WIDTH - pw) // 2
         py = pill_y - ph // 2
-        draw.rounded_rectangle(
-            [(px, py), (px + pw, py + ph)],
+        # Semi-transparent pill background
+        pill_bg = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+        pill_draw = ImageDraw.Draw(pill_bg)
+        pill_draw.rounded_rectangle(
+            [(0, 0), (pw - 1, ph - 1)],
             radius=ph // 2,
-            fill=(255, 255, 255, 15) if not dominant else (dominant[0] // 3, dominant[1] // 3, dominant[2] // 3),
-            outline=(*accent, 80) if dominant else (*_ACCENT, 80),
+            fill=(accent[0] // 4, accent[1] // 4, accent[2] // 4, 120),
+            outline=(*accent, 70),
         )
-        draw.text((_WIDTH // 2, pill_y), f"♪ {duration}", fill=accent, font=font_pill, anchor="mm")
+        img.paste(pill_bg, (px, py), pill_bg)
+        draw = ImageDraw.Draw(img)
+        draw.text((_WIDTH // 2, pill_y), pill_text, fill=accent, font=font_pill, anchor="mm")
 
-    # --- Decorative line ---
-    line_y = text_y + 200
-    line_w = 200
-    draw.line(
-        [(_WIDTH // 2 - line_w, line_y), (_WIDTH // 2 + line_w, line_y)],
-        fill=(*accent, 60), width=2,
-    )
+    # ── Thin decorative line ──
+    sep_y = text_y + 215
+    line_half = 160
+    for x in range(_WIDTH // 2 - line_half, _WIDTH // 2 + line_half):
+        dist = abs(x - _WIDTH // 2)
+        alpha = int(60 * (1 - dist / line_half))
+        draw.point((x, sep_y), fill=(*accent, alpha))
 
-    # --- QR code ---
+    # ── QR code (crisp) ──
     deep_link = f"https://t.me/{_BOT_USERNAME}?start=tr_{track_id}"
     qr_size = 180
     try:
         qr_img = _make_qr(deep_link, qr_size)
-        qr_y = _HEIGHT - 340
-        img.paste(qr_img, ((_WIDTH - qr_size) // 2, qr_y))
+        qr_y = _HEIGHT - 330
+
+        # QR glow
+        qr_glow = Image.new("RGBA", (qr_size + 40, qr_size + 40), (0, 0, 0, 0))
+        qg_draw = ImageDraw.Draw(qr_glow)
+        qg_draw.rounded_rectangle(
+            [(0, 0), (qr_size + 39, qr_size + 39)],
+            radius=20,
+            fill=(accent[0] // 5, accent[1] // 5, accent[2] // 5, 60),
+        )
+        try:
+            qr_glow = qr_glow.filter(ImageFilter.GaussianBlur(radius=10))
+        except Exception:
+            pass
+        img.paste(qr_glow, ((_WIDTH - qr_size) // 2 - 20, qr_y - 20), qr_glow)
+
+        img.paste(qr_img, ((_WIDTH - qr_size) // 2, qr_y), qr_img)
     except Exception:
         logger.debug("QR code generation failed", exc_info=True)
 
-    # --- Footer ---
+    # ── Footer ──
+    draw = ImageDraw.Draw(img)
     font_footer = _get_font(28)
-    draw.text((_WIDTH // 2, _HEIGHT - 110), "Слушай в", fill=_GREY, font=font_footer, anchor="mm")
     font_bot = _get_font(32, bold=True)
-    draw.text((_WIDTH // 2, _HEIGHT - 65), f"@{_BOT_USERNAME}", fill=accent, font=font_bot, anchor="mm")
+    draw.text((_WIDTH // 2, _HEIGHT - 100), "Слушай в", fill=_GREY, font=font_footer, anchor="mm")
+    draw.text((_WIDTH // 2, _HEIGHT - 55), f"@{_BOT_USERNAME}", fill=accent, font=font_bot, anchor="mm")
 
     buf = io.BytesIO()
     img.save(buf, "PNG", quality=95)
@@ -239,7 +305,7 @@ def generate_recap_card(
     if not _PIL_AVAILABLE:
         return None
 
-    img = _gradient_bg()
+    img = _build_background(None, None)
     draw = ImageDraw.Draw(img)
 
     font_brand = _get_font(48, bold=True)
