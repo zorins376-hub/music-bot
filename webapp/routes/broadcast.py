@@ -526,6 +526,11 @@ async def start_broadcast(request: Request, user: dict = Depends(get_current_use
     channel = body.get("channel", "tequila")
     limit = min(int(body.get("limit", 30)), 100)
 
+    # Prevent double-start: if broadcast is already live, reject
+    is_live = await r.get(_BCAST_LIVE_KEY)
+    if is_live:
+        raise HTTPException(status_code=409, detail="Broadcast is already live")
+
     now = datetime.now(timezone.utc).isoformat()
 
     await r.set(_BCAST_LIVE_KEY, "1")
@@ -640,6 +645,10 @@ async def broadcast_add_track(request: Request, user: dict = Depends(get_current
 async def broadcast_remove_track(video_id: str, user: dict = Depends(get_current_user)):
     await _require_broadcast_admin(user)
     r = await _get_redis()
+
+    is_live = await r.get(_BCAST_LIVE_KEY)
+    if not is_live:
+        raise HTTPException(status_code=400, detail="Broadcast is not active")
 
     current_idx = int(await r.hget(_BCAST_STATE_KEY, "current_idx") or 0)
     queue_raw = await r.lrange(_BCAST_QUEUE_KEY, 0, -1)

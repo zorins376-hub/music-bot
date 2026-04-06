@@ -60,6 +60,8 @@ export const LiveRadioView = memo(function LiveRadioView({
   const crossfadeTimerRef = useRef<number | null>(null);
   const currentVideoIdRef = useRef<string>("");
   const playVoiceMessageRef = useRef<(url: string) => void>(() => {});
+  const isDJRef = useRef(false);
+  const crossfadeSecRef = useRef(crossfadeSec);
 
   // ── Local audio: play a broadcast track independently ──
   const playTrackLocally = useCallback((videoId: string, seekTo?: number) => {
@@ -124,8 +126,8 @@ export const LiveRadioView = memo(function LiveRadioView({
       setElapsed(t);
 
       // ── Crossfade logic ──
-      if (!audio.duration || crossfadeActiveRef.current) return;
-      const cfSec = (() => { try { const v = localStorage.getItem("tma:broadcast-crossfade"); return v ? parseInt(v, 10) : 8; } catch { return 8; } })();
+      if (!isDJRef.current || !audio.duration || crossfadeActiveRef.current) return;
+      const cfSec = crossfadeSecRef.current;
       if (cfSec <= 0) return;
       const remaining = audio.duration - audio.currentTime;
       if (remaining > cfSec || remaining < 0.5 || audio.duration < cfSec * 2) return;
@@ -177,9 +179,9 @@ export const LiveRadioView = memo(function LiveRadioView({
     };
     audio.addEventListener("timeupdate", onTimeUpdate);
 
-    // Track ended → advance broadcast (no crossfade case)
+    // Track ended → advance broadcast (DJ only, no crossfade case)
     const onEnded = () => {
-      if (!crossfadeActiveRef.current) {
+      if (!crossfadeActiveRef.current && isDJRef.current) {
         advanceBroadcast().catch(() => {});
       }
     };
@@ -562,6 +564,8 @@ export const LiveRadioView = memo(function LiveRadioView({
   }
 
   const isDJ = Boolean(isAdmin || broadcast?.is_dj);
+  isDJRef.current = isDJ;
+  crossfadeSecRef.current = crossfadeSec;
   const isLive = broadcast?.is_live ?? false;
   const currentIdx = broadcast?.current_idx ?? 0;
   const tracks = broadcast?.tracks ?? [];
