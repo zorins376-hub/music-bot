@@ -170,7 +170,6 @@ export function App() {
 
   const [view, setView] = useState<View>("foryou");
   const [partyCode, setPartyCode] = useState<string | null>(null);
-  const [partyReadonly, setPartyReadonly] = useState(false);
   const [state, setState] = useState<PlayerState>({
     current_track: null,
     queue: [],
@@ -1348,7 +1347,6 @@ export function App() {
     if (startParam && startParam.startsWith("party_")) {
       const code = startParam.slice(6);
       if (code) {
-        setPartyReadonly(false);
         setPartyCode(code);
         setView("party");
       }
@@ -1356,7 +1354,6 @@ export function App() {
     if (startParam && startParam.startsWith("partytv_")) {
       const code = startParam.slice(8);
       if (code) {
-        setPartyReadonly(true);
         setPartyCode(code);
         setView("party");
       }
@@ -1676,7 +1673,10 @@ export function App() {
   }, [action]);
 
   const handlePartyPlaybackAction = useCallback((playbackAction: string, track?: Track, position?: number) => {
-    if (playbackAction === "play" && track) return action("play", track.video_id, undefined, track);
+    if (playbackAction === "play" && track) {
+      if (position !== undefined && position > 1) track.startAt = position;
+      return action("play", track.video_id, undefined, track);
+    }
     if (playbackAction === "pause") return action("pause");
     if (playbackAction === "seek") return action("seek", undefined, position);
   }, [action]);
@@ -2485,7 +2485,7 @@ export function App() {
 
       {view === "party" && (
         <Suspense fallback={null}><ViewErrorBoundary viewName="Party" fallbackColor={theme.hintColor}>
-          <PartyView userId={userId} onPlayTrack={handlePartyPlayTrack} onPlaybackAction={handlePartyPlaybackAction} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} readOnlyMode={partyReadonly} />
+          <PartyView userId={userId} onPlayTrack={handlePartyPlayTrack} onPlaybackAction={handlePartyPlaybackAction} accentColor={accentColor} themeId={theme.id} initialCode={partyCode} />
         </ViewErrorBoundary></Suspense>
       )}
 

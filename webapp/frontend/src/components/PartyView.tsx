@@ -16,14 +16,13 @@ interface Props {
   accentColor?: string;
   themeId?: string;
   initialCode?: string | null;
-  readOnlyMode?: boolean;
 }
 
 const haptic = (s: "light" | "medium" | "heavy") => {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s); } catch {}
 };
 
-export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", initialCode, readOnlyMode = false }: Props) {
+export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlaybackAction, accentColor = "var(--tg-theme-button-color, #7c4dff)", themeId = "blackroom", initialCode }: Props) {
   const warm = themeId === "tequila";
   const [party, setParty] = useState<Party | null>(null);
   const [myParties, setMyParties] = useState<Party[]>([]);
@@ -39,7 +38,6 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
   const [reactionBursts, setReactionBursts] = useState<Array<{ id: number; emoji: string; left: number }>>([]);
   const [livePosition, setLivePosition] = useState(0);
   const [showStageMode, setShowStageMode] = useState(false);
-  const [showTvMode, setShowTvMode] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [lyrics, setLyrics] = useState<string[]>([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
@@ -100,8 +98,8 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
     marginBottom: 8,
   };
 
-  const isDJ = !readOnlyMode && party ? party.viewer_role === "dj" : false;
-  const canControl = !readOnlyMode && party ? ["dj", "cohost"].includes(party.viewer_role) : false;
+  const isDJ = party ? party.viewer_role === "dj" : false;
+  const canControl = party ? ["dj", "cohost"].includes(party.viewer_role) : false;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -383,7 +381,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
   }, [party?.current_position, party?.tracks]);
 
   useEffect(() => {
-    if (!showStageMode && !showTvMode) {
+    if (!showStageMode) {
       document.body.style.overflow = "";
       return;
     }
@@ -392,7 +390,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showStageMode, showTvMode]);
+  }, [showStageMode]);
 
   useEffect(() => {
     if (initialCode) {
@@ -401,6 +399,14 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
         .then((p) => {
           setParty(p);
           connectSSE(initialCode);
+          // Auto-play current track at the server's position when joining
+          if (p.playback?.action === "play") {
+            const ct = p.tracks.find((t) => t.position === p.current_position);
+            if (ct) {
+              const seekPos = p.playback.seek_position || 0;
+              void onPlaybackActionRef.current?.("play", ct, seekPos);
+            }
+          }
         })
         .catch(() => showToast("Пати не найдена"))
         .finally(() => setLoading(false));
@@ -425,7 +431,17 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
       return;
     }
     syncIntervalRef.current = setInterval(() => {
-      fetchParty(party.invite_code).then(setParty).catch(() => {});
+      fetchParty(party.invite_code).then((p) => {
+        setParty(p);
+        // Re-sync audio if drift > 4s
+        if (p.playback?.action === "play") {
+          const ct = p.tracks.find((t) => t.position === p.current_position);
+          if (ct) {
+            const serverPos = p.playback.seek_position || 0;
+            void onPlaybackActionRef.current?.("seek", undefined, serverPos);
+          }
+        }
+      }).catch(() => {});
     }, 15000);
     return () => { if (syncIntervalRef.current) clearInterval(syncIntervalRef.current); };
   }, [party?.invite_code]);
@@ -491,6 +507,14 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
       const p = await fetchParty(cleanCode);
       setParty(p);
       connectSSE(code);
+      // Auto-play current track at room position
+      if (p.playback?.action === "play") {
+        const ct = p.tracks.find((t) => t.position === p.current_position);
+        if (ct) {
+          const seekPos = p.playback.seek_position || 0;
+          void onPlaybackActionRef.current?.("play", ct, seekPos);
+        }
+      }
     } catch {
       showToast("Пати не найдена");
     }
@@ -558,13 +582,6 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
     if (!party) return;
     haptic("light");
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/TSmymusicbot_bot?startapp=party_${party.invite_code}`)}&text=${encodeURIComponent(`🎉 Заходи на пати «${party.name}»! Добавляй свои треки 🎶`)}`;
-    window.open(shareUrl, "_blank");
-  };
-
-  const handleShareTv = () => {
-    if (!party) return;
-    haptic("light");
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/TSmymusicbot_bot?startapp=partytv_${party.invite_code}`)}&text=${encodeURIComponent(`📺 Смотри Party TV «${party.name}» в live-режиме`)}`;
     window.open(shareUrl, "_blank");
   };
 
@@ -691,10 +708,8 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
               boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
               backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
             }}>
-              <button onClick={() => { handleShareTv(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> Share TV</button>
               {currentTrack && <button onClick={() => { setShowStageMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSparkles size={14} /> Stage mode</button>}
-              {currentTrack && <button onClick={() => { setShowTvMode(true); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconTV size={14} /> TV mode</button>}
-              {!readOnlyMode && <button onClick={() => { handleSavePlaylist(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSave size={14} /> Сохранить плейлист</button>}
+              {<button onClick={() => { handleSavePlaylist(); setShowMoreMenu(false); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", background: "transparent", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}><IconSave size={14} /> Сохранить плейлист</button>}
               {isDJ && <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />}
               {isDJ && (
                 showConfirmClose
@@ -726,12 +741,12 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
               </div>
             </div>
             <div style={{ fontSize: 12, color: "rgba(24,13,0,0.7)", marginTop: 6, lineHeight: 1.45 }}>
-<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{readOnlyMode ? <><IconTV size={13} /> Режим витрины — только просмотр live room</> : (isDJ ? <><IconHeadphones size={13} /> Ты DJ — управляй очередью</> : "Добавляй треки в общую очередь")}</span>
+<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{isDJ ? <><IconHeadphones size={13} /> Ты DJ — управляй очередью</> : "Добавляй треки в общую очередь"}</span>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               <div onClick={() => { navigator.clipboard?.writeText(party.invite_code).then(() => { haptic("light"); showToast("Код скопирован"); }).catch(() => {}); }} style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.16)", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>#{party.invite_code} <IconClipboard size={11} /></div>
               <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}><IconMusic size={13} /> {party.tracks.length} треков</div>
-              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}>{readOnlyMode ? <><IconTV size={12} /> read-only</> : (isDJ ? <><IconTrophy size={12} /> DJ mode</> : <><IconSparkles size={12} /> listener</>)}</div>
+              <div style={{ padding: "7px 10px", borderRadius: 12, background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 700 , display: "flex", alignItems: "center", gap: 4 }}>{isDJ ? <><IconTrophy size={12} /> DJ mode</> : <><IconSparkles size={12} /> listener</>}</div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={handleShare} style={{
@@ -971,7 +986,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
             <span>Live chat</span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 10, color: hintColor }}>{chatMessages.length} msgs</span>
-              {canControl && !readOnlyMode && chatMessages.length > 0 && (
+              {canControl && chatMessages.length > 0 && (
                 <button onClick={handleClearChat} style={{ padding: "5px 8px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.04)", color: textColor, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Clear</button>
               )}
             </div>
@@ -981,15 +996,15 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
               <div key={message.id} style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.03)" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ fontSize: 11, color: textColor, fontWeight: 700 }}>{message.display_name || "Guest"}</div>
-                  {!readOnlyMode && (canControl || message.user_id === userId) && (
+                  {(canControl || message.user_id === userId) && (
                     <button onClick={() => handleDeleteChatMessage(message.id)} style={{ padding: "4px 7px", borderRadius: 999, border: "none", background: "rgba(239,83,80,0.16)", color: "#ff8a80", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>×</button>
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: hintColor, marginTop: 2 }}>{message.message}</div>
               </div>
-            )) : <div style={{ color: hintColor, fontSize: 12 }}>{readOnlyMode ? "Read-only screen. Сообщения только для просмотра." : "Чат пока тихий. Напиши первым."}</div>}
+            )) : <div style={{ color: hintColor, fontSize: 12 }}>{"Чат пока тихий. Напиши первым."}</div>}
           </div>
-          {!readOnlyMode && <div style={{ display: "flex", gap: 8 }}>
+          {<div style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
               placeholder="Написать в чат..."
@@ -1002,7 +1017,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
           </div>}
         </div>
 
-        {!readOnlyMode && <button onClick={() => { haptic("light"); setShowSearch(true); }} style={{
+        {<button onClick={() => { haptic("light"); setShowSearch(true); }} style={{
           width: "100%", padding: "14px 0", borderRadius: 16, border: cardBorder,
           background: softBg, color: textColor, fontSize: 14, fontWeight: 700,
           cursor: "pointer", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -1350,54 +1365,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
           </div>
         )}
 
-        {showTvMode && currentTrack && (
-          <div style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 99997,
-            background: warm ? "linear-gradient(180deg, rgba(25,14,6,0.98), rgba(10,7,3,1))" : "linear-gradient(180deg, rgba(5,7,14,0.99), rgba(2,3,8,1))",
-            overflow: "auto",
-          }}>
-            <div style={{ minHeight: "100vh", padding: "24px 22px 36px", display: "flex", flexDirection: "column", gap: 24 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ color: hintColor, fontSize: 11, fontWeight: 800, letterSpacing: 1.6, textTransform: "uppercase" }}>Party TV</div>
-                  <div style={{ color: textColor, fontSize: 24, fontWeight: 800 }}>{party.name}</div>
-                </div>
-                <button onClick={() => setShowTvMode(false)} style={{ padding: "10px 14px", borderRadius: 999, border: cardBorder, background: "rgba(255,255,255,0.06)", color: textColor, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><IconClose size={14} /> Close</button>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)", gap: 24 }}>
-                <div style={{ ...glassCard, borderRadius: 28, padding: 20 }}>
-                  <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
-                    <div style={{ width: 220, height: 220, borderRadius: 26, overflow: "hidden", background: "rgba(255,255,255,0.06)", flexShrink: 0 }}>
-                      {currentTrack.cover_url ? <img src={currentTrack.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><IconMusic size={48} color={textColor} /></div>}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ color: textColor, fontSize: 34, fontWeight: 800, lineHeight: 1.08 }}>{currentTrack.title}</div>
-                      <div style={{ color: hintColor, fontSize: 18, marginTop: 8 }}>{currentTrack.artist}</div>
-                      <div style={{ marginTop: 16, height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}><div style={{ width: `${progressPercent}%`, height: "100%", background: activeBg }} /></div>
-                      <div style={{ display: "flex", justifyContent: "space-between", color: hintColor, fontSize: 13, marginTop: 8 }}><span>{formatDuration(livePosition)}</span><span>{currentTrack.duration_fmt}</span></div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ ...glassCard, borderRadius: 28, padding: 20 }}>
-                  <div style={{ ...sectionLabel, marginBottom: 12 }}>Queue</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {upNext.slice(0, 6).map((track, index) => (
-                      <div key={`tv-${track.video_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.03)" }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ color: textColor, fontSize: 14, fontWeight: 700 }}>{index + 1}. {track.title}</div>
-                          <div style={{ color: hintColor, fontSize: 12 }}>{track.artist}</div>
-                        </div>
-                        <div style={{ color: hintColor, fontSize: 12 }}>{track.duration_fmt}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+
 
         <style>{`@keyframes partyReactionFloat { 0% { transform: translate3d(0, 0, 0) scale(0.82); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate3d(0, -88px, 0) scale(1.16); opacity: 0; } } @keyframes partyEqualizer { 0%, 100% { transform: scaleY(0.45); opacity: 0.65; } 50% { transform: scaleY(1.1); opacity: 1; } } @keyframes partyOrbitPulse { 0%, 100% { transform: scale(0.96); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } } @keyframes partyParticleFloat { 0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.4; } 50% { transform: translate3d(0, -18px, 0) scale(1.08); opacity: 0.75; } } @keyframes partyTransitionFlash { 0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; } } @keyframes partyCrowdPulse { 0%, 100% { transform: scale(0.9); opacity: 0.72; } 50% { transform: scale(1.18); opacity: 1; } }`}</style>
       </div>
