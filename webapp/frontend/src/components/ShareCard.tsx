@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { memo } from "preact/compat";
 import { extractDominantColor, rgbToCSS } from "../colorExtractor";
+import { getStoryCardUrl } from "../api";
 import { IconClose, IconUpload } from "./Icons";
 
 interface ShareCardProps {
   track: {
     title: string;
     artist: string;
+    video_id?: string;
     cover_url?: string;
     duration_fmt?: string;
   };
@@ -206,41 +208,49 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
 
   const handleShare = useCallback(async () => {
     if (!cardUrl) return;
-    
+
+    // 1) Try native Web Share API (works in real browsers, not in TG WebView)
     try {
-      // Try native share
       if (navigator.share && navigator.canShare) {
         const response = await fetch(cardUrl);
         const blob = await response.blob();
         const file = new File([blob], `${track.title}.png`, { type: "image/png" });
-        
         if (navigator.canShare({ files: [file] })) {
           await navigator.share({
             files: [file],
             title: `${track.artist} — ${track.title}`,
-            text: isTequila ? "Listen on 𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀 𝐌 𝐔 𝐒 𝐈 𝐂" : "Listen on BLACK ROOM",
+            text: isTequila ? "Listen on TEQUILA MUSIC" : "Listen on BLACK ROOM",
           });
           return;
         }
       }
-      
-      // Fallback: download
-      const a = document.createElement("a");
-      a.href = cardUrl;
-      a.download = `${track.title}_${isTequila ? "tequila_music" : "blackroom"}.png`;
-      a.click();
-    } catch (e) {
-      console.error("Share error:", e);
+    } catch {
+      // Web Share not supported or user cancelled
+    }
+
+    // 2) Fallback: share as Telegram message with link
+    const appLink = `https://t.me/TSmymusicbot_bot/app?startapp=play_${track.video_id || ""}`;
+    const text = `🎵 ${track.artist} — ${track.title}\n${appLink}`;
+    try {
+      const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${encodeURIComponent(`🎵 ${track.artist} — ${track.title}`)}`;
+      window.Telegram?.WebApp?.openTelegramLink?.(tgShareUrl);
+    } catch {
+      window.open(`https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${encodeURIComponent(`🎵 ${track.artist} — ${track.title}`)}`, "_blank");
     }
   }, [cardUrl, track, isTequila]);
 
   const handleDownload = useCallback(() => {
-    if (!cardUrl) return;
-    const a = document.createElement("a");
-    a.href = cardUrl;
-    a.download = `${track.title}_${isTequila ? "tequila_music" : "blackroom"}.png`;
-    a.click();
-  }, [cardUrl, track.title, isTequila]);
+    // In TG WebView, <a download>.click() silently fails.
+    // If we have a server-side story card URL, open it so user can long-press → Save.
+    // Otherwise fall back to opening the canvas blob URL.
+    const url = track.video_id ? getStoryCardUrl(track.video_id) : cardUrl;
+    if (!url) return;
+    try {
+      window.Telegram?.WebApp?.openLink?.(url);
+    } catch {
+      window.open(url, "_blank");
+    }
+  }, [cardUrl, track.video_id]);
 
   return (
     <div
