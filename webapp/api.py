@@ -1988,7 +1988,7 @@ async def get_story_card(
 
     from starlette.responses import Response
     return Response(content=png_bytes, media_type="image/png",
-                    headers={"Content-Disposition": f'inline; filename="story_{video_id}.png"'})
+                    headers={"Content-Disposition": f'attachment; filename="story_{video_id}.png"'})
 
 
 # ── Friends Activity Feed API ───────────────────────────────────────────
