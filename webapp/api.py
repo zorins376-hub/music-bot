@@ -1943,8 +1943,17 @@ async def track_of_day(user: dict = Depends(get_current_user)):
 # ── Story Cards API ──────────────────────────────────────────────────────
 
 @app.get("/api/story-card/{video_id}")
-async def get_story_card(video_id: str, user: dict = Depends(get_current_user)):
+async def get_story_card(
+    video_id: str,
+    x_telegram_init_data: str | None = Header(None),
+    token: str | None = Query(None),
+):
     """Generate a shareable story card image for a track."""
+    # Auth: accept header or query param (openLink can't send headers)
+    init_data = x_telegram_init_data or token
+    user = verify_init_data(init_data) if init_data else None
+    if user is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     from bot.services.story_cards import generate_track_card
     import httpx
 

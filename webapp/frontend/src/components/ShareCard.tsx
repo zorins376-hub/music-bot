@@ -214,9 +214,9 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
   const handleShare = useCallback((e: Event) => {
     e.stopPropagation();
     const appLink = `https://t.me/TSmymusicbot_bot/app?startapp=play_${track.video_id || ""}`;
-    const text = encodeURIComponent(`🎵 ${track.artist} — ${track.title}`);
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${text}`;
-    // openTelegramLink is the most reliable in TG WebView, window.open as fallback
+    // Put everything into text so it's one cohesive message
+    const msg = `🎵 ${track.artist} — ${track.title}\n\n▶️ Послушать: ${appLink}`;
+    const shareUrl = `https://t.me/share/url?url=&text=${encodeURIComponent(msg)}`;
     const tg = (window as any).Telegram?.WebApp;
     if (tg?.openTelegramLink) {
       tg.openTelegramLink(shareUrl);
