@@ -141,6 +141,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
         if (msg.event === "closed") {
           showToast("Пати завершена!");
           setParty(null);
+          fetchMyParties().then(setMyParties).catch(() => {});
           return;
         }
 
@@ -545,6 +546,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
       await closeParty(party.invite_code);
       setParty(null);
       eventSourceRef.current?.close();
+      fetchMyParties().then(setMyParties).catch(() => {});
     } catch {
       showToast("Только DJ может закрыть пати");
     }
