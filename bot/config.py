@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # ── Каналы экосистемы (v1.1) ─────────────────────────────────────────
     TEQUILA_CHANNEL: str = ""
     FULLMOON_CHANNEL: str = ""
-    BLACKROOM_GROUP_ID: Optional[int] = None
+    BLACKROOM_GROUP_ID: Optional[str] = None
 
     # ── YouTube cookies (base64-encoded Netscape cookies.txt) ────────────
     YT_COOKIES: Optional[str] = None
