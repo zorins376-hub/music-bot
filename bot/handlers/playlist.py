@@ -583,10 +583,34 @@ async def cb_pick_playlist(callback: CallbackQuery, callback_data: AddToPlCb) ->
             text=f"▸ {pl.name}",
             callback_data=AddToPlCb(tid=callback_data.tid, pid=pl.id).pack(),
         )])
-    await callback.message.answer(
-        t(user.language, "pl_pick"),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-    )
+    # Cancel button to restore original track keyboard
+    rows.append([InlineKeyboardButton(
+        text="✕ Отмена",
+        callback_data=AddToPlCb(tid=callback_data.tid, pid=-1).pack(),
+    )])
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    except Exception:
+        # Fallback if message can't be edited (e.g. too old)
+        await callback.message.answer(
+            t(user.language, "pl_pick"),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+
+
+@router.callback_query(AddToPlCb.filter(F.pid == -1))
+async def cb_cancel_pick_playlist(callback: CallbackQuery, callback_data: AddToPlCb) -> None:
+    """Cancel playlist picker — restore original track keyboard."""
+    await callback.answer()
+    from bot.handlers.search import _feedback_keyboard
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=_feedback_keyboard(callback_data.tid),
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(AddToPlCb.filter(F.pid > 0))
@@ -629,7 +653,14 @@ async def cb_add_to_playlist(callback: CallbackQuery, callback_data: AddToPlCb) 
         except Exception:
             logger.debug("mirror_playlist_track_add failed pt=%s", pt.id, exc_info=True)
     await callback.answer(t(user.language, "pl_track_added", name=pl.name), show_alert=True)
-    await callback.message.delete()
+    # Restore original track keyboard in-place
+    from bot.handlers.search import _feedback_keyboard
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=_feedback_keyboard(callback_data.tid),
+        )
+    except Exception:
+        pass
 
 
 # ── Share playlist (C-04) ────────────────────────────────────────────────
