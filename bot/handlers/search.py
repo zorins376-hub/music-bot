@@ -27,7 +27,7 @@ from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 from bot.services.provider_health import record_provider_event
-from bot.services.search_engine import deduplicate_results, suggest_query
+from bot.services.search_engine import _relevance_score, deduplicate_results, normalize_query, parse_query, suggest_query
 from bot.services.analytics import track_event
 from bot.services.share_links import create_share_link, resolve_share_link
 from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb
@@ -169,14 +169,12 @@ async def _get_bot_setting(key: str, default: str) -> str:
 
 # session_id → {chat_id, user_msg_id, status_msg_id, created_at}
 _group_sessions: dict[str, dict] = {}
-_group_sessions_lock = asyncio.Lock()
 
 
 async def _schedule_group_cleanup(bot, session_id: str) -> None:
     """Delete search messages in group if no track selected within timeout."""
     await asyncio.sleep(_GROUP_CLEANUP_SEC)
-    async with _group_sessions_lock:
-        info = _group_sessions.pop(session_id, None)
+    info = _group_sessions.pop(session_id, None)
     if not info:
         return
     for mid in (info.get("status_msg_id"), info.get("user_msg_id")):
@@ -189,8 +187,7 @@ async def _schedule_group_cleanup(bot, session_id: str) -> None:
 
 async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> None:
     """After track is selected in group: delete original message + search results."""
-    async with _group_sessions_lock:
-        info = _group_sessions.pop(session_id, None)
+    info = _group_sessions.pop(session_id, None)
     # Delete the search results message (the inline keyboard message)
     try:
         await results_msg.delete()
@@ -354,16 +351,20 @@ async def _do_search(message: Message, query: str) -> None:
         await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
         status = await message.answer(t(lang, "searching"))
 
+    _search_t0 = time.monotonic()
     is_group = message.chat.type in ("group", "supergroup")
     if is_group:
         max_results = _MAX_RESULTS_GROUP
     else:
         max_results = int(await _get_bot_setting("max_results", "10"))
 
+    parsed_query = parse_query(query)
+    provider_query = parsed_query.get("clean") or parsed_query.get("original") or query
+
     # STEP 1: Search local DB (TEQUILA / FULLMOON channels + cached tracks)
-    local_tracks = await search_local_tracks(query, limit=max_results)
+    local_tracks = await search_local_tracks(provider_query, limit=max_results)
     local_results = []
-    for idx, tr in enumerate(local_tracks or []):
+    for tr in (local_tracks or []):
         local_results.append({
             "video_id": tr.source_id,
             "title": tr.title or "Unknown",
@@ -372,7 +373,6 @@ async def _do_search(message: Message, query: str) -> None:
             "duration_fmt": _fmt_duration(tr.duration) if tr.duration else "?:??",
             "source": tr.source or "channel",
             "file_id": tr.file_id,
-            "_provider_pos": idx,
         })
 
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
@@ -380,14 +380,14 @@ async def _do_search(message: Message, query: str) -> None:
         """Search a single source with cache and 8s timeout."""
         t0 = time.monotonic()
         try:
-            cached = await cache.get_query_cache(query, source)
+            cached = await cache.get_query_cache(provider_query, source)
             if cached is not None:
                 return cached
-            res = await asyncio.wait_for(search_fn(query, limit=limit), timeout=8)
+            res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=8)
             elapsed = time.monotonic() - t0
             record_provider_event(source, "search", elapsed, True)
             if res:
-                await cache.set_query_cache(query, res, source)
+                await cache.set_query_cache(provider_query, res, source)
                 requests_total.labels(source=source).inc()
             return res or []
         except Exception as exc:
@@ -411,41 +411,82 @@ async def _do_search(message: Message, query: str) -> None:
         _search_source("vk", search_vk, max_results),
         _search_source("youtube", _search_yt, max_results),
     ]
-    source_results = await asyncio.gather(*tasks, return_exceptions=True)
+    source_results = await asyncio.gather(*tasks)
     all_results: list[dict] = []
     for batch in source_results:
-        if isinstance(batch, BaseException):
-            continue
-        # Stamp provider position so ranking preserves provider relevance order
-        for i, track in enumerate(batch):
-            track["_provider_pos"] = i
         all_results.extend(batch)
 
     # A-05: If few results and query is mono-language, try transliterated search
     if len(all_results) < 3:
-        script = detect_script(query)
+        script = detect_script(provider_query)
         alt_query = None
         if script == "cyrillic":
-            alt_query = transliterate_cyr_to_lat(query)
+            alt_query = transliterate_cyr_to_lat(provider_query)
         elif script == "latin":
-            alt_query = transliterate_lat_to_cyr(query)
-        if alt_query and alt_query != query:
+            alt_query = transliterate_lat_to_cyr(provider_query)
+        if alt_query and alt_query != provider_query:
             alt_tasks = [
                 _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
                 _search_source("yandex", lambda q, limit=5: search_yandex(alt_query, limit=limit), max_results),
             ]
-            alt_results = await asyncio.gather(*alt_tasks, return_exceptions=True)
+            alt_results = await asyncio.gather(*alt_tasks)
             for batch in alt_results:
-                if isinstance(batch, BaseException):
-                    continue
                 all_results.extend(batch)
 
     # Merge local + external results, then deduplicate
     all_results = local_results + all_results
 
     # Deduplicate across sources (language-aware ranking)
-    script = detect_script(query)
-    results = deduplicate_results(all_results, lang_hint=script, query=query)[:max_results] if all_results else []
+    script = detect_script(provider_query)
+    results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results] if all_results else []
+
+    # Lyrics hint fallback: for long lyric fragments with weak top-1, use Genius to
+    # identify likely canonical artist/title and search providers again by that hint.
+    should_try_lyrics_hint = len(provider_query.split()) >= 4
+    if should_try_lyrics_hint:
+        top_score = 0.0
+        if results:
+            top_score = _relevance_score(
+                normalize_query(provider_query),
+                results[0].get("uploader", ""),
+                results[0].get("title", ""),
+                position=results[0].get("_provider_pos", 5),
+            )
+        if not results or top_score < 0.85:
+            try:
+                from bot.services.lyrics_provider import search_by_lyrics
+
+                lyric_hints = await search_by_lyrics(provider_query, limit=2)
+            except Exception:
+                lyric_hints = []
+
+            hint_tracks: list[dict] = []
+            seen_hint_queries: set[str] = set()
+            for hint in lyric_hints:
+                artist_hint = hint.get("artist", "").strip()
+                title_hint = hint.get("title", "").strip()
+                if not artist_hint or not title_hint:
+                    continue
+                hint_query = f"{artist_hint} {title_hint}".strip()
+                if hint_query in seen_hint_queries:
+                    continue
+                seen_hint_queries.add(hint_query)
+                try:
+                    hint_yandex, hint_youtube = await asyncio.gather(
+                        asyncio.wait_for(search_yandex(hint_query, limit=2), timeout=6),
+                        asyncio.wait_for(_search_yt(hint_query, limit=2), timeout=6),
+                    )
+                except Exception:
+                    continue
+
+                for idx, track in enumerate((hint_yandex or []) + (hint_youtube or [])):
+                    track["_provider_pos"] = idx
+                    track["_hint_bonus"] = 0.85 if idx == 0 else 0.65
+                    hint_tracks.append(track)
+
+            if hint_tracks:
+                all_results.extend(hint_tracks)
+                results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results]
 
     # DMCA filter: remove blocked tracks, show appeal button if any were blocked
     blocked_count = 0
@@ -485,6 +526,36 @@ async def _do_search(message: Message, query: str) -> None:
     await record_listening_event(
         user_id=user.id, query=query[:500], action="search", source="search"
     )
+
+    # ── Search audit log ──────────────────────────────────────────────────
+    try:
+        _search_ms = int((time.monotonic() - _search_t0) * 1000)
+        _top1 = results[0] if results else {}
+        _top1_score = 0.0
+        if _top1:
+            _top1_score = round(_relevance_score(
+                normalize_query(provider_query),
+                _top1.get("uploader", ""),
+                _top1.get("title", ""),
+                position=_top1.get("_provider_pos", 5),
+            ), 3)
+        _src_set = list({r.get("source", "?") for r in results})
+        _audit = _json.dumps({
+            "t": "search",
+            "ts": int(time.time()),
+            "uid": user.id,
+            "q": query[:300],
+            "pq": provider_query[:300],
+            "n": len(results),
+            "top1": f"{_top1.get('uploader', '')} - {_top1.get('title', '')}" if _top1 else "",
+            "top1_sc": _top1_score,
+            "src": _src_set,
+            "ms": _search_ms,
+        }, ensure_ascii=False)
+        await cache.redis.lpush("search:audit", _audit)
+        await cache.redis.ltrim("search:audit", 0, 49999)
+    except Exception:
+        logger.debug("search audit log failed", exc_info=True)
 
     # Groups: auto-play first track — prefer cached tracks for instant delivery
     if is_group:
@@ -586,14 +657,8 @@ async def _group_auto_play(
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
         return
 
-    # Redis cache → DB fallback
+    # Redis cache
     file_id = await cache.get_file_id(video_id, bitrate)
-    if not file_id:
-        try:
-            from bot.services.telegram_cache import get_file_id as _tg_get_fid
-            file_id = await _tg_get_fid(video_id)
-        except Exception:
-            pass
     if file_id:
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
@@ -749,16 +814,32 @@ async def handle_text(message: Message) -> None:
 
     matched_prefix = False
 
+    # Handle @bot_username mentions in groups — simple text-based detection
+    if is_group:
+        bot_me = await message.bot.me()
+        if bot_me.username:
+            at_tag = f"@{bot_me.username}"
+            # Case-insensitive check
+            idx = lower.find(at_tag.lower())
+            if idx != -1:
+                text = (text[:idx] + text[idx + len(at_tag):]).strip()
+                lower = text.lower()
+                matched_prefix = True
+
     # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
     _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
-    for prefix in _PREFIXES:
-        if lower.startswith(prefix):
-            text = text[len(prefix):].strip()
-            matched_prefix = True
-            break
+    if not matched_prefix:
+        for prefix in _PREFIXES:
+            if lower.startswith(prefix):
+                text = text[len(prefix):].strip()
+                matched_prefix = True
+                break
 
-    # In groups: only respond to prefix triggers — ignore links and bare text
+    # In groups: auto-convert YouTube/Spotify/Yandex links even without trigger prefix
     if is_group and not matched_prefix:
+        if is_youtube_url(text) or is_spotify_url(text) or is_yandex_music_url(text):
+            await _do_search(message, text)
+            return
         return
 
     if not text:
@@ -818,6 +899,24 @@ async def handle_track_select(
     track_info = results[callback_data.i]
     _share_q = f"{track_info.get('uploader', '')} - {track_info.get('title', '')}"
     video_id = track_info["video_id"]
+
+    # ── Selection audit log ───────────────────────────────────────────────
+    try:
+        _sel_audit = _json.dumps({
+            "t": "pick",
+            "ts": int(time.time()),
+            "uid": user.id,
+            "idx": callback_data.i,
+            "n": len(results),
+            "artist": track_info.get("uploader", "")[:120],
+            "title": track_info.get("title", "")[:120],
+            "src": track_info.get("source", "?"),
+        }, ensure_ascii=False)
+        await cache.redis.lpush("search:audit", _sel_audit)
+        await cache.redis.ltrim("search:audit", 0, 49999)
+    except Exception:
+        logger.debug("selection audit log failed", exc_info=True)
+
     if not await _acquire_download_lock(user.id, video_id):
         return
 
@@ -852,12 +951,6 @@ async def handle_track_select(
 
         # Проверяем Redis кэш
         file_id = await cache.get_file_id(video_id, bitrate)
-        if not file_id:
-            try:
-                from bot.services.telegram_cache import get_file_id as _tg_get_fid
-                file_id = await _tg_get_fid(video_id)
-            except Exception:
-                pass
         if file_id:
             cache_hits.inc()
             caption = _track_caption(lang, track_info, bitrate, ad_free=_af)

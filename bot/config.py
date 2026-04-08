@@ -55,8 +55,8 @@ class Settings(BaseSettings):
         if not self.BOT_TOKEN or not self.BOT_TOKEN.strip():
             raise ValueError("BOT_TOKEN is required and cannot be empty")
         if not self.ADMIN_IDS and not self.ADMIN_USERNAMES:
-            import logging as _logging
-            _logging.getLogger(__name__).warning("No ADMIN_IDS or ADMIN_USERNAMES configured; admin commands will be unavailable")
+            import warnings
+            warnings.warn("No ADMIN_IDS or ADMIN_USERNAMES configured; admin commands will be unavailable until loaded from Redis")
         return self
 
     @field_validator("WEBAPP_CORS_ORIGINS", mode="before")
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # ── Каналы экосистемы (v1.1) ─────────────────────────────────────────
     TEQUILA_CHANNEL: str = ""
     FULLMOON_CHANNEL: str = ""
-    BLACKROOM_GROUP_ID: Optional[str] = None  # single ID or comma-separated list
+    BLACKROOM_GROUP_ID: Optional[int] = None
 
     # ── YouTube cookies (base64-encoded Netscape cookies.txt) ────────────
     YT_COOKIES: Optional[str] = None
@@ -138,9 +138,7 @@ class Settings(BaseSettings):
 
     # ── Genius (lyrics) ──────────────────────────────────────────────────
     GENIUS_TOKEN: Optional[str] = None
-
-    # ── Last.fm (recommendations / similar tracks) ────────────────────────
-    LASTFM_API_KEY: Optional[str] = None
+    GENIUS_PROXY_URL: Optional[str] = None  # e.g. http://proxy:8080 for DNS-blocked envs
 
     # ── Prometheus metrics ────────────────────────────────────────────
     METRICS_PORT: int = 9090  # VPS: enabled (0 = disabled)
@@ -193,9 +191,6 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None           # e.g. https://xxxx.supabase.co
     SUPABASE_SERVICE_KEY: Optional[str] = None   # service_role key (NOT anon)
     SUPABASE_AI_ENABLED: bool = True             # Master switch: use Supabase AI (disables local ML)
-
-    # ── Cache Channel (Telegram channel for caching audio files) ──────────
-    CACHE_CHANNEL_ID: Optional[int] = None
 
     # ── Bot Fleet / Sharding (5.2) ────────────────────────────────────────
     NODE_ID: Optional[str] = None  # e.g. "node-1"

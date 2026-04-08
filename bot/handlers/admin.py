@@ -6,8 +6,6 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import case, func, select, update, and_
 
@@ -30,11 +28,6 @@ _USERS_PER_PAGE = 10
 _admin_fwd_state: dict[int, dict] = {}
 
 _LIVE_TRACKS_PER_PAGE = 8
-
-
-class BroadcastState(StatesGroup):
-    waiting_message = State()  # admin sends text/photo/gif for broadcast
-
 
 # Admin rate limiting: max operations per minute
 _ADMIN_RATE_LIMIT = 15
@@ -105,7 +98,6 @@ async def _build_detailed_stats() -> str:
                 func.sum(case((User.last_active >= week_ago, 1), else_=0)),
                 func.sum(case((User.last_active >= month_ago, 1), else_=0)),
                 func.sum(case((User.is_banned == True, 1), else_=0)),
-                func.sum(case((User.bot_blocked == True, 1), else_=0)),
                 func.sum(case((User.is_premium == True, 1), else_=0)),
                 func.sum(case((and_(User.is_premium == True, User.premium_until == None), 1), else_=0)),
                 func.coalesce(func.sum(User.request_count), 0),
@@ -119,10 +111,9 @@ async def _build_detailed_stats() -> str:
         wau = int(u[4] or 0)
         mau = int(u[5] or 0)
         banned_count = int(u[6] or 0)
-        blocked_count = int(u[7] or 0)
-        premium_total = int(u[8] or 0)
-        admin_premium = int(u[9] or 0)
-        total_requests = int(u[10] or 0)
+        premium_total = int(u[7] or 0)
+        admin_premium = int(u[8] or 0)
+        total_requests = int(u[9] or 0)
         paid_premium = premium_total - admin_premium
 
         # ── Payments: single combined query ───────
@@ -214,8 +205,6 @@ async def _build_detailed_stats() -> str:
         f"  Новых за неделю: <b>{users_week}</b>",
         f"  DAU: <b>{dau}</b> | WAU: <b>{wau}</b> | MAU: <b>{mau}</b>",
         f"  Забанено: <b>{banned_count}</b>",
-        f"  🚫 Заблокировали бота: <b>{blocked_count}</b>",
-        f"  ✅ Активных: <b>{user_total - blocked_count - banned_count}</b>",
         "",
         "<b>◇ Premium:</b>",
         f"  Всего: <b>{premium_total}</b>",
@@ -613,23 +602,17 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await message.answer(f"Пользователь {label} разблокирован.")
         await log_admin_action(message.from_user.id, "unban", target.id)
 
-    # /admin broadcast <текст> — legacy text-only broadcast
+    # /admin broadcast <текст>
     elif subcmd == "broadcast":
         if len(args) < 3:
-            await message.answer(
-                "📨 <b>Рассылка</b>\n\n"
-                "Для текстовой рассылки: <code>/admin broadcast текст</code>\n\n"
-                "Или нажми кнопку «◈ Рассылка» в админ-панели — "
-                "там можно отправить фото, GIF или видео.",
-                parse_mode="HTML",
-            )
+            await message.answer("Использование: /admin broadcast <текст>")
             return
-        text = message.text.split(None, 2)[2]  # everything after "/admin broadcast"
-        import json as _json
+        text = args[2]
+        # Store pending broadcast for confirmation
         await cache.redis.setex(
             f"admin:broadcast_pending:{message.from_user.id}",
-            300,
-            _json.dumps({"chat_id": message.chat.id, "message_id": message.message_id, "text_only": text}),
+            300,  # 5 min TTL
+            text,
         )
         preview = text[:200] + ("..." if len(text) > 200 else "")
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1094,124 +1077,82 @@ async def handle_adm_health(callback: CallbackQuery) -> None:
     await callback.message.answer(text, parse_mode="HTML")
 
 
-@router.callback_query(lambda c: c.data == "adm:broadcast")
-async def handle_adm_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None:
-    """Enter broadcast FSM: ask admin to send a message (text/photo/GIF)."""
-    if not _is_admin(callback.from_user.id):
-        return await callback.answer("⛔", show_alert=True)
-    await callback.answer()
-    await state.set_state(BroadcastState.waiting_message)
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="adm:broadcast_cancel")]
-    ])
-    await callback.message.answer(
-        "📨 <b>Рассылка</b>\n\n"
-        "Отправь мне сообщение, которое хочешь разослать всем пользователям.\n\n"
-        "Поддерживается:\n"
-        "• Текст (с HTML-форматированием)\n"
-        "• Фото с подписью\n"
-        "• GIF/анимация с подписью\n"
-        "• Видео с подписью\n\n"
-        "Оформи сообщение красиво — оно будет отправлено <b>как есть</b>.",
-        parse_mode="HTML",
-        reply_markup=cancel_kb,
-    )
-
-
-@router.message(BroadcastState.waiting_message)
-async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot) -> None:
-    """Receive broadcast content from admin, show preview and confirm."""
+@router.message(Command("searchaudit"))
+async def cmd_search_audit(message: Message) -> None:
+    """Quick search quality snapshot from Redis audit log."""
     if not _is_admin(message.from_user.id):
-        await state.clear()
+        return
+    try:
+        raw = await cache.redis.lrange("search:audit", 0, 4999)
+    except Exception:
+        await message.answer("Redis unavailable")
+        return
+    if not raw:
+        await message.answer("No audit data yet. Wait for users to search.")
         return
 
-    # Store the message reference for later copy_message
-    await state.update_data(
-        broadcast_chat_id=message.chat.id,
-        broadcast_message_id=message.message_id,
-    )
+    import json as _j
+    searches, picks = [], []
+    for r in raw:
+        try:
+            e = _j.loads(r)
+        except Exception:
+            continue
+        if e.get("t") == "search":
+            searches.append(e)
+        elif e.get("t") == "pick":
+            picks.append(e)
 
-    # Also store in Redis as backup (FSM might expire)
-    import json as _json
-    await cache.redis.setex(
-        f"admin:broadcast_pending:{message.from_user.id}",
-        300,  # 5 min TTL
-        _json.dumps({"chat_id": message.chat.id, "message_id": message.message_id}),
-    )
+    lines = [f"<b>🔍 Search Audit</b> ({len(searches)} searches, {len(picks)} picks)"]
+    if searches:
+        lines.append(f"Pick rate: <b>{len(picks) / len(searches):.0%}</b>")
+        scores = [s.get("top1_sc", 0) for s in searches if s.get("n", 0) > 0]
+        if scores:
+            scores.sort()
+            lines.append(f"Top-1 score median: <b>{scores[len(scores) // 2]:.3f}</b>")
+            low = sum(1 for s in scores if s < 0.5)
+            lines.append(f"Top-1 &lt;0.5: {low}/{len(scores)}")
+        times = sorted(s.get("ms", 0) for s in searches)
+        lines.append(f"Latency p50/p95: {times[len(times) // 2]}ms / {times[int(len(times) * 0.95)]}ms")
+        zero = sum(1 for s in searches if s.get("n", 0) == 0)
+        if zero:
+            lines.append(f"Zero results: {zero}")
+    if picks:
+        from collections import Counter
+        top_pos = Counter(p.get("idx", "?") for p in picks).most_common(3)
+        pos_str = ", ".join(f"#{k}: {v}" for k, v in top_pos)
+        lines.append(f"Top positions: {pos_str}")
+        top_src = Counter(p.get("src", "?") for p in picks).most_common(3)
+        src_str = ", ".join(f"{k}: {v}" for k, v in top_src)
+        lines.append(f"Sources: {src_str}")
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Подтвердить рассылку", callback_data="adm:broadcast_confirm"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="adm:broadcast_cancel"),
-        ]
-    ])
-
-    # Count users
-    async with async_session() as session:
-        result = await session.execute(
-            select(func.count(User.id)).where(User.is_banned == False)  # noqa: E712
-        )
-        user_count = result.scalar() or 0
-
-    # Describe content type
-    if message.animation:
-        content_type = "GIF + текст"
-    elif message.photo:
-        content_type = "Фото + текст"
-    elif message.video:
-        content_type = "Видео + текст"
-    else:
-        content_type = "Текст"
-
-    await message.reply(
-        f"⚠️ <b>Подтверди рассылку</b>\n\n"
-        f"Тип: <b>{content_type}</b>\n"
-        f"Получателей: <b>{user_count}</b> пользователей\n\n"
-        f"☝️ Сообщение выше будет отправлено всем. Подтвердить?",
-        parse_mode="HTML",
-        reply_markup=kb,
-    )
-    # Stay in state until confirm/cancel
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "adm:broadcast_confirm")
-async def handle_broadcast_confirm(callback: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+async def handle_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
     if not _is_admin(callback.from_user.id):
         return await callback.answer("⛔", show_alert=True)
     await callback.answer()
-
-    import json as _json
     pending_key = f"admin:broadcast_pending:{callback.from_user.id}"
-    raw = await cache.redis.get(pending_key)
-    if not raw:
+    text = await cache.redis.get(pending_key)
+    if not text:
         await callback.message.edit_text("⚠️ Рассылка истекла или уже отправлена.")
-        await state.clear()
         return
-    if isinstance(raw, bytes):
-        raw = raw.decode()
-    data = _json.loads(raw)
-
+    if isinstance(text, bytes):
+        text = text.decode()
     await cache.redis.delete(pending_key)
-    await state.clear()
     await callback.message.edit_text("⏳ Рассылка запущена...")
-
-    # Legacy text-only broadcast
-    if "text_only" in data:
-        await _broadcast(bot, callback.message, data["text_only"])
-        await log_admin_action(callback.from_user.id, "broadcast", details=data["text_only"][:200])
-    else:
-        # Copy message broadcast (supports photo/GIF/video/text)
-        await _broadcast_copy(bot, callback.message, data["chat_id"], data["message_id"])
-        await log_admin_action(callback.from_user.id, "broadcast", details=f"msg_id={data['message_id']}")
+    await _broadcast(bot, callback.message, text)
+    await log_admin_action(callback.from_user.id, "broadcast", details=text[:200])
 
 
 @router.callback_query(lambda c: c.data == "adm:broadcast_cancel")
-async def handle_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+async def handle_broadcast_cancel(callback: CallbackQuery) -> None:
     if not _is_admin(callback.from_user.id):
         return await callback.answer("⛔", show_alert=True)
     await callback.answer()
     await cache.redis.delete(f"admin:broadcast_pending:{callback.from_user.id}")
-    await state.clear()
     await callback.message.edit_text("❌ Рассылка отменена.")
 
 
@@ -1240,9 +1181,6 @@ async def handle_adm_back(callback: CallbackQuery) -> None:
 async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
     async with async_session() as session:
         total = await session.scalar(select(func.count()).select_from(User)) or 0
-        blocked_total = await session.scalar(
-            select(func.count()).select_from(User).where(User.bot_blocked == True)  # noqa: E712
-        ) or 0
         result = await session.execute(
             select(User)
             .order_by(User.created_at.desc())
@@ -1254,15 +1192,7 @@ async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]
     rows = []
     for u in users:
         name = u.username or u.first_name or str(u.id)
-        # Status icon: ◇ premium, ○ free, 🚫 blocked bot
-        blocked = getattr(u, "bot_blocked", False)
-        if blocked:
-            icon = "\U0001f6ab"  # 🚫
-        elif u.is_premium:
-            icon = "\u25c7"
-        else:
-            icon = "\u25cb"
-        label = f"{icon} @{name}" if u.username else f"{icon} {name}"
+        label = f"{'\u25c7' if u.is_premium else '\u25cb'} @{name}" if u.username else f"{'\u25c7' if u.is_premium else '\u25cb'} {name}"
         if u.is_premium:
             btn_text = "\u2717"
             btn_cb = AdmUserCb(act="unprem", uid=u.id, p=page).pack()
@@ -1288,13 +1218,7 @@ async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]
     rows.append(nav)
     rows.append([InlineKeyboardButton(text="\u25c1 \u041d\u0430\u0437\u0430\u0434", callback_data="action:admin")])
 
-    active = total - blocked_total
-    text = (
-        f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b> ({total})\n"
-        f"Активных: <b>{active}</b> · Заблокировали: <b>{blocked_total}</b>\n\n"
-        f"\u25c7 = Premium · \u25cb = Free · \U0001f6ab = Заблокировал бота\n"
-        f"\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
-    )
+    text = f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b> ({total})\n\n\u25c7 = Premium \u00b7 \u25cb = Free\n\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1385,7 +1309,7 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         return
     await callback.answer()
     prompts = {
-        "adm:broadcast": None,  # handled by dedicated FSM handler above
+        "adm:broadcast": "Для рассылки используй:\n<code>/admin broadcast текст</code>",
         "adm:premium": "Для выдачи Premium:\n<code>/admin premium @username</code>\nили\n<code>/admin premium user_id</code>",
         "adm:ban": "Для бана:\n<code>/admin ban @username</code>\nДля разбана:\n<code>/admin unban @username</code>\n\nМожно также по ID.",
         "adm:mode": "Для смены режима:\n<code>/admin mode night|energy|hybrid</code>",
@@ -1722,82 +1646,23 @@ async def _load_channel_tracks(bot: Bot, admin_msg: Message, channel_ref: str, l
 
 
 async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
-    """Broadcast text to all users with Telegram-friendly rate limiting."""
+    """Broadcast to all users with Telegram-friendly rate limiting."""
     import asyncio
     async with async_session() as session:
         result = await session.execute(
-            select(User.id).where(
-                User.is_banned == False,  # noqa: E712
-                User.bot_blocked == False,  # noqa: E712
-            )
+            select(User.id).where(User.is_banned == False)  # noqa: E712
         )
         user_ids = [row[0] for row in result.all()]
 
     sent, failed = 0, 0
-    blocked_ids: list[int] = []
     for uid in user_ids:
         try:
             await bot.send_message(uid, text, parse_mode="HTML")
             sent += 1
-        except Exception as e:
+        except Exception:
             failed += 1
-            err_str = str(e).lower()
-            if "blocked" in err_str or "deactivated" in err_str or "not found" in err_str:
-                blocked_ids.append(uid)
-        await asyncio.sleep(0.05)
-
-    # Mark blocked users so we skip them next time
-    if blocked_ids:
-        async with async_session() as session:
-            await session.execute(
-                update(User).where(User.id.in_(blocked_ids)).values(bot_blocked=True)
-            )
-            await session.commit()
+        await asyncio.sleep(0.05)  # ~20 msg/sec, safe for Telegram limits
 
     await admin_msg.answer(
-        f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
-        + (f"\n🚫 Заблокировали бота: {len(blocked_ids)}" if blocked_ids else "")
-    )
-
-
-async def _broadcast_copy(bot: Bot, admin_msg: Message, from_chat_id: int, message_id: int) -> None:
-    """Broadcast by copying a message (supports text, photo, GIF, video) to all users."""
-    import asyncio
-    async with async_session() as session:
-        result = await session.execute(
-            select(User.id).where(
-                User.is_banned == False,  # noqa: E712
-                User.bot_blocked == False,  # noqa: E712
-            )
-        )
-        user_ids = [row[0] for row in result.all()]
-
-    sent, failed = 0, 0
-    blocked_ids: list[int] = []
-    for uid in user_ids:
-        try:
-            await bot.copy_message(
-                chat_id=uid,
-                from_chat_id=from_chat_id,
-                message_id=message_id,
-            )
-            sent += 1
-        except Exception as e:
-            failed += 1
-            err_str = str(e).lower()
-            if "blocked" in err_str or "deactivated" in err_str or "not found" in err_str:
-                blocked_ids.append(uid)
-        await asyncio.sleep(0.05)
-
-    # Mark blocked users so we skip them next time
-    if blocked_ids:
-        async with async_session() as session:
-            await session.execute(
-                update(User).where(User.id.in_(blocked_ids)).values(bot_blocked=True)
-            )
-            await session.commit()
-
-    await admin_msg.answer(
-        f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}"
-        + (f"\n🚫 Заблокировали бота: {len(blocked_ids)}" if blocked_ids else "")
+        f"Broadcast done.\nSent: {sent}\nFailed: {failed}"
     )
