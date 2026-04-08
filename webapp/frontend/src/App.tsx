@@ -425,10 +425,12 @@ export function App() {
       // Only auto-skip if user was actually playing — prevents ghost state on cold start
       const s = stateRef.current;
       if (s.is_playing && s.current_track) {
-        // Retry once before skipping — stream may still be loading on server
-        if (_errorRetryCount < 1) {
+        // Retry up to 3 times with exponential backoff — server may still be downloading track
+        const maxRetries = 3;
+        if (_errorRetryCount < maxRetries) {
           _errorRetryCount++;
-          console.warn("Audio error, retrying in 1.5s...");
+          const delay = _errorRetryCount * 2500; // 2.5s, 5s, 7.5s
+          console.warn(`Audio error, retry ${_errorRetryCount}/${maxRetries} in ${delay}ms...`);
           setBuffering(true);
           setTimeout(() => {
             const a = audioRef.current;
@@ -438,7 +440,7 @@ export function App() {
               a.src = src;
               a.play().catch(() => {});
             }
-          }, 1500);
+          }, delay);
           return;
         }
         _errorRetryCount = 0;
@@ -1133,8 +1135,8 @@ export function App() {
           const onReady = () => { audio.removeEventListener("canplaythrough", onReady); resolve(); };
           if (audio.readyState >= 4) { resolve(); } // HAVE_ENOUGH_DATA — fully buffered
           else { audio.addEventListener("canplaythrough", onReady, { once: true }); }
-          // Timeout fallback: don't block forever on slow networks
-          setTimeout(resolve, 8000);
+          // Timeout fallback: don't block forever — give backend time to download from yt-dlp
+          setTimeout(resolve, 20000);
         });
         if (seekToStart && seekToStart > 1) {
           audio.currentTime = seekToStart;
