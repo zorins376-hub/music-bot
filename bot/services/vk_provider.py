@@ -54,7 +54,17 @@ def _search_vk_sync(query: str, limit: int) -> list[dict]:
     if audio is None:
         return []
     try:
-        tracks = audio.search(q=query, count=min(limit + 10, 100))
+        raw = audio.search(q=query, count=min(limit + 10, 100))
+        # vk_api.audio.search returns a generator; materialise it safely
+        tracks = list(raw) if raw else []
+    except (IndexError, KeyError, TypeError) as e:
+        # vk_api web scraper breaks when VK changes internal payload format
+        logger.warning("VK search parser broken (vk_api needs update): %s", e)
+        return []
+    except Exception as e:
+        logger.error("VK search failed: %s", e)
+        return []
+    try:
         results: list[dict] = []
         for tr in tracks:
             artist = (tr.get("artist") or "").strip()
