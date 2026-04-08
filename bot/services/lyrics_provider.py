@@ -161,13 +161,22 @@ async def _scrape_lyrics(session: aiohttp.ClientSession, url: str) -> str | None
 
 
 async def search_by_lyrics(query: str, limit: int = 3) -> list[dict]:
-    """Search Genius by lyrics text. Returns list of {artist, title, source} dicts.
+    """Search for song by lyrics text. Returns list of {artist, title, source} dicts.
 
-    Useful when user searches by song lyrics rather than artist/title.
+    Tries Genius first (API token or public endpoint), then falls back to
+    Musixmatch public search if Genius returns no results.
     """
     if not query.strip():
         return []
 
+    results = await _search_genius_lyrics(query, limit)
+    if not results:
+        results = await _search_musixmatch_lyrics(query, limit)
+    return results
+
+
+async def _search_genius_lyrics(query: str, limit: int) -> list[dict]:
+    """Search Genius by lyrics text."""
     global _genius_disabled_until
     if _genius_disabled_until > time.time():
         return []
@@ -220,11 +229,58 @@ async def search_by_lyrics(query: str, limit: int = 3) -> list[dict]:
                 })
         return results
     except Exception as e:
-        if "getaddrinfo failed" in str(e).lower() or "dns" in str(e).lower() or "nameresolutionerror" in str(e).lower():
+        err = str(e).lower()
+        if "getaddrinfo failed" in err or "dns" in err or "nameresolutionerror" in err or "403" in err:
             _genius_disabled_until = time.time() + _GENIUS_RETRY_AFTER
-            logger.warning("Genius lyrics search disabled for %ds after DNS failure", _GENIUS_RETRY_AFTER)
+            logger.warning("Genius lyrics search disabled for %ds after failure: %s", _GENIUS_RETRY_AFTER, e)
         else:
             logger.warning("Genius lyrics search error: %s", e)
+        return []
+
+
+_MUSIXMATCH_SEARCH_URL = "https://api.musixmatch.com/ws/1.1/track.search"
+_MUSIXMATCH_LYRICS_URL = "https://api.musixmatch.com/ws/1.1/track.lyrics.get"
+
+
+async def _search_musixmatch_lyrics(query: str, limit: int) -> list[dict]:
+    """Fallback lyrics search via Musixmatch public API."""
+    try:
+        session = get_session()
+        params = {
+            "q_lyrics": query,
+            "page_size": max(limit, 5),
+            "page": 1,
+            "s_track_rating": "desc",
+            "apikey": "68abb93fbe3a11298b12092e27e6e56f",
+        }
+        async with session.get(
+            _MUSIXMATCH_SEARCH_URL,
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json()
+
+        track_list = (
+            data.get("message", {})
+            .get("body", {})
+            .get("track_list", [])
+        )
+        results = []
+        for item in track_list[:limit]:
+            track = item.get("track", {})
+            artist = (track.get("artist_name") or "").strip()
+            title = (track.get("track_name") or "").strip()
+            if artist and title:
+                results.append({
+                    "artist": artist,
+                    "title": title,
+                    "source": "musixmatch",
+                })
+        return results
+    except Exception as e:
+        logger.debug("Musixmatch lyrics search error: %s", e)
         return []
 
 

@@ -377,13 +377,13 @@ async def _do_search(message: Message, query: str) -> None:
 
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
     async def _search_source(source: str, search_fn, limit: int) -> list[dict]:
-        """Search a single source with cache and 8s timeout."""
+        """Search a single source with cache and 12s timeout."""
         t0 = time.monotonic()
         try:
             cached = await cache.get_query_cache(provider_query, source)
             if cached is not None:
                 return cached
-            res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=8)
+            res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=12)
             elapsed = time.monotonic() - t0
             record_provider_event(source, "search", elapsed, True)
             if res:
@@ -440,9 +440,9 @@ async def _do_search(message: Message, query: str) -> None:
     script = detect_script(provider_query)
     results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results] if all_results else []
 
-    # Lyrics hint fallback: for long lyric fragments with weak top-1, use Genius to
+    # Lyrics hint fallback: for lyric fragments with weak top-1, use lyrics search to
     # identify likely canonical artist/title and search providers again by that hint.
-    should_try_lyrics_hint = len(provider_query.split()) >= 4
+    should_try_lyrics_hint = len(provider_query.split()) >= 3
     if should_try_lyrics_hint:
         top_score = 0.0
         if results:
@@ -473,8 +473,8 @@ async def _do_search(message: Message, query: str) -> None:
                 seen_hint_queries.add(hint_query)
                 try:
                     hint_yandex, hint_youtube = await asyncio.gather(
-                        asyncio.wait_for(search_yandex(hint_query, limit=2), timeout=6),
-                        asyncio.wait_for(_search_yt(hint_query, limit=2), timeout=6),
+                        asyncio.wait_for(search_yandex(hint_query, limit=2), timeout=10),
+                        asyncio.wait_for(_search_yt(hint_query, limit=2), timeout=10),
                     )
                 except Exception:
                     continue
