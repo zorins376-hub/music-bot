@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     PYROGRAM_API_HASH: Optional[str] = None
     PYROGRAM_SESSION_STRING: Optional[str] = None
 
+    # ── Telegram CDN Cache ────────────────────────────────────────────────
+    CACHE_CHANNEL_ID: Optional[int] = None  # private channel ID, e.g. -100xxxx
+
     # ── Каналы экосистемы (v1.1) ─────────────────────────────────────────
     TEQUILA_CHANNEL: str = ""
     FULLMOON_CHANNEL: str = ""
