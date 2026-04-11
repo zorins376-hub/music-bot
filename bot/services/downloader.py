@@ -440,6 +440,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
     else:
         search_prefix = f"ytsearch{fetch_count}"
 
+    cookiefile, temp_cookie = _prepare_cookiefile()
     ydl_opts = {
         "format": "bestaudio/best",
         "extract_flat": "in_playlist",
@@ -451,6 +452,8 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "ignore_no_formats_error": True,
         **_base_opts(),
     }
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
@@ -483,17 +486,23 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
     except Exception as e:
         logger.error("Search error: %s", e)
         return []
+    finally:
+        _cleanup_temp_cookie(temp_cookie)
 
 
 def _list_formats_debug(video_id: str) -> None:
     """Log available formats for a video (debug helper)."""
     if _is_permanently_failed(video_id):
         return
+    cookiefile, temp_cookie = _prepare_cookiefile()
     try:
-        with yt_dlp.YoutubeDL({
+        opts = {
             "quiet": False, "verbose": True, "no_warnings": False,
             "skip_download": True, **_base_opts(),
-        }) as ydl:
+        }
+        if cookiefile:
+            opts["cookiefile"] = cookiefile
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(
                 f"https://www.youtube.com/watch?v={video_id}",
                 download=False, process=False,
@@ -512,6 +521,8 @@ def _list_formats_debug(video_id: str) -> None:
                 )
     except Exception as e:
         logger.error("DEBUG list-formats failed for %s: %s", video_id, e)
+    finally:
+        _cleanup_temp_cookie(temp_cookie)
 
 
 def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=None, dl_id: str | None = None) -> Path:
@@ -520,6 +531,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
     url = f"https://www.youtube.com/watch?v={video_id}"
     file_stem = f"{video_id}_{dl_id}" if dl_id else video_id
     output_template = str(output_dir / f"{file_stem}.%(ext)s")
+    cookiefile, temp_cookie = _prepare_cookiefile()
 
     def _hook(d: dict) -> None:
         if progress_cb and d.get("status") == "downloading":
@@ -552,6 +564,8 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
             f"duration <= {settings.MAX_DURATION}"
         ),
     }
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -563,6 +577,8 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
             logger.error("Download failed for %s: %s", video_id, e)
             _list_formats_debug(video_id)
         raise
+    finally:
+        _cleanup_temp_cookie(temp_cookie)
 
     mp3_path = output_dir / f"{file_stem}.mp3"
     if mp3_path.exists():
