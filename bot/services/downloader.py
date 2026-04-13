@@ -149,6 +149,11 @@ def _base_opts() -> dict:
     # Enable JS runtimes for signature solving
     # Use deno (single static binary) with explicit path for container reliability
     opts["js_runtimes"] = {"deno": {"path": "/usr/local/bin/deno"}, "node": {}}
+    # PO Token provider (bgutil HTTP server) + use mweb client (recommended for PO Token)
+    opts["extractor_args"] = {
+        "youtube": {"player_client": ["mweb"]},
+        "youtubepot-bgutilhttp": {"base_url": ["http://bgutil-provider:4416"]},
+    }
     # Proxy rotation
     from bot.services.proxy_pool import proxy_pool
     proxy = proxy_pool.get_next()
