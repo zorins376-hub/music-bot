@@ -27,15 +27,8 @@ def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> Inline
             InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
         ],
     ]
-    # TMA Player — deep link (works on all clients including Desktop without WebView2)
-    if settings.TMA_URL and bot_username:
-        rows.append([
-            InlineKeyboardButton(
-                text="🎵 Открыть плеер",
-                url=f"https://t.me/{bot_username}?startapp=player",
-            ),
-        ])
-    elif settings.TMA_URL:
+    # TMA Player WebApp button
+    if settings.TMA_URL:
         rows.append([
             InlineKeyboardButton(text="🎵 Открыть плеер", web_app=WebAppInfo(url=settings.TMA_URL)),
         ])
