@@ -1161,16 +1161,18 @@ async def handle_adm_back(callback: CallbackQuery) -> None:
     await callback.answer()
     from bot.handlers.start import _main_menu
     user = await get_or_create_user(callback.from_user)
+    bot_me = await callback.bot.me()
+    _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
             t(user.language, "start_message", name=callback.from_user.first_name or ""),
-            reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id)),
+            reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id), bot_username=_username),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
             t(user.language, "start_message", name=callback.from_user.first_name or ""),
-            reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id)),
+            reply_markup=_main_menu(user.language, _is_admin(callback.from_user.id), bot_username=_username),
             parse_mode="HTML",
         )
 

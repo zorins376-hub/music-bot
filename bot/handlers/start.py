@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
+def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> InlineKeyboardMarkup:
     from bot.config import settings
     rows = [
         [
@@ -27,23 +27,62 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◑ FULLMOON LIVE", callback_data="radio:fullmoon"),
         ],
     ]
-    # TMA Player WebApp button (1.1)
-    if settings.TMA_URL:
+    # TMA Player — deep link (works on all clients including Desktop without WebView2)
+    if settings.TMA_URL and bot_username:
+        rows.append([
+            InlineKeyboardButton(
+                text="🎵 Открыть плеер",
+                url=f"https://t.me/{bot_username}?startapp=player",
+            ),
+        ])
+    elif settings.TMA_URL:
         rows.append([
             InlineKeyboardButton(text="🎵 Открыть плеер", web_app=WebAppInfo(url=settings.TMA_URL)),
         ])
     rows += [
         [
-            InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
-            InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
-        ],
-        [
             InlineKeyboardButton(text="✦ DAILY MIX", callback_data="action:mix"),
             InlineKeyboardButton(text="🎙 AI DJ", callback_data="action:dj"),
         ],
         [
+            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
+            InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
+        ],
+        [
+            InlineKeyboardButton(text="◈ Найти трек", callback_data="action:search"),
+            InlineKeyboardButton(text="🤖 AI Плейлист", callback_data="action:ai_playlist"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Топ-чарты", callback_data="action:charts"),
+        ],
+        [
+            InlineKeyboardButton(text="�🎦 Видео", callback_data="action:video"),
+            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
+        ],
+        [
+            InlineKeyboardButton(text="🆕 Новые релизы", callback_data="action:radar"),
+            InlineKeyboardButton(text="🎤 Вкус", callback_data="action:taste"),
+        ],
+        [
+            InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
+            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="action:family"),
+        ],
+        [
             InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
-            InlineKeyboardButton(text="▸ Ещё", callback_data="action:more_menu"),
+        ],
+        [
+            InlineKeyboardButton(text="🏅 Бейджи", callback_data="action:badges"),
+            InlineKeyboardButton(text="🏆 Топ игроков", callback_data="action:leaderboard"),
+        ],
+        [
+            InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
+        ],
+        [
+            InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
+        ],
+        [
+            InlineKeyboardButton(text="📥 Импорт", callback_data="action:import_playlist"),
+            InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
         ],
     ]
     if admin:
@@ -51,46 +90,6 @@ def _main_menu(lang: str, admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◆ Админ-панель", callback_data="action:admin"),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _more_menu(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✦ AUTO MIX", callback_data="radio:automix"),
-            InlineKeyboardButton(text="◈ По вашему вкусу", callback_data="action:recommend"),
-        ],
-        [
-            InlineKeyboardButton(text="🤖 AI Плейлист", callback_data="action:ai_playlist"),
-            InlineKeyboardButton(text="🆕 Новые релизы", callback_data="action:radar"),
-        ],
-        [
-            InlineKeyboardButton(text="🎦 Видео", callback_data="action:video"),
-            InlineKeyboardButton(text="◆ Топ сегодня", callback_data="action:top"),
-        ],
-        [
-            InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
-            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="action:family"),
-        ],
-        [
-            InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
-            InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
-        ],
-        [
-            InlineKeyboardButton(text="🎖 Бейджи", callback_data="action:badges"),
-            InlineKeyboardButton(text="🏆 Топ игроков", callback_data="action:leaderboard"),
-        ],
-        [
-            InlineKeyboardButton(text="🎤 Вкус", callback_data="action:taste"),
-            InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
-        ],
-        [
-            InlineKeyboardButton(text="📥 Импорт", callback_data="action:import_playlist"),
-        ],
-        [
-            InlineKeyboardButton(text="◂ Назад", callback_data="action:menu"),
-        ],
-    ])
-
 
 
 _LANG_KEYBOARD = InlineKeyboardMarkup(
@@ -171,9 +170,10 @@ async def cmd_start(message: Message) -> None:
             )
             await session.commit()
 
+    bot_me = await message.bot.me()
     await message.answer(
         t(user.language, "start_message", name=message.from_user.first_name or ""),
-        reply_markup=_main_menu(user.language, admin=admin),
+        reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
 
@@ -277,39 +277,23 @@ async def handle_favorites_button(callback: CallbackQuery) -> None:
     await send_favorites(callback.message, user.id, user.language)
 
 
-@router.callback_query(lambda c: c.data == "action:more_menu")
-async def handle_more_menu_button(callback: CallbackQuery) -> None:
-    user = await get_or_create_user(callback.from_user)
-    await callback.answer()
-    try:
-        await callback.message.edit_text(
-            t(user.language, "start_message", name=callback.from_user.first_name or ""),
-            reply_markup=_more_menu(user.language),
-            parse_mode="HTML",
-        )
-    except Exception:
-        await callback.message.answer(
-            t(user.language, "start_message", name=callback.from_user.first_name or ""),
-            reply_markup=_more_menu(user.language),
-            parse_mode="HTML",
-        )
-
-
 @router.callback_query(lambda c: c.data == "action:menu")
 async def handle_menu_button(callback: CallbackQuery) -> None:
     user = await get_or_create_user(callback.from_user)
     admin = is_admin(callback.from_user.id, callback.from_user.username)
     await callback.answer()
+    bot_me = await callback.bot.me()
+    _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
             t(user.language, "start_message", name=callback.from_user.first_name or ""),
-            reply_markup=_main_menu(user.language, admin=admin),
+            reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
             t(user.language, "start_message", name=callback.from_user.first_name or ""),
-            reply_markup=_main_menu(user.language, admin=admin),
+            reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
 
