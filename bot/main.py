@@ -7,7 +7,7 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, ErrorEvent
 
 from bot.config import settings as app_settings
@@ -151,6 +151,9 @@ async def on_startup(bot: Bot) -> None:
         await register_node(app_settings.NODE_ID)
         await start_heartbeat_loop(app_settings.NODE_ID)
 
+    # Blocked users checker (daily scan)
+    asyncio.create_task(_blocked_users_checker(bot))
+
     # One-time welcome broadcast for existing users
     asyncio.create_task(_broadcast_welcome(bot))
 
@@ -226,10 +229,38 @@ async def on_shutdown(bot: Bot) -> None:
     logger.info("Bot stopped")
 
 
+async def _mark_user_blocked(user_id: int) -> None:
+    """Mark user as having blocked the bot."""
+    from bot.models.base import async_session
+    from bot.models.user import User
+    try:
+        async with async_session() as session:
+            from sqlalchemy import update as sa_update
+            await session.execute(
+                sa_update(User).where(User.id == user_id).values(blocked_bot=True)
+            )
+            await session.commit()
+        logger.debug("Marked user %d as blocked_bot", user_id)
+    except Exception:
+        pass
+
+
 async def _global_error_handler(event: ErrorEvent) -> bool:
     """Catch-all: log every unhandled handler exception and reply to the user."""
     if isinstance(event.exception, TelegramBadRequest) and "query is too old" in str(event.exception).lower():
         logger.warning("Ignoring stale callback query %s", event.update.update_id)
+        return True
+
+    # Detect "bot was blocked by the user" / "user is deactivated"
+    err_msg = str(event.exception).lower()
+    if "blocked by the user" in err_msg or "user is deactivated" in err_msg or "chat not found" in err_msg:
+        uid = None
+        if event.update.message and event.update.message.from_user:
+            uid = event.update.message.from_user.id
+        elif event.update.callback_query and event.update.callback_query.from_user:
+            uid = event.update.callback_query.from_user.id
+        if uid:
+            await _mark_user_blocked(uid)
         return True
 
     logger.exception(
@@ -246,6 +277,45 @@ async def _global_error_handler(event: ErrorEvent) -> bool:
     except Exception:
         logger.debug("error handler reply failed", exc_info=True)
     return True
+
+
+async def _blocked_users_checker(bot: Bot) -> None:
+    """Daily scan: check which users blocked the bot via sendChatAction."""
+    from sqlalchemy import select, update as sa_update
+    from bot.models.base import async_session
+    from bot.models.user import User
+    from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+
+    await asyncio.sleep(120)  # Wait for startup to settle
+
+    while True:
+        try:
+            async with async_session() as session:
+                result = await session.execute(
+                    select(User.id).where(User.blocked_bot == False).order_by(User.last_active.desc()).limit(500)
+                )
+                user_ids = [row[0] for row in result.fetchall()]
+
+            if not user_ids:
+                logger.info("Blocked checker: no users to check")
+            else:
+                blocked = 0
+                for uid in user_ids:
+                    try:
+                        await bot.send_chat_action(uid, "typing")
+                    except (TelegramForbiddenError, TelegramBadRequest) as e:
+                        err = str(e).lower()
+                        if "blocked by the user" in err or "user is deactivated" in err or "chat not found" in err:
+                            await _mark_user_blocked(uid)
+                            blocked += 1
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.05)  # Rate limit
+                logger.info("Blocked checker: scanned %d users, %d blocked", len(user_ids), blocked)
+        except Exception as e:
+            logger.warning("Blocked checker error: %s", e)
+
+        await asyncio.sleep(86400)  # Run once per day
 
 
 async def _broadcast_welcome(bot: Bot) -> None:
@@ -288,6 +358,9 @@ async def _broadcast_welcome(bot: Bot) -> None:
                     await session.commit()
             except Exception as e:
                 failed += 1
+                err_str = str(e).lower()
+                if "blocked by the user" in err_str or "user is deactivated" in err_str:
+                    await _mark_user_blocked(user_id)
                 # Still mark as sent to avoid retry spam on blocked users
                 try:
                     async with async_session() as session:

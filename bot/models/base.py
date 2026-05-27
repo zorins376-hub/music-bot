@@ -141,6 +141,8 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         "ALTER TABLE tracks ALTER COLUMN genre TYPE VARCHAR(100)",
                         # BlockedTrack columns
                         "ALTER TABLE blocked_tracks ADD COLUMN IF NOT EXISTS alternative_source_id VARCHAR(100)",
+                        # User blocked_bot tracking
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_bot BOOLEAN DEFAULT false",
                     ]
                     for stmt in _alter_stmts:
                         await _run_migration(conn, stmt)

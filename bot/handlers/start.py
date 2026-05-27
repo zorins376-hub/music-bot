@@ -109,6 +109,14 @@ async def cmd_start(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     admin = is_admin(message.from_user.id, message.from_user.username)
 
+    # User came back — mark as not blocked
+    if user.blocked_bot:
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id == user.id).values(blocked_bot=False)
+            )
+            await session.commit()
+
     # D-02: Handle deep-link from inline mode: /start s_<base64(query)>
     args = message.text.split(maxsplit=1)
     if len(args) > 1:

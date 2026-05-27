@@ -101,6 +101,7 @@ async def _build_detailed_stats() -> str:
                 func.sum(case((User.is_premium == True, 1), else_=0)),
                 func.sum(case((and_(User.is_premium == True, User.premium_until == None), 1), else_=0)),
                 func.coalesce(func.sum(User.request_count), 0),
+                func.sum(case((User.blocked_bot == True, 1), else_=0)),
             )
         )
         u = user_stats_r.one()
@@ -114,7 +115,9 @@ async def _build_detailed_stats() -> str:
         premium_total = int(u[7] or 0)
         admin_premium = int(u[8] or 0)
         total_requests = int(u[9] or 0)
+        blocked_count = int(u[10] or 0)
         paid_premium = premium_total - admin_premium
+        active_users = user_total - blocked_count
 
         # ── Payments: single combined query ───────
         pay_stats_r = await session.execute(
@@ -200,7 +203,8 @@ async def _build_detailed_stats() -> str:
         "<b>◆ Подробная статистика бота</b>",
         "",
         "<b>◎ Пользователи:</b>",
-        f"  Всего: <b>{user_total}</b>",
+        f"  Активных: <b>{active_users}</b>  (всего: {user_total})",
+        f"  Заблокировали бота: <b>{blocked_count}</b>",
         f"  Новых сегодня: <b>{users_today}</b>",
         f"  Новых за неделю: <b>{users_week}</b>",
         f"  DAU: <b>{dau}</b> | WAU: <b>{wau}</b> | MAU: <b>{mau}</b>",
