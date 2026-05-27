@@ -83,73 +83,84 @@ async def index_yandex_popular() -> int:
     try:
         client = await ClientAsync(token).init()
 
-        # 1. Landing blocks (new-releases, chart, personal playlists)
+        # 1. Main chart (top-100)
+        try:
+            chart_resp = await client.chart()
+            chart_obj = getattr(chart_resp, "chart", None)
+            if chart_obj:
+                chart_tracks = getattr(chart_obj, "tracks", []) or []
+                batch = _yandex_tracks_to_dicts(chart_tracks[:100])
+                cnt = await _index_track_list(batch, default_source="yandex")
+                total += cnt
+                logger.debug("Yandex chart: indexed %d tracks", cnt)
+        except Exception as e:
+            logger.debug("Yandex chart error: %s", e)
+
+        # 2. Landing blocks — handle different entity types
         try:
             landing = await client.landing(["new-releases", "chart"])
             for block in (landing.blocks or []):
                 for entity in (block.entities or []):
-                    playlist = getattr(entity, "data", None)
-                    if not playlist:
+                    data = getattr(entity, "data", None)
+                    if not data:
                         continue
-                    tracks_list = getattr(playlist, "tracks", None)
-                    if not tracks_list:
+
+                    # ChartItem / TrackShort — singular .track
+                    track_obj = getattr(data, "track", None)
+                    if track_obj:
+                        batch = _yandex_tracks_to_dicts([data])
+                        cnt = await _index_track_list(batch, default_source="yandex")
+                        total += cnt
                         continue
-                    batch = _yandex_tracks_to_dicts(tracks_list)
-                    cnt = await _index_track_list(batch, default_source="yandex")
-                    total += cnt
+
+                    # Playlist — has .tracks list
+                    tracks_list = getattr(data, "tracks", None)
+                    if tracks_list:
+                        batch = _yandex_tracks_to_dicts(tracks_list)
+                        cnt = await _index_track_list(batch, default_source="yandex")
+                        total += cnt
+                        continue
+
+                    # Album from landing — fetch full tracks
+                    album_id = getattr(data, "id", None)
+                    if album_id and hasattr(data, "track_count"):
+                        try:
+                            full_album = await client.albums_with_tracks(album_id)
+                            if full_album and full_album.volumes:
+                                album_meta = _extract_yandex_album_meta(full_album)
+                                for volume in full_album.volumes:
+                                    batch = _yandex_tracks_to_dicts(volume, album_meta=album_meta)
+                                    cnt = await _index_track_list(batch, default_source="yandex")
+                                    total += cnt
+                        except Exception:
+                            continue
         except Exception as e:
             logger.debug("Yandex landing error: %s", e)
 
-        # 2. New releases — full album metadata (genre, year, label)
+        # 3. New releases — album IDs, fetch full metadata
         try:
-            new_releases = await client.new_releases()
-            if new_releases:
-                albums_to_fetch = new_releases[:50] if isinstance(new_releases, list) else []
-                for album in albums_to_fetch:
-                    album_id = getattr(album, "id", None)
-                    if not album_id:
-                        continue
-                    try:
-                        full_album = await client.albums_with_tracks(album_id)
-                        if full_album and full_album.volumes:
-                            # Album-level metadata
-                            album_meta = _extract_yandex_album_meta(full_album)
-                            for volume in full_album.volumes:
-                                batch = _yandex_tracks_to_dicts(volume, album_meta=album_meta)
-                                cnt = await _index_track_list(batch, default_source="yandex")
-                                total += cnt
-                    except Exception:
-                        continue
-        except Exception as e:
-            logger.debug("Yandex new_releases error: %s", e)
-
-        # 3. Genre playlists (popular in each genre)
-        try:
-            genres = await client.genres()
-            if genres:
-                for genre_obj in genres[:15]:  # top 15 genres
-                    genre_id = getattr(genre_obj, "id", None)
-                    genre_title = getattr(genre_obj, "title", None) or genre_id
-                    if not genre_id:
-                        continue
-                    try:
-                        # Yandex metatag playlists for genres
-                        radio_info = getattr(genre_obj, "radio_icon", None)
-                        sub_genres = getattr(genre_obj, "sub_genres", []) or []
-                        # Use the genre's "chart" or similar
-                        chart = await client.chart(genre_id)
-                        if chart and getattr(chart, "chart", None):
-                            chart_tracks = getattr(chart.chart, "tracks", []) or []
-                            batch = _yandex_tracks_to_dicts(
-                                chart_tracks[:50],
-                                force_genre=genre_title,
-                            )
+            landing_list = await client.new_releases()
+            # new_releases() returns LandingList with .new_releases = [int album_id, ...]
+            album_ids = getattr(landing_list, "new_releases", None) or []
+            if not isinstance(album_ids, list):
+                album_ids = []
+            for album_id in album_ids[:50]:
+                # album_id is an integer, not an object
+                aid = album_id if isinstance(album_id, int) else getattr(album_id, "id", None)
+                if not aid:
+                    continue
+                try:
+                    full_album = await client.albums_with_tracks(aid)
+                    if full_album and full_album.volumes:
+                        album_meta = _extract_yandex_album_meta(full_album)
+                        for volume in full_album.volumes:
+                            batch = _yandex_tracks_to_dicts(volume, album_meta=album_meta)
                             cnt = await _index_track_list(batch, default_source="yandex")
                             total += cnt
-                    except Exception:
-                        continue
+                except Exception:
+                    continue
         except Exception as e:
-            logger.debug("Yandex genres error: %s", e)
+            logger.debug("Yandex new_releases error: %s", e)
 
         logger.info("Indexed %d Yandex Music tracks total", total)
     except Exception as e:
