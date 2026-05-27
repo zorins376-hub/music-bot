@@ -30,7 +30,7 @@ from bot.services.provider_health import record_provider_event
 from bot.services.search_engine import _relevance_score, deduplicate_results, normalize_query, parse_query, suggest_query
 from bot.services.analytics import track_event
 from bot.services.share_links import create_share_link, resolve_share_link
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb, WrongTrackPickCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def _classify_download_error(err_msg: str) -> str:
 _GROUP_CLEANUP_SEC = 60
 
 # Search result limits
-_MAX_RESULTS_GROUP = 1      # In groups — just one track
+_MAX_RESULTS_GROUP = 5      # In groups — search 5 candidates for retry
 
 # ── Download progress ─────────────────────────────────────────────────────
 
@@ -230,10 +230,15 @@ def _is_ad_free(user) -> bool:
 _SEARCH_LOGO = "\u25c9 <b>BLACK ROOM</b>"
 
 
-def _build_results_keyboard(results: list[dict], session_id: str) -> InlineKeyboardMarkup:
+def _build_results_keyboard(
+    results: list[dict],
+    session_id: str,
+    picked: set[int] | None = None,
+) -> InlineKeyboardMarkup:
     buttons = []
     for i, track in enumerate(results):
-        label = f"♪ {track['uploader']} — {track['title'][:40]} ({track['duration_fmt']})"
+        check = "✅ " if picked and i in picked else ""
+        label = f"{check}♪ {track['uploader']} — {track['title'][:40]} ({track['duration_fmt']})"
         buttons.append(
             [InlineKeyboardButton(
                 text=label,
@@ -559,9 +564,14 @@ async def _do_search(message: Message, query: str) -> None:
 
     # Groups: auto-play first track — prefer cached tracks for instant delivery
     if is_group:
-        best = results[0]
-        # Check top-3 results: if any has file_id or redis cache, use it instead
-        for candidate in results[:3]:
+        import re as _re_grp
+        from bot.services.search_engine import _SOURCE_RANK as _SRC_RANK_MIX, _SOURCE_RANK_CYR
+        _q_has_cyr = bool(_re_grp.search(r'[а-яёА-ЯЁ]', provider_query))
+        _grp_rank = _SOURCE_RANK_CYR if _q_has_cyr else _SRC_RANK_MIX
+
+        # First priority: any cached track (file_id = instant delivery)
+        best = None
+        for candidate in results[:5]:
             if candidate.get("file_id"):
                 best = candidate
                 break
@@ -570,7 +580,70 @@ async def _do_search(message: Message, query: str) -> None:
                 candidate["file_id"] = fid
                 best = candidate
                 break
-        await _group_auto_play(message, status, user, best)
+
+        # Second priority: for Cyrillic queries pick best Yandex/VK track;
+        # for Latin queries fall back to deduplicated rank order (results[0])
+        if best is None:
+            if _q_has_cyr:
+                # Sort top-5 by Cyrillic-friendly source rank (yandex=6, vk=5 > youtube=1)
+                _grp_candidates = sorted(
+                    results[:5],
+                    key=lambda r: _grp_rank.get(r.get("source", ""), 0),
+                    reverse=True,
+                )
+                best = _grp_candidates[0]
+                logger.info(
+                    "Group: Cyrillic query → chose src=%s vid=%s title=%s",
+                    best.get("source"), best.get("video_id"), best.get("title"),
+                )
+            else:
+                best = results[0]
+
+        # Build alternate-candidates list (everything except best), store for "🔁 Не тот трек?" button
+        _candidates = [r for r in results if r.get("video_id") != best.get("video_id")]
+        _alt_sid: str | None = None
+        if _candidates:
+            _alt_sid = secrets.token_urlsafe(6)
+            await cache.store_search(_alt_sid, _candidates[:4])
+
+        # Retry loop: try best first, then up to 4 other candidates
+        from bot.services.downloader import _is_permanently_failed as _pf_check
+        _play_queue = [best] + _candidates[:4]
+        _played = False
+        for _pi, _play_cand in enumerate(_play_queue):
+            _vid = _play_cand.get("video_id", "")
+            if _vid and _pf_check(_vid):
+                logger.info("Group: skipping permanently-failed candidate %s", _vid)
+                continue
+            logger.info(
+                "Group auto-play try #%d: src=%s vid=%s title=%s",
+                _pi, _play_cand.get("source"), _vid, _play_cand.get("title"),
+            )
+            # Alts for this candidate = everything else in the play queue
+            _this_alts = [r for r in _play_queue if r.get("video_id") != _vid]
+            _this_alt_sid: str | None = None
+            if _this_alts:
+                _this_alt_sid = secrets.token_urlsafe(6)
+                await cache.store_search(_this_alt_sid, _this_alts)
+            try:
+                await _group_auto_play(
+                    message, status, user, _play_cand,
+                    alt_sid=_this_alt_sid,
+                    raise_on_error=True,
+                )
+                _played = True
+                break
+            except Exception as _play_err:
+                logger.warning(
+                    "Group: candidate #%d failed (%s), trying next: %s",
+                    _pi, _vid, _play_err,
+                )
+                continue
+        if not _played:
+            try:
+                await status.edit_text(t(lang, "error_download"))
+            except Exception:
+                pass
         return
 
     session_id = secrets.token_urlsafe(6)
@@ -630,10 +703,46 @@ async def _download_spotify_track(track_info: dict, bitrate: int) -> Path:
     raise RuntimeError(f"No downloadable source found for Spotify track: {query}")
 
 
+def _wrong_track_keyboard(alt_sid: str, num_alts: int) -> InlineKeyboardMarkup | None:
+    """Build the '🔁 Не тот трек?' inline keyboard for group messages.
+
+    Shows numbered buttons (#1 #2 …) that let the user pick an alternative track.
+    """
+    if not alt_sid or num_alts == 0:
+        return None
+    alt_buttons = []
+    for i in range(min(num_alts, 4)):
+        alt_buttons.append(
+            InlineKeyboardButton(
+                text=f"#{i + 1}",
+                callback_data=WrongTrackPickCb(sid=alt_sid, i=i).pack(),
+            )
+        )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔁 Не тот трек?", callback_data="wt_label")],
+            alt_buttons,
+        ]
+    )
+
+
+@router.callback_query(lambda c: c.data == "wt_label")
+async def cb_wt_label(callback: CallbackQuery) -> None:
+    """Noop handler for the '🔁 Не тот трек?' label button — just shows a tooltip."""
+    await callback.answer("Нажми на номер, чтобы скачать другой вариант", show_alert=False)
+
+
 async def _group_auto_play(
-    message: Message, status: Message, user, track_info: dict
+    message: Message, status: Message, user, track_info: dict,
+    alt_sid: str | None = None,
+    raise_on_error: bool = False,
 ) -> None:
-    """In groups: download and send the first track immediately, then clean up."""
+    """In groups: download and send the first track immediately, then clean up.
+
+    alt_sid   — session ID for the alternate-candidates list (for "🔁 Не тот трек?" button).
+    raise_on_error — re-raise download exceptions instead of showing error message;
+                     used by the retry loop in the group dispatch section.
+    """
     lang = user.language
     default_br = int(await _get_bot_setting("default_bitrate", "192"))
     bitrate = int(user.quality) if user.quality in ("128", "192", "320") else _smart_bitrate(
@@ -672,13 +781,20 @@ async def _group_auto_play(
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
         return
 
-    # Download
-    await status.edit_text(t(lang, "downloading"))
+    # Download (safe edit — status might already show "downloading" from a previous attempt)
+    try:
+        await status.edit_text(t(lang, "downloading"))
+    except Exception:
+        pass  # "message is not modified" or already deleted — ignore
     await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     mp3_path: Path | None = None
     try:
         _dl_id = uuid.uuid4().hex[:8]
         if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
+            logger.info(
+                "Group download: src=yandex ym_track_id=%s vid=%s",
+                track_info.get("ym_track_id"), video_id,
+            )
             mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
             await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
         elif track_info.get("source") == "vk" and track_info.get("vk_url"):
@@ -691,8 +807,12 @@ async def _group_auto_play(
             if not _is_valid_yt_id(video_id):
                 dl_vid = await _resolve_yt_video_id(track_info)
                 if not dl_vid:
-                    await status.edit_text(t(lang, "error_download"))
-                    return
+                    if not raise_on_error:
+                        try:
+                            await status.edit_text(t(lang, "error_download"))
+                        except Exception:
+                            pass
+                    raise RuntimeError(f"Could not resolve YouTube ID for {video_id}")
             mp3_path = await download_track(dl_vid, bitrate, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
         if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
@@ -705,19 +825,35 @@ async def _group_auto_play(
                 file_size = mp3_path.stat().st_size
             except Exception:
                 mp3_path = None
-                await status.edit_text(t(lang, "error_too_large_final"))
+                try:
+                    await status.edit_text(t(lang, "error_too_large_final"))
+                except Exception:
+                    pass
                 return
             if file_size > settings.MAX_FILE_SIZE:
                 cleanup_file(mp3_path)
                 mp3_path = None
-                await status.edit_text(t(lang, "error_too_large_final"))
+                try:
+                    await status.edit_text(t(lang, "error_too_large_final"))
+                except Exception:
+                    pass
                 return
+        # Count how many alts are stored for the button
+        _num_alts = 0
+        if alt_sid:
+            try:
+                _alt_list = await cache.get_search(alt_sid)
+                _num_alts = len(_alt_list) if _alt_list else 0
+            except Exception:
+                pass
+        _wt_kb = _wrong_track_keyboard(alt_sid, _num_alts) if _num_alts > 0 else None
         sent = await message.answer_audio(
             audio=FSInputFile(mp3_path),
             title=track_info["title"],
             performer=track_info["uploader"],
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+            reply_markup=_wt_kb,
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
         await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
@@ -725,7 +861,12 @@ async def _group_auto_play(
     except Exception as e:
         err_msg = str(e)
         logger.error("Group auto-play error for %s: %s", video_id, err_msg)
-        await status.edit_text(t(lang, _classify_download_error(err_msg)))
+        if raise_on_error:
+            raise
+        try:
+            await status.edit_text(t(lang, _classify_download_error(err_msg)))
+        except Exception:
+            pass
     finally:
         if mp3_path:
             cleanup_file(mp3_path)
@@ -739,6 +880,206 @@ async def _delete_msgs(bot, chat_id: int, msg_ids: list[int]) -> None:
                 await bot.delete_message(chat_id, mid)
             except Exception:
                 logger.debug("delete_msgs mid=%s failed", mid, exc_info=True)
+
+
+# ── "🔁 Не тот трек?" — wrong-track picker ────────────────────────────────
+
+async def _delayed_delete(message, session_id: str, delay: int = 30) -> None:
+    """Delete the keyboard message after `delay` seconds and clean up Redis keys."""
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug("delayed_delete: could not delete message: %s", e)
+    try:
+        await cache.redis.delete(f"picked:{session_id}", f"delete_timer:{session_id}")
+    except Exception:
+        pass
+
+
+async def _mark_picked_and_refresh(callback, session_id: str, idx: int) -> None:
+    """Mark idx as picked, refresh the keyboard checkmarks, and schedule deletion."""
+    try:
+        await cache.redis.sadd(f"picked:{session_id}", idx)
+        await cache.redis.expire(f"picked:{session_id}", 300)
+        raw_picked = await cache.redis.smembers(f"picked:{session_id}")
+        picked = {int(x) for x in raw_picked}
+        results = await cache.get_search(session_id)
+        if results:
+            new_kb = _build_results_keyboard(results, session_id, picked=picked)
+            try:
+                await callback.message.edit_reply_markup(reply_markup=new_kb)
+            except Exception as e:
+                logger.debug("mark_picked: edit_reply_markup failed: %s", e)
+        timer_key = f"delete_timer:{session_id}"
+        was_set = await cache.redis.setnx(timer_key, "1")
+        if was_set:
+            await cache.redis.expire(timer_key, 60)
+            asyncio.create_task(_delayed_delete(callback.message, session_id, 30))
+    except Exception as e:
+        logger.warning("mark_picked_and_refresh error: %s", e)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+
+async def _try_download_track(track: dict, bitrate: int) -> tuple[Path | None, str]:
+    """Try to download a single track. Returns (mp3_path, error_message)."""
+    video_id = track.get("video_id", "")
+    _dl_id = uuid.uuid4().hex[:8]
+    try:
+        if track.get("source") == "yandex" and track.get("ym_track_id"):
+            logger.info(
+                "TryDownload: src=yandex ym_track_id=%s vid=%s",
+                track.get("ym_track_id"), video_id,
+            )
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
+            await download_yandex(
+                track["ym_track_id"], mp3_path, bitrate, token=track.get("_ym_token")
+            )
+            return mp3_path, ""
+        elif track.get("source") == "vk" and track.get("vk_url"):
+            logger.info("TryDownload: src=vk vid=%s", video_id)
+            mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
+            await download_vk(track["vk_url"], mp3_path)
+            return mp3_path, ""
+        elif track.get("source") == "spotify":
+            logger.info("TryDownload: src=spotify vid=%s", video_id)
+            mp3_path = await _download_spotify_track(track, bitrate)
+            return mp3_path, ""
+        else:
+            dl_vid = video_id if _is_valid_yt_id(video_id) else None
+            if not dl_vid:
+                dl_vid = await _resolve_yt_video_id(track)
+            if not dl_vid:
+                return None, "no YouTube ID resolved"
+            logger.info("TryDownload: src=%s yt_vid=%s", track.get("source", "yt"), dl_vid)
+            mp3_path = await download_track(dl_vid, bitrate, dl_id=_dl_id)
+            return mp3_path, ""
+    except Exception as e:
+        return None, str(e)
+
+
+@router.callback_query(WrongTrackPickCb.filter())
+async def cb_wrong_track_pick(callback: CallbackQuery, callback_data: WrongTrackPickCb) -> None:
+    """Handle user picking an alternative track. Auto-retries through the alts list."""
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    alts = await cache.get_search(callback_data.sid)
+    if not alts or callback_data.i >= len(alts):
+        await callback.answer("Трек больше недоступен", show_alert=True)
+        return
+    primary = alts[callback_data.i]
+    await callback.answer(f"⬇ {primary.get('title', '')[:40]}")
+    chat_id = callback.message.chat.id
+    orig_msg_id = callback.message.message_id
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    status = await callback.bot.send_message(chat_id, t(lang, "downloading"))
+    default_br = int(await _get_bot_setting("default_bitrate", "192"))
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else default_br
+
+    # Build candidate queue: primary first, then other alts (different video_id)
+    seen_vids = {primary.get("video_id", "")}
+    candidates = [primary]
+    for alt in alts:
+        vid = alt.get("video_id", "")
+        if vid and vid not in seen_vids:
+            candidates.append(alt)
+            seen_vids.add(vid)
+    # Also fall back to a fresh YouTube search if everything fails
+    fallback_query = f"{primary.get('uploader', '')} {primary.get('title', '')}".strip()
+
+    from bot.services.downloader import _is_permanently_failed as _pf_check
+    await callback.bot.send_chat_action(chat_id, ChatAction.UPLOAD_DOCUMENT)
+
+    sent_track: dict | None = None
+    sent_path: Path | None = None
+    final_err = ""
+    for idx, track in enumerate(candidates[:5]):
+        vid = track.get("video_id", "")
+        if vid and _pf_check(vid):
+            logger.info("WrongTrackPick: skipping permanently-failed %s", vid)
+            continue
+        logger.info(
+            "WrongTrackPick try #%d: src=%s vid=%s title=%s",
+            idx, track.get("source"), vid, track.get("title"),
+        )
+        mp3_path, err = await _try_download_track(track, bitrate)
+        if mp3_path and mp3_path.exists():
+            sent_track = track
+            sent_path = mp3_path
+            break
+        final_err = err
+        logger.warning(
+            "WrongTrackPick try #%d failed src=%s vid=%s: %s",
+            idx, track.get("source"), vid, err,
+        )
+        # cleanup partial file if any
+        if mp3_path:
+            cleanup_file(mp3_path)
+
+    # Last-resort: fresh YouTube search by artist+title
+    if sent_track is None and fallback_query:
+        try:
+            logger.info("WrongTrackPick fallback: fresh YouTube search '%s'", fallback_query[:80])
+            yt_results = await search_tracks(fallback_query, max_results=2, source="youtube")
+            for yt_cand in yt_results:
+                yt_vid = yt_cand.get("video_id", "")
+                if yt_vid in seen_vids or (yt_vid and _pf_check(yt_vid)):
+                    continue
+                logger.info("WrongTrackPick fallback try: yt_vid=%s", yt_vid)
+                mp3_path, err = await _try_download_track(yt_cand, bitrate)
+                if mp3_path and mp3_path.exists():
+                    sent_track = yt_cand
+                    sent_path = mp3_path
+                    break
+                final_err = err
+                if mp3_path:
+                    cleanup_file(mp3_path)
+        except Exception as e:
+            logger.debug("WrongTrackPick fresh-search fallback failed: %s", e)
+
+    if sent_track is None or sent_path is None:
+        logger.error(
+            "WrongTrackPick: ALL %d candidates failed. last_err=%s",
+            len(candidates), final_err,
+        )
+        try:
+            await status.edit_text(t(lang, _classify_download_error(final_err)))
+        except Exception:
+            pass
+        return
+
+    try:
+        _af = _is_ad_free(user)
+        sent = await callback.bot.send_audio(
+            chat_id=chat_id,
+            audio=FSInputFile(sent_path),
+            title=sent_track.get("title", ""),
+            performer=sent_track.get("uploader", ""),
+            duration=int(sent_track["duration"]) if sent_track.get("duration") else None,
+            caption=_track_caption(lang, sent_track, bitrate, ad_free=_af),
+        )
+        await cache.set_file_id(sent_track.get("video_id", ""), sent.audio.file_id, bitrate)
+        await _post_download(user.id, sent_track, sent.audio.file_id, bitrate)
+        for mid in [status.message_id, orig_msg_id]:
+            try:
+                await callback.bot.delete_message(chat_id, mid)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error("WrongTrackPick: send_audio failed: %s", e, exc_info=True)
+        try:
+            await status.edit_text(t(lang, "error_download"))
+        except Exception:
+            pass
+    finally:
+        if sent_path:
+            cleanup_file(sent_path)
 
 
 # fmt_duration imported from bot.utils
@@ -981,6 +1322,10 @@ async def handle_track_select(
 
         try:
             if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
+                logger.info(
+                    "DM download: src=yandex ym_track_id=%s vid=%s",
+                    track_info.get("ym_track_id"), video_id,
+                )
                 mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
                 await download_yandex(track_info["ym_track_id"], mp3_path, bitrate, token=track_info.get("_ym_token"))
             elif track_info.get("source") == "vk" and track_info.get("vk_url"):
@@ -989,6 +1334,12 @@ async def handle_track_select(
             elif track_info.get("source") == "spotify":
                 mp3_path = await _download_spotify_track(track_info, bitrate)
             else:
+                # For Yandex tracks missing ym_track_id, log the anomaly
+                if track_info.get("source") == "yandex":
+                    logger.warning(
+                        "DM download: src=yandex but ym_track_id missing! vid=%s keys=%s",
+                        video_id, list(track_info.keys()),
+                    )
                 dl_vid = video_id
                 if not _is_valid_yt_id(video_id):
                     dl_vid = await _resolve_yt_video_id(track_info)
@@ -1039,12 +1390,15 @@ async def handle_track_select(
         except Exception as e:
             err_msg = str(e)
             logger.error("Download error for %s: %s", video_id, err_msg)
-            # C-07: Auto-retry with a different source
+            # C-07: Auto-retry with a different source (only if the original source was not YouTube)
             failed_source = track_info.get("source", "youtube")
             retry_query = f"{track_info.get('uploader', '')} {track_info.get('title', '')}".strip()
-            if retry_query and failed_source != "youtube":
+            # Only do YouTube fallback when Yandex/VK/etc. failed AND the error is NOT a YouTube error
+            # (If err_msg already contains a YouTube error, we're already in YouTube path — don't double-retry)
+            _already_youtube_err = "youtube" in err_msg.lower() or "ytdl" in err_msg.lower()
+            if retry_query and failed_source != "youtube" and not _already_youtube_err:
                 try:
-                    await status.edit_text(f"⚠️ {failed_source} недоступен, ищу альтернативу...")
+                    await status.edit_text(t(lang, "searching") + "...")
                     alt_results = await search_tracks(retry_query, max_results=1, source="youtube")
                     if alt_results:
                         retry_id = uuid.uuid4().hex[:8]

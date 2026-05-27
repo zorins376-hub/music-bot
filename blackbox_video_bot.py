@@ -82,6 +82,7 @@ START_TEXT = """
 
 ▸ <b>1000+ сайтов</b> — YouTube, TikTok, Instagram, VK, X, Reddit и другие
 ▸ <b>🎵 Аудио-режим</b> — извлекай музыку из любого видео
+▸ <b>⭕ Кружок</b> — превращай любое видео в видеосообщение
 ▸ <b>Авто-подбор качества</b> — максимум, что влезет в Telegram
 ▸ <b>Прогресс в реальном времени</b> — видишь каждый процент
 ▸ <b>📜 История</b> — все скачивания под рукой
@@ -91,6 +92,7 @@ START_TEXT = """
 <b>📖 Как пользоваться:</b>
 
 Отправь ссылку → выбери 🎬 Видео или 🎵 Аудио
+Отправь видео файл → нажми ⭕ Создать кружок
 Всё остальное — наша работа.
 
 ━━━━━━━━━━━━━━━━━━━
@@ -657,6 +659,9 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "2. Отправь её мне\n"
         "3. Выбери 🎬 <b>Видео</b> или 🎵 <b>Аудио</b>\n"
         "4. Получи файл!\n\n"
+        "<b>⭕ Создать кружок:</b>\n"
+        "Отправь видео (или видеосообщение) → нажми кнопку ⭕\n"
+        "Бот обрежет, сожмёт и отправит как кружок (до 60 сек).\n\n"
         "<b>💡 Поддерживаемые сайты:</b>\n"
         "YouTube, TikTok, Instagram, VK Video, X/Twitter, Reddit, Facebook, Twitch, Vimeo, Dailymotion, OK.ru и <b>1000+ других</b>\n\n"
         "<b>📋 Команды:</b>\n"
@@ -679,9 +684,10 @@ async def about_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "контент должен быть доступен каждому.\n\n"
         "Без рекламы. Без регистрации. Без подписок.\n"
         "Просто ссылка → видео.\n\n"
-        "<b>Версия:</b> 4.0\n"
-        "<b>Движок:</b> yt-dlp\n"
-        "<b>Поддерживает:</b> 1000+ сайтов\n\n"
+        "<b>Версия:</b> 4.1\n"
+        "<b>Движок:</b> yt-dlp + FFmpeg\n"
+        "<b>Поддерживает:</b> 1000+ сайтов\n"
+        "<b>⭕ Кружки:</b> авто-кадрирование и конвертация\n\n"
         "<i>Black Box — скачивай. Смотри. Делись.</i>",
         parse_mode="HTML",
     )
@@ -814,6 +820,9 @@ async def handle_url(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # URL store for preview → download
 _url_store: dict[str, str] = {}
 
+# Circle store: user_id → {file_id, message_id, duration, file_size}
+_circle_pending: dict[int, dict] = {}
+
 
 async def go_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handle video/audio button press from preview."""
@@ -888,6 +897,249 @@ async def go_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(_queued_download(
         ctx.bot, query.message.chat_id, msg_id, url, uid, uname, is_audio,
     ))
+
+
+# ══════════════════════════════════════
+# Circle (Video Note) module
+# ══════════════════════════════════════
+
+CIRCLE_MAX_DOWNLOAD = 20 * 1024 * 1024  # Telegram getFile limit
+CIRCLE_MAX_DURATION = 60  # Telegram video_note limit (seconds)
+CIRCLE_SIZE = 640  # square side in pixels
+
+
+async def handle_video_for_circle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Intercept video/video_note/document(video) → offer 'Create circle' button."""
+    msg = update.message
+    user = update.effective_user
+    if not user:
+        return
+
+    # Determine file_id and duration from the message
+    file_id = None
+    duration = 0
+    file_size = 0
+    file_name = ""
+
+    if msg.video:
+        file_id = msg.video.file_id
+        duration = msg.video.duration or 0
+        file_size = msg.video.file_size or 0
+        file_name = msg.video.file_name or "video"
+    elif msg.video_note:
+        file_id = msg.video_note.file_id
+        duration = msg.video_note.duration or 0
+        file_size = msg.video_note.file_size or 0
+        file_name = "video_note"
+    elif msg.document and msg.document.mime_type and msg.document.mime_type.startswith("video/"):
+        file_id = msg.document.file_id
+        file_size = msg.document.file_size or 0
+        file_name = msg.document.file_name or "document"
+    else:
+        return  # not a video
+
+    if not file_id:
+        return
+
+    # Check file size (Telegram getFile limit ~20MB)
+    if file_size > CIRCLE_MAX_DOWNLOAD:
+        await msg.reply_text(
+            f"⚠️ Видео слишком большое ({_size_fmt(file_size)}).\n"
+            f"Лимит Telegram API для скачивания — {_size_fmt(CIRCLE_MAX_DOWNLOAD)}.\n\n"
+            f"Отправь видео покороче или сожми его.",
+        )
+        return
+
+    # Store pending video
+    _circle_pending[user.id] = {
+        "file_id": file_id,
+        "message_id": msg.message_id,
+        "duration": duration,
+        "file_size": file_size,
+    }
+
+    dur_text = _dur_fmt(duration) if duration else "неизвестно"
+    warn = ""
+    if duration > CIRCLE_MAX_DURATION:
+        warn = f"\n⚠️ Видео длиннее 60 сек — будет обрезано до 1 мин."
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⭕ Создать кружок", callback_data=f"circle:{user.id}")]
+    ])
+
+    await msg.reply_text(
+        f"🎬 <b>Видео получено</b>\n"
+        f"⏱ Длительность: {dur_text}\n"
+        f"📦 Размер: {_size_fmt(file_size)}{warn}\n\n"
+        f"Нажми кнопку, чтобы превратить в кружок:",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+async def circle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle 'Create circle' button press."""
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split(":")
+    if len(parts) != 2:
+        return
+    owner_id = int(parts[1])
+
+    # Only the user who sent the video can press the button
+    if query.from_user.id != owner_id:
+        await query.answer("Это не твоё видео!", show_alert=True)
+        return
+
+    pending = _circle_pending.pop(owner_id, None)
+    if not pending:
+        await query.edit_message_text("❌ Видео устарело. Отправь заново.")
+        return
+
+    file_id = pending["file_id"]
+    chat_id = query.message.chat_id
+    status_msg = query.message
+
+    try:
+        await query.edit_message_text("⏳ <b>Скачиваю видео...</b>", parse_mode="HTML")
+    except Exception:
+        pass
+
+    # Download the file from Telegram
+    uid = query.from_user.id
+    ts = int(time.time())
+    input_path = DOWNLOAD_DIR / f"circle_in_{uid}_{ts}.mp4"
+    output_path = DOWNLOAD_DIR / f"circle_out_{uid}_{ts}.mp4"
+    thumb_path = DOWNLOAD_DIR / f"circle_thumb_{uid}_{ts}.jpg"
+
+    try:
+        tg_file = await ctx.bot.get_file(file_id)
+        await tg_file.download_to_drive(str(input_path))
+    except Exception as e:
+        log.error("Circle: download failed: %s", e)
+        try:
+            await status_msg.edit_text(f"❌ Не удалось скачать видео:\n{str(e)[:200]}")
+        except Exception:
+            pass
+        input_path.unlink(missing_ok=True)
+        return
+
+    try:
+        await status_msg.edit_text("⏳ <b>Конвертирую в кружок...</b>", parse_mode="HTML")
+    except Exception:
+        pass
+
+    # FFmpeg: crop to center square, scale to 640x640, limit 60s, H.264+AAC
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", "-i", str(input_path),
+        "-t", str(CIRCLE_MAX_DURATION),
+        "-vf", f"crop='min(iw,ih)':'min(iw,ih)',scale={CIRCLE_SIZE}:{CIRCLE_SIZE},setsar=1",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "26",
+        "-c:a", "aac", "-b:a", "128k", "-ac", "1",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace")[-300:] if stderr else "unknown"
+            log.error("Circle FFmpeg failed (rc=%d): %s", proc.returncode, err)
+            await status_msg.edit_text("❌ Не удалось сконвертировать видео.")
+            return
+
+    except asyncio.TimeoutError:
+        log.error("Circle FFmpeg timeout for user %d", uid)
+        await status_msg.edit_text("❌ Конвертация заняла слишком долго (>120с).")
+        return
+    except Exception as e:
+        log.error("Circle FFmpeg exception: %s", e)
+        await status_msg.edit_text(f"❌ Ошибка конвертации:\n{str(e)[:200]}")
+        return
+    finally:
+        input_path.unlink(missing_ok=True)
+
+    if not output_path.exists() or output_path.stat().st_size < 1024:
+        await status_msg.edit_text("❌ Результат конвертации пустой.")
+        output_path.unlink(missing_ok=True)
+        return
+
+    # Generate thumbnail
+    try:
+        thumb_cmd = [
+            "ffmpeg", "-y", "-i", str(output_path),
+            "-vframes", "1", "-vf", f"scale={CIRCLE_SIZE}:{CIRCLE_SIZE}",
+            str(thumb_path),
+        ]
+        thumb_proc = await asyncio.create_subprocess_exec(
+            *thumb_cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(thumb_proc.communicate(), timeout=10)
+    except Exception:
+        pass  # thumbnail is optional
+
+    # Get actual duration
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(output_path),
+        ]
+        probe_proc = await asyncio.create_subprocess_exec(
+            *probe_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        probe_out, _ = await asyncio.wait_for(probe_proc.communicate(), timeout=5)
+        actual_duration = int(float(probe_out.decode().strip()))
+    except Exception:
+        actual_duration = min(pending.get("duration", 0), CIRCLE_MAX_DURATION) or 10
+
+    # Send as video note (circle)
+    try:
+        await status_msg.edit_text("📤 <b>Отправляю кружок...</b>", parse_mode="HTML")
+    except Exception:
+        pass
+
+    try:
+        with open(output_path, "rb") as vf:
+            send_kwargs = {
+                "chat_id": chat_id,
+                "video_note": vf,
+                "duration": actual_duration,
+                "length": CIRCLE_SIZE,
+                "read_timeout": 120,
+                "write_timeout": 120,
+            }
+            if thumb_path.exists():
+                send_kwargs["thumbnail"] = open(thumb_path, "rb")
+            try:
+                await ctx.bot.send_video_note(**send_kwargs)
+            finally:
+                if "thumbnail" in send_kwargs and hasattr(send_kwargs["thumbnail"], "close"):
+                    send_kwargs["thumbnail"].close()
+
+        out_size = output_path.stat().st_size
+        await status_msg.edit_text(
+            f"✅ <b>Кружок готов!</b>\n\n"
+            f"⏱ {_dur_fmt(actual_duration)} · {_size_fmt(out_size)}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        log.error("Circle: send_video_note failed: %s", e)
+        await status_msg.edit_text(f"❌ Не удалось отправить кружок:\n{str(e)[:200]}")
+    finally:
+        output_path.unlink(missing_ok=True)
+        thumb_path.unlink(missing_ok=True)
 
 
 async def cancel_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1124,9 +1376,12 @@ def main():
     # Callbacks
     app.add_handler(CallbackQueryHandler(cancel_callback, pattern=r"^cancel:"))
     app.add_handler(CallbackQueryHandler(go_callback, pattern=r"^go:"))
+    app.add_handler(CallbackQueryHandler(circle_callback, pattern=r"^circle:"))
     app.add_handler(CallbackQueryHandler(users_page_callback, pattern=r"^users_page:"))
+    # Video → circle conversion (must be before text handler)
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE | (filters.Document.VIDEO), handle_video_for_circle))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
-    log.info("BlackBox Video bot v4.0 started!")
+    log.info("BlackBox Video bot v4.1 started!")
     app.run_polling(allowed_updates=["message", "callback_query"])
 
 

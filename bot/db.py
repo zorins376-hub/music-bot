@@ -125,9 +125,6 @@ async def get_or_create_user_raw(
                     if user.last_active is None or (now - user.last_active) >= touch_interval:
                         user.last_active = now
                         changed = True
-                    if getattr(user, "bot_blocked", False):
-                        user.bot_blocked = False
-                        changed = True
 
                     expired_premium = (
                         not admin

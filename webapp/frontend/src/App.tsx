@@ -23,7 +23,7 @@ const ActivityFeedView = lazy(() => import("./components/ActivityFeedView").then
 const WrappedView = lazy(() => import("./components/WrappedView").then(m => ({ default: m.WrappedView })));
 const SleepSoundsView = lazy(() => import("./components/SleepSoundsView").then(m => ({ default: m.SleepSoundsView })));
 const LiveRadioView = lazy(() => import("./components/LiveRadioView").then(m => ({ default: m.LiveRadioView })));
-import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchTrending, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitDataUnsafe, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
+import { fetchPlayerState, sendAction, getStreamUrl, reorderQueue, fetchWave, fetchSimilar, fetchRadioNext, fetchTrending, fetchUserProfile, updateUserAudioSettings, fetchPlaylists, addTrackToPlaylist, playPlaylist, ingestEvent, isOnline, onNetworkChange, fetchBroadcast, getInitData, getInitDataUnsafe, getTelegramDebugInfo, reportTelegramDebugInfo, type EqPreset, type PlayerState, type Track, type UserProfile, type Playlist } from "./api";
 import { extractDominantColor, extractColors, rgbToCSS, rgbaToCSS } from "./colorExtractor";
 import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCache";
 import { themes, getThemeById, getSavedThemeId, saveThemeId, applyThemeCSSVars, type Theme } from "./themes";
@@ -164,9 +164,15 @@ function getSavedEqPreset(): EqPreset {
 }
 
 export function App() {
+  const initData = getInitData();
   const initDataUnsafe = getInitDataUnsafe();
+  const telegramDebugInfo = getTelegramDebugInfo();
   const user = initDataUnsafe?.user;
   const userId = user?.id ?? 0;
+  const hasInitData = Boolean(initData);
+  const hasTelegramContext = Boolean(userId && hasInitData);
+  const hasTelegramShell = telegramDebugInfo.webApp === "object" || telegramDebugInfo.isTelegramUserAgent;
+  const telegramLaunchUrl = "https://t.me/TSmymusicbot_bot?startapp=player";
 
   const [view, setView] = useState<View>("foryou");
   const [partyCode, setPartyCode] = useState<string | null>(null);
@@ -1955,6 +1961,167 @@ export function App() {
 
   const isTequila = theme.id === "tequila";
   const hasAudioControls = Boolean(userProfile?.is_premium || userProfile?.is_admin);
+
+  useEffect(() => {
+    reportTelegramDebugInfo();
+  }, []);
+
+  if (!hasTelegramContext) {
+    const title = hasTelegramShell
+      ? "Telegram не передал данные Mini App"
+      : "Плеер нужно открывать внутри Telegram";
+    const description = hasTelegramShell
+      ? "Страница открылась, но у неё нет initData. Без этого бот не может понять, кто открыл приложение. Обычно причина в привязке домена или в неверном launch-flow у бота."
+      : "Сейчас открыт обычный сайт, а не Telegram Mini App. Запусти плеер из чата с ботом, чтобы Telegram передал подпись и профиль пользователя.";
+
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: theme.bgImage ? undefined : theme.bgColor,
+        color: theme.textColor,
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        <ToastContainer />
+        {theme.bgImage && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              backgroundImage: `url(${theme.bgImage})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              zIndex: -2,
+            }}
+          />
+        )}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: theme.bgOverlay || `radial-gradient(circle at top, ${theme.accentAlpha}, transparent 42%), ${theme.bgColor}`,
+            zIndex: -1,
+          }}
+        />
+        <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px 40px" }}>
+          <div style={{
+            marginTop: 24,
+            borderRadius: 28,
+            padding: "22px 18px",
+            background: `linear-gradient(180deg, ${theme.cardBg}, rgba(0,0,0,0.18))`,
+            border: `1px solid ${theme.accentAlpha}`,
+            backdropFilter: "blur(18px)",
+            WebkitBackdropFilter: "blur(18px)",
+            boxShadow: `0 18px 48px rgba(0,0,0,0.28), inset 0 1px 0 ${theme.accentAlpha}`,
+          }}>
+            <div style={{
+              width: 52,
+              height: 52,
+              borderRadius: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: `linear-gradient(135deg, ${theme.accent}, ${theme.accentAlpha})`,
+              color: "#fff",
+              boxShadow: `0 12px 28px ${theme.accentAlpha}`,
+            }}>
+              <IconRocket size={22} color="#fff" />
+            </div>
+            <div style={{ marginTop: 18, fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
+              {title}
+            </div>
+            <div style={{ marginTop: 12, fontSize: 14, lineHeight: 1.6, color: theme.hintColor }}>
+              {description}
+            </div>
+            <div style={{
+              marginTop: 18,
+              padding: "14px 14px 12px",
+              borderRadius: 18,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: theme.textColor, marginBottom: 8 }}>
+                Что это значит
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 1.6, color: theme.hintColor }}>
+                Если этот экран появился после кнопки "Открыть плеер", значит Telegram открыл URL без подписи Mini App. Для админа это почти всегда проверка BotFather и привязки домена через `/setdomain demotivators.net`.
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
+              <button
+                onClick={() => {
+                  const openTelegramLink = window.Telegram?.WebApp?.openTelegramLink;
+                  if (openTelegramLink) {
+                    openTelegramLink(telegramLaunchUrl);
+                  } else {
+                    window.location.href = telegramLaunchUrl;
+                  }
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  border: "none",
+                  borderRadius: 16,
+                  padding: "14px 16px",
+                  background: `linear-gradient(135deg, ${theme.accent}, ${theme.visualizerGradient[0]})`,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: `0 14px 30px ${theme.accentAlpha}`,
+                }}
+              >
+                <IconLink size={16} color="#fff" />
+                Открыть через Telegram
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  borderRadius: 16,
+                  padding: "13px 16px",
+                  background: "rgba(255,255,255,0.04)",
+                  color: theme.textColor,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <IconBell size={15} color={theme.textColor} />
+                Проверить ещё раз
+              </button>
+            </div>
+            <div style={{
+              marginTop: 18,
+              borderRadius: 18,
+              padding: "14px 14px 10px",
+              background: "rgba(0,0,0,0.22)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <IconClipboard size={15} color={theme.hintColor} />
+                <div style={{ fontSize: 12, fontWeight: 700, color: theme.textColor }}>
+                  Диагностика запуска
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8, fontSize: 12, color: theme.hintColor }}>
+                <div>Telegram SDK: {telegramDebugInfo.webApp}</div>
+                <div>initData bytes: {telegramDebugInfo.initDataLen}</div>
+                <div>Hash fallback: {telegramDebugInfo.hasHashInitData ? "yes" : "no"}</div>
+                <div>Telegram UA: {telegramDebugInfo.isTelegramUserAgent ? "yes" : "no"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>

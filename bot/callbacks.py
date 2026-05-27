@@ -70,3 +70,9 @@ class MixCb(CallbackData, prefix="mix"):
 class AppealCb(CallbackData, prefix="apl_d"):
     """DMCA appeal callback."""
     sid: str  # source_id (truncated)
+
+
+class WrongTrackPickCb(CallbackData, prefix="wtp"):
+    """Pick an alternative track when the bot selected the wrong one in a group."""
+    sid: str  # alternate-candidates session ID
+    i: int    # index into the alternate list

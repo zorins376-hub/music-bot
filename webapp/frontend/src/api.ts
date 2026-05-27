@@ -18,6 +18,34 @@ export function getInitData(): string {
   return getInitDataFromHash();
 }
 
+export interface TelegramDebugInfo {
+  telegram: string;
+  webApp: string;
+  initDataLen: number;
+  initDataUnsafe?: unknown;
+  url: string;
+  userAgent: string;
+  hasHashInitData: boolean;
+  isTelegramUserAgent: boolean;
+  referrer: string;
+}
+
+export function getTelegramDebugInfo(): TelegramDebugInfo {
+  const initData = getInitData();
+  const userAgent = navigator.userAgent;
+  return {
+    telegram: typeof window.Telegram,
+    webApp: typeof window.Telegram?.WebApp,
+    initDataLen: initData.length,
+    initDataUnsafe: window.Telegram?.WebApp?.initDataUnsafe,
+    url: window.location.href,
+    userAgent,
+    hasHashInitData: window.location.hash.includes("tgWebAppData="),
+    isTelegramUserAgent: /Telegram/i.test(userAgent),
+    referrer: document.referrer,
+  };
+}
+
 // Parse initDataUnsafe from initData string or URL hash
 export function getInitDataUnsafe(): { 
   user?: { id: number; first_name?: string; username?: string; language_code?: string; is_premium?: boolean };
@@ -48,26 +76,29 @@ export function getInitDataUnsafe(): {
 
 // Debug: log Telegram SDK state on first call
 let _debugLogged = false;
+export function reportTelegramDebugInfo(force = false): void {
+  if (_debugLogged && !force) return;
+  _debugLogged = true;
+
+  const initData = getInitData();
+  const debugInfo = getTelegramDebugInfo();
+  console.log("[TMA_DEBUG]", debugInfo);
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (initData) {
+    headers["X-Telegram-Init-Data"] = initData;
+  }
+
+  fetch("/api/debug-auth", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(debugInfo),
+  }).catch(() => {});
+}
+
 function getHeaders(): Record<string, string> {
   const initData = getInitData();
-  if (!_debugLogged) {
-    _debugLogged = true;
-    const debugInfo = {
-      telegram: typeof window.Telegram,
-      webApp: typeof window.Telegram?.WebApp,
-      initDataLen: initData.length,
-      initDataUnsafe: window.Telegram?.WebApp?.initDataUnsafe,
-      url: window.location.href,
-      userAgent: navigator.userAgent,
-    };
-    console.log("[TMA_DEBUG]", debugInfo);
-    // Send debug info to server
-    fetch("/api/debug-auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(debugInfo),
-    }).catch(() => {});
-  }
+  reportTelegramDebugInfo();
   return {
     "Content-Type": "application/json",
     "X-Telegram-Init-Data": initData,

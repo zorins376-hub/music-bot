@@ -61,9 +61,8 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
                 "duration_fmt": fmt_duration(tr.duration) if tr.duration else "?:??",
                 "source": tr.source or "channel",
                 "file_id": tr.file_id,
-                "_provider_pos": i,
             }
-            for i, tr in enumerate(tracks)
+            for tr in tracks
         ]
 
     local_res, ym_res, sp_res, vk_res, yt_res = await asyncio.gather(
@@ -72,17 +71,9 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
         _safe(search_spotify(query, limit=3)),
         _safe(search_vk(query, limit=3)),
         _safe(search_tracks(query, max_results=5)),
-        return_exceptions=True,
     )
 
-    all_results = []
-    for r in (local_res, ym_res, sp_res, vk_res, yt_res):
-        if isinstance(r, BaseException) or r is None:
-            continue
-        # Stamp provider position so ranking preserves provider relevance order
-        for i, track in enumerate(r):
-            track["_provider_pos"] = i
-        all_results.extend(r)
+    all_results = (local_res or []) + (ym_res or []) + (sp_res or []) + (vk_res or []) + (yt_res or [])
     script = detect_script(query)
     results_data = deduplicate_results(all_results, lang_hint=script, query=query)[:10]
 
@@ -96,14 +87,8 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
         source = track.get("source", "youtube")
         icon = _SOURCE_ICON.get(source, "♪")
 
-        # Use file_id from track dict (local DB) or Redis cache or DB fallback
+        # Use file_id from track dict (local DB) or Redis cache
         fid = track.get("file_id") or await cache.get_file_id(video_id)
-        if not fid:
-            try:
-                from bot.services.telegram_cache import get_file_id as _tg_get_fid
-                fid = await _tg_get_fid(video_id)
-            except Exception:
-                pass
         if fid:
             results.append(
                 InlineQueryResultCachedAudio(

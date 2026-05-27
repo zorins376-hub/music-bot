@@ -452,7 +452,6 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         "quiet": True,
         "no_warnings": True,
         "logger": _ytdlp_logger,
-        "default_search": search_prefix,
         "socket_timeout": 15,
         "ignore_no_formats_error": True,
         **_base_opts(),
@@ -461,7 +460,8 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
         ydl_opts["cookiefile"] = cookiefile
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=False)
+            search_query = f"{search_prefix}:{query}"
+            info = ydl.extract_info(search_query, download=False)
             # Convert to list INSIDE context to avoid I/O errors after close
             entries = list(info.get("entries", [])) if info else []
 

@@ -356,7 +356,7 @@ async def security_headers_middleware(request: Request, call_next):
         "media-src 'self' https: blob:; "
         "connect-src 'self' https: wss:; "
         "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://telegram.org https://*.telegram.org; "
         "frame-ancestors 'self' https://*.telegram.org https://t.me;"
     )
     return response
@@ -445,6 +445,50 @@ async def _get_or_create_webapp_user(tg_user: dict):
     username = tg_user.get("username")
     first_name = tg_user.get("first_name") or ""
     return await get_or_create_user_raw(user_id, username, first_name)
+
+
+class WebAppDebugPayload(BaseModel):
+    telegram: str | None = None
+    webApp: str | None = None
+    initDataLen: int = 0
+    initDataUnsafe: dict | None = None
+    url: str | None = None
+    userAgent: str | None = None
+    hasHashInitData: bool = False
+    isTelegramUserAgent: bool = False
+    referrer: str | None = None
+
+
+@app.post("/api/debug-auth")
+async def debug_auth(
+    payload: WebAppDebugPayload,
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    auth_user = verify_init_data(x_telegram_init_data) if x_telegram_init_data else None
+    init_keys = sorted(payload.initDataUnsafe.keys()) if isinstance(payload.initDataUnsafe, dict) else []
+    logger.warning(
+        "[TMA_DEBUG] auth_ok=%s user_id=%s telegram=%s webapp=%s init_len=%s hash=%s tg_ua=%s init_keys=%s origin=%s referer=%s request_ua=%s page_url=%s",
+        bool(auth_user),
+        auth_user.get("id") if auth_user else None,
+        payload.telegram,
+        payload.webApp,
+        payload.initDataLen,
+        payload.hasHashInitData,
+        payload.isTelegramUserAgent,
+        init_keys,
+        request.headers.get("origin"),
+        payload.referrer or request.headers.get("referer"),
+        payload.userAgent or request.headers.get("user-agent"),
+        payload.url,
+    )
+    return {
+        "ok": True,
+        "auth_ok": bool(auth_user),
+        "user_id": auth_user.get("id") if auth_user else None,
+        "init_data_len": payload.initDataLen,
+        "is_telegram_user_agent": payload.isTelegramUserAgent,
+    }
 
 
 @app.get("/api/user/me", response_model=UserProfileSchema)
