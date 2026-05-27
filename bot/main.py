@@ -441,10 +441,18 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
 
 
 async def main() -> None:
-    bot = Bot(
+    # Use local Telegram Bot API server if configured (supports files >50 MB)
+    bot_kwargs: dict = dict(
         token=app_settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    if app_settings.TELEGRAM_API_URL:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        from aiogram.client.telegram import TelegramAPIServer
+        local_server = TelegramAPIServer.from_base(app_settings.TELEGRAM_API_URL)
+        bot_kwargs["session"] = AiohttpSession(api=local_server)
+        logger.info("Using local Bot API: %s", app_settings.TELEGRAM_API_URL)
+    bot = Bot(**bot_kwargs)
     dp = build_dispatcher()
 
     if app_settings.USE_WEBHOOK:

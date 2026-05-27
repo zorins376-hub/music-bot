@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     REDIS_MAX_OPS_PER_SEC: int = 0  # 0 = disabled
     REDIS_BURST: int = 50
 
+    # ── Local Telegram Bot API server (files >50 MB) ────────────────────
+    TELEGRAM_API_URL: str = ""
+
     # ── Webhook ───────────────────────────────────────────────────────────
     USE_WEBHOOK: bool = False
     WEBHOOK_URL: str = ""
