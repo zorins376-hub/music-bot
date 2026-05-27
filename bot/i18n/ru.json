@@ -1,5 +1,5 @@
 {
-  "start_message": "◉ <b>BLACK ROOM RADIO BOT</b>\n\nПривет, {name}!\n\nТвой персональный DJ в Telegram.\nТри источника. Один бот.\n\n<i>TEQUILA MUSIC · FULLMOON TRIP SOUND · BLACK ROOM</i>",
+  "start_message": "<b>BLACK ROOM</b>  ·  <i>music bot</i>\n\n{name}, ♫\n\nYouTube  ·  Yandex  ·  VK  ·  SoundCloud\nОдин поиск — все источники.",
   "help_message": "<b>Команды:</b>\n/search &lt;запрос&gt; — поиск трека\n/top — топ треков\n/history — твои последние запросы\n/settings — качество аудио\n/lang — сменить язык\n/help — эта справка\n\n<b>Распознавание:</b> отправь голосовое, аудио или видео — бот определит трек через Shazam и скачает его\n\n<b>В личке:</b> просто напиши название трека\n<b>В группе:</b> <code>трек Гуф</code> или /search Гуф",
   "search_prompt": "Напиши название трека или исполнителя:",
   "searching": "◈ Ищу...",

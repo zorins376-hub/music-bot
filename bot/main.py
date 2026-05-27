@@ -157,35 +157,24 @@ async def on_startup(bot: Bot) -> None:
     # One-time version broadcast for existing users after deploy
     asyncio.create_task(_broadcast_version_update(bot))
 
-    # Register bot commands for private chats
+    # Register bot commands — compact luxury menu
     private_commands = [
-        BotCommand(command="start", description="◉ Главное меню"),
-        BotCommand(command="search", description="◈ Найти трек"),
-        BotCommand(command="mix", description="✦ Daily Mix"),
-        BotCommand(command="radar", description="🆕 Release Radar"),
-        BotCommand(command="video", description="🎦 Найти клип"),
-        BotCommand(command="top", description="◆ Топ треков"),
-        BotCommand(command="charts", description="🏆 Топ-чарты"),
-        BotCommand(command="stats", description="◎ Моя статистика"),
-        BotCommand(command="history", description="▹ Мои запросы"),
-        BotCommand(command="settings", description="≡ Качество аудио"),
-        BotCommand(command="playlist", description="▸ Плейлисты"),
-        BotCommand(command="favorites", description="❤️ Любимое"),
-        BotCommand(command="profile", description="◉ Мой профиль"),
-        BotCommand(command="lang", description="○ Сменить язык"),
-        BotCommand(command="help", description="◌ Справка"),
-        BotCommand(command="faq", description="❓ FAQ"),
-        BotCommand(command="ai_playlist", description="🤖 AI Плейлист"),
+        BotCommand(command="start", description="Меню"),
+        BotCommand(command="search", description="Найти трек"),
+        BotCommand(command="mix", description="Daily Mix"),
+        BotCommand(command="charts", description="Топ-чарты"),
+        BotCommand(command="profile", description="Мой профиль"),
+        BotCommand(command="favorites", description="Избранное"),
+        BotCommand(command="settings", description="Настройки"),
     ]
     try:
         await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
 
-        # Register bot commands for group chats
+        # Group chats — minimal
         group_commands = [
-            BotCommand(command="search", description="◈ Найти трек"),
-            BotCommand(command="video", description="🎦 Найти клип"),
-            BotCommand(command="top", description="◆ Топ треков"),
-            BotCommand(command="party", description="🎉 Party плейлист"),
+            BotCommand(command="search", description="Найти трек"),
+            BotCommand(command="charts", description="Чарты"),
+            BotCommand(command="party", description="Party плейлист"),
         ]
         await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
     except Exception as e:
