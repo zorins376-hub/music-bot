@@ -111,8 +111,8 @@ _NON_ORIGINAL_MARKERS: tuple[tuple[str, float], ...] = (
 def normalize_query(query: str) -> str:
     """Normalize a search query: strip junk, normalize whitespace, lowercase."""
     q = query.strip().lower()
-    q = q.replace("’", "").replace("’", "").replace("`", "")
-    q = re.sub(r’\s*[\(\[][^\)\]]{0,50}[\)\]]\s*’, ‘ ‘, q)
+    q = q.replace("‘", "").replace("’", "").replace("`", "")
+    q = re.sub(r'\s*[\(\[][^\)\]]{0,50}[\)\]]\s*', ' ', q)
     q = _JUNK_RE.sub(" ", q)
     q = _MULTI_SPACE.sub(" ", q)
     return q.strip()
