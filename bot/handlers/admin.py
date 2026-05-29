@@ -1186,9 +1186,13 @@ async def handle_adm_back(callback: CallbackQuery) -> None:
 
 async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
     async with async_session() as session:
-        total = await session.scalar(select(func.count()).select_from(User)) or 0
+        # Only count and show active users (not blocked)
+        active_filter = User.blocked_bot == False
+        total = await session.scalar(select(func.count()).select_from(User).where(active_filter)) or 0
+        blocked = await session.scalar(select(func.count()).select_from(User).where(User.blocked_bot == True)) or 0
         result = await session.execute(
             select(User)
+            .where(active_filter)
             .order_by(User.created_at.desc())
             .offset(page * _USERS_PER_PAGE)
             .limit(_USERS_PER_PAGE)
@@ -1224,7 +1228,12 @@ async def _build_user_list_kb(page: int = 0) -> tuple[str, InlineKeyboardMarkup]
     rows.append(nav)
     rows.append([InlineKeyboardButton(text="\u25c1 \u041d\u0430\u0437\u0430\u0434", callback_data="action:admin")])
 
-    text = f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b> ({total})\n\n\u25c7 = Premium \u00b7 \u25cb = Free\n\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
+    text = (
+        f"<b>\u25ce \u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438</b>\n"
+        f"\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445: <b>{total}</b>  \u00b7  \u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043b\u0438: <b>{blocked}</b>\n\n"
+        f"\u25c7 = Premium \u00b7 \u25cb = Free\n"
+        f"\u041d\u0430\u0436\u043c\u0438 \u25c7 \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0434\u0430\u0442\u044c, \u2717 \u0447\u0442\u043e\u0431\u044b \u0441\u043d\u044f\u0442\u044c."
+    )
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 

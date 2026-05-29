@@ -576,8 +576,8 @@ def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: 
                     parsed=parsed,
                 )
                 + float(t.get("_hint_bonus", 0.0))
-                # Popularity micro-boost: tracks already in our cache are proven popular
-                + (0.05 if t.get("file_id") else 0.0),
+                # Popularity boost: cached tracks get bonus proportional to download count
+                + (min(0.30, 0.05 + t.get("_downloads", 0) / 200) if t.get("file_id") else 0.0),
                 + (0.28 * max(0, artist_counts.get(normalize_query(t.get("uploader", "")), 0) - 1)),
                 rank.get(t.get("source", ""), 0),
             ),

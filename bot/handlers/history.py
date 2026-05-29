@@ -4,24 +4,13 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import desc, func, select
 
+from bot.callbacks import ShareTrackCb
 from bot.db import get_or_create_user, get_user_stats
 from bot.i18n import t
 from bot.models.base import async_session
 from bot.models.track import ListeningHistory, Track
 
 router = Router()
-
-
-def _top_period_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text=f"▫ {t(lang, 'top_period_today')}", callback_data="top:today"),
-                InlineKeyboardButton(text=f"▪ {t(lang, 'top_period_week')}", callback_data="top:week"),
-                InlineKeyboardButton(text=f"◆ {t(lang, 'top_period_all')}", callback_data="top:all"),
-            ]
-        ]
-    )
 
 
 async def _show_top(message: Message, tg_user: TgUser, period: str = "week") -> None:
@@ -39,15 +28,11 @@ async def _show_top(message: Message, tg_user: TgUser, period: str = "week") -> 
         since = None
         period_label = t(lang, "top_period_all")
 
-    # Count play events per track within the time period
     async with async_session() as session:
         q = (
-            select(
-                Track,
-                func.count(ListeningHistory.id).label("play_count"),
-            )
+            select(Track, func.count(ListeningHistory.id).label("play_count"))
             .join(ListeningHistory, ListeningHistory.track_id == Track.id)
-            .where(ListeningHistory.action == "play")
+            .where(ListeningHistory.action == "play", Track.file_id.isnot(None))
         )
         if since:
             q = q.where(ListeningHistory.created_at >= since)
@@ -59,14 +44,27 @@ async def _show_top(message: Message, tg_user: TgUser, period: str = "week") -> 
         await message.answer(t(lang, "top_empty"))
         return
 
-    lines = [f"{t(lang, 'top_header')} ({period_label})"]
+    buttons: list[list[InlineKeyboardButton]] = []
     for i, (track, play_count) in enumerate(rows, 1):
-        name = f"{track.artist} — {track.title}" if track.artist else track.title or "Unknown"
-        lines.append(f"{i}. {name} ({play_count} {t(lang, 'downloads_count')})")
+        artist = (track.artist or "")[:18]
+        title = (track.title or "Unknown")[:22]
+        label = f"▶ {i}. {artist} — {title}  · {play_count}" if artist else f"▶ {i}. {title}  · {play_count}"
+        buttons.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=ShareTrackCb(tid=track.id, act="dl").pack(),
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(text=f"▫ {t(lang, 'top_period_today')}", callback_data="top:today"),
+        InlineKeyboardButton(text=f"▪ {t(lang, 'top_period_week')}", callback_data="top:week"),
+        InlineKeyboardButton(text=f"◆ {t(lang, 'top_period_all')}", callback_data="top:all"),
+    ])
 
     await message.answer(
-        "\n".join(lines),
-        reply_markup=_top_period_keyboard(lang),
+        f"{t(lang, 'top_header')} ({period_label})",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         parse_mode="HTML",
     )
 

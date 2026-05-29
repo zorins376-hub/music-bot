@@ -1,5 +1,5 @@
 # ── Core bot (MVP) ────────────────────────────────────────────────────────
-aiogram==3.15.0
+aiogram==3.28.2
 aiohttp==3.10.11
 aiofiles==23.2.1
 pydantic-settings==2.13.1

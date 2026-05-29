@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, ErrorEvent
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, ErrorEvent, MenuButtonCommands
 
 from bot.config import settings as app_settings
 
@@ -180,6 +180,8 @@ async def on_startup(bot: Bot) -> None:
             BotCommand(command="party", description="Party плейлист"),
         ]
         await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+        # Set Menu button to show command list (instead of web-app)
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     except Exception as e:
         logger.warning("Failed to set bot commands (non-fatal): %s", e)
 
@@ -253,7 +255,7 @@ async def _global_error_handler(event: ErrorEvent) -> bool:
 
     # Detect "bot was blocked by the user" / "user is deactivated"
     err_msg = str(event.exception).lower()
-    if "blocked by the user" in err_msg or "user is deactivated" in err_msg or "chat not found" in err_msg:
+    if "blocked by the user" in err_msg or "user is deactivated" in err_msg:
         uid = None
         if event.update.message and event.update.message.from_user:
             uid = event.update.message.from_user.id
@@ -286,7 +288,7 @@ async def _blocked_users_checker(bot: Bot) -> None:
     from bot.models.user import User
     from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
-    await asyncio.sleep(120)  # Wait for startup to settle
+    await asyncio.sleep(3600)  # Wait 1 hour before first scan
 
     while True:
         try:
@@ -303,14 +305,20 @@ async def _blocked_users_checker(bot: Bot) -> None:
                 for uid in user_ids:
                     try:
                         await bot.send_chat_action(uid, "typing")
-                    except (TelegramForbiddenError, TelegramBadRequest) as e:
+                    except TelegramForbiddenError:
+                        # 403 = user explicitly blocked the bot
+                        await _mark_user_blocked(uid)
+                        blocked += 1
+                    except TelegramBadRequest as e:
                         err = str(e).lower()
-                        if "blocked by the user" in err or "user is deactivated" in err or "chat not found" in err:
+                        # Only "user is deactivated" = deleted account
+                        if "user is deactivated" in err:
                             await _mark_user_blocked(uid)
                             blocked += 1
+                        # "chat not found" = user never started bot, skip
                     except Exception:
                         pass
-                    await asyncio.sleep(0.05)  # Rate limit
+                    await asyncio.sleep(0.1)  # Rate limit
                 logger.info("Blocked checker: scanned %d users, %d blocked", len(user_ids), blocked)
         except Exception as e:
             logger.warning("Blocked checker error: %s", e)

@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select, update
 from sqlalchemy.sql import func
 
@@ -20,17 +20,10 @@ router = Router()
 
 
 def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> InlineKeyboardMarkup:
-    from bot.config import settings
-    rows = []
-    # TMA Player WebApp button - hero
-    if settings.TMA_URL:
-        rows.append([
-            InlineKeyboardButton(text="▶️  Открыть плеер", web_app=WebAppInfo(url=settings.TMA_URL)),
-        ])
-    rows += [
+    rows = [
         # -- Music --
         [
-            InlineKeyboardButton(text="◈ Поиск", callback_data="action:search"),
+            InlineKeyboardButton(text="\U0001f50e Поиск", callback_data="action:search", style="primary"),
             InlineKeyboardButton(text="✦ Mix", callback_data="action:mix"),
             InlineKeyboardButton(text="☆ Чарты", callback_data="action:charts"),
         ],
@@ -41,7 +34,7 @@ def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> Inline
         ],
         # -- Discover --
         [
-            InlineKeyboardButton(text="✨ AI DJ", callback_data="action:dj"),
+            InlineKeyboardButton(text="✨ AI DJ", callback_data="action:dj", style="primary"),
             InlineKeyboardButton(text="⭐ Radar", callback_data="action:radar"),
             InlineKeyboardButton(text="◆ Top", callback_data="action:top"),
         ],
@@ -51,8 +44,12 @@ def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> Inline
             InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
             InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
         ],
-        # -- More --
+        # -- Share & More --
         [
+            InlineKeyboardButton(
+                text="\U0001f517 Поделиться",
+                copy_text=CopyTextButton(text=f"https://t.me/{bot_username}" if bot_username else "BLACK ROOM music bot"),
+            ),
             InlineKeyboardButton(text="‥ Ещё", callback_data="menu:more"),
         ],
     ]

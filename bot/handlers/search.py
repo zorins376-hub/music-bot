@@ -11,6 +11,7 @@ from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
+    CopyTextButton,
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -39,6 +40,9 @@ router = Router()
 
 _TRACK_SHARE_TTL = 30 * 24 * 3600  # 30 days
 _DOWNLOAD_LOCK_TTL = 10
+
+# Telegram message effect IDs: 🎉=5159385139981059251 🔥=5104841245755180586 👍=5107584321108051014
+_EFFECT_FIRE = "5104841245755180586"
 
 
 def _classify_download_error(err_msg: str) -> str:
@@ -378,6 +382,7 @@ async def _do_search(message: Message, query: str) -> None:
             "duration_fmt": _fmt_duration(tr.duration) if tr.duration else "?:??",
             "source": tr.source or "channel",
             "file_id": tr.file_id,
+            "_downloads": tr.downloads or 0,
         })
 
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
@@ -1279,14 +1284,17 @@ async def handle_track_select(
                 performer=track_info["uploader"],
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=caption,
+                message_effect_id=_EFFECT_FIRE if not is_group else None,
             )
             tid = await _post_download(user.id, track_info, local_fid, bitrate)
             if is_group:
                 await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
             else:
+                _bot_me = await callback.bot.me()
+                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                 await callback.message.answer(
                     t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(tid, _share_q),
+                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
                 )
             return
 
@@ -1301,14 +1309,17 @@ async def handle_track_select(
                 performer=track_info["uploader"],
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=caption,
+                message_effect_id=_EFFECT_FIRE if not is_group else None,
             )
             tid = await _post_download(user.id, track_info, file_id, bitrate)
             if is_group:
                 await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
             else:
+                _bot_me = await callback.bot.me()
+                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                 await callback.message.answer(
                     t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(tid, _share_q),
+                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
                 )
             return
 
@@ -1374,6 +1385,7 @@ async def handle_track_select(
                 performer=track_info["uploader"],
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+                message_effect_id=_EFFECT_FIRE if not is_group else None,
             )
 
             await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
@@ -1382,9 +1394,11 @@ async def handle_track_select(
             if is_group:
                 await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
             else:
+                _bot_me = await callback.bot.me()
+                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                 await callback.message.answer(
                     t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(tid, _share_q),
+                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
                 )
 
         except Exception as e:
@@ -1415,9 +1429,11 @@ async def handle_track_select(
                             tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
                             await status.delete()
                             if not is_group:
+                                _bot_me = await callback.bot.me()
+                                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                                 await callback.message.answer(
                                     t(lang, "rate_track"),
-                                    reply_markup=_feedback_keyboard(tid, _share_q),
+                                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
                                 )
                             return
                         finally:
@@ -1502,7 +1518,7 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
     return track.id
 
 
-def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMarkup:
+def _feedback_keyboard(track_id: int, share_query: str = "", share_url: str = "") -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
@@ -1547,11 +1563,19 @@ def _feedback_keyboard(track_id: int, share_query: str = "") -> InlineKeyboardMa
             ),
         ],
     ]
+    # Copy-to-clipboard: share link
+    if share_url:
+        rows[2].append(
+            InlineKeyboardButton(
+                text="\U0001f4cb \u0421\u0441\u044b\u043b\u043a\u0430",
+                copy_text=CopyTextButton(text=share_url),
+            )
+        )
     # E-03: Share button
     if share_query:
         rows[1].append(
             InlineKeyboardButton(
-                text="\ud83d\udce4",
+                text="\U0001f4e8",
                 switch_inline_query=share_query[:64],
             )
         )
@@ -1760,25 +1784,32 @@ async def handle_lyrics(callback: CallbackQuery, callback_data: LyricsCb) -> Non
 
     lines = lyrics_data["lines"]
     url = lyrics_data.get("url", "")
-    footer = f"<a href=\"{url}\">{t(lang, 'lyrics_full_link')}</a>" if url else ""
-    chunks = _split_long_text_lines(
-        header=f"📝 <b>{artist} — {title}</b>",
-        lines=lines,
-        footer=footer,
-        max_len=3900,
-    )
+    footer = f"\n<a href=\"{url}\">{t(lang, 'lyrics_full_link')}</a>" if url else ""
+
+    # Build lyrics with expandable blockquote
+    lyrics_text = "\n".join(lines)
+    # Trim to fit Telegram message limit (4096 chars)
+    max_lyrics = 3600
+    if len(lyrics_text) > max_lyrics:
+        lyrics_text = lyrics_text[:max_lyrics] + "\n…"
+    header = f"\U0001f3b5 <b>{artist} — {title}</b>\n\n"
+    body = f"<blockquote expandable>{lyrics_text}</blockquote>"
+    text = header + body + footer
 
     translate_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🌐 Перевод", callback_data=LyrTransCb(tid=callback_data.tid).pack()),
+        InlineKeyboardButton(text="\U0001f30d Перевод", callback_data=LyrTransCb(tid=callback_data.tid).pack()),
+        InlineKeyboardButton(
+            text="\U0001f4cb Копировать",
+            copy_text=CopyTextButton(text=f"{artist} — {title}\n\n{lyrics_text}"[:256]),
+        ),
     ]])
 
-    for index, chunk in enumerate(chunks):
-        await callback.message.answer(
-            chunk,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=translate_kb if index == 0 else None,
-        )
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=translate_kb,
+    )
 
 
 @router.callback_query(LyrTransCb.filter())
