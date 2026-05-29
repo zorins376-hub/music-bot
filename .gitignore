@@ -20,3 +20,5 @@ deploy/.env*
 !deploy/.env*.example
 node_modules/
 webapp/frontend/node_modules/
+.zencoder/
+.zenflow/
