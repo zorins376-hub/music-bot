@@ -7,6 +7,7 @@ the token is missing / invalid.
 import asyncio
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -26,6 +27,17 @@ _vk_pool = ThreadPoolExecutor(
 )
 _vk_session: object = None  # cached vk_api.VkApi session for direct API calls
 _vk_audio: object = None   # cached VkAudio instance
+
+# Auto-disable: a blocked/invalid VK account makes vk_api hang and the web
+# fallback scrape retry, freezing the search for tens of seconds while returning
+# nothing. On an auth/blocked error we disable VK for a cooldown and return []
+# instantly (mirrors the Spotify provider), so a dead VK never slows search.
+_vk_disabled_until: float = 0.0
+_VK_COOLDOWN = 3600  # seconds
+_VK_AUTH_ERROR_MARKERS = (
+    "authorization failed", "user is blocked", "user was deactivated",
+    "access denied", "invalid access_token", "access_token has expired", "[5]",
+)
 
 
 def _get_vk_session():
@@ -205,11 +217,18 @@ def _search_vk_web_sync(query: str, limit: int) -> list[dict]:
 
 
 def _search_vk_sync(query: str, limit: int) -> list[dict]:
+    global _vk_disabled_until
     try:
         results = _format_vk_results(_search_vk_api_sync(query, limit), limit)
         if results:
             return results
     except Exception as e:
+        # A blocked/invalid token: disable VK and skip the slow web fallback
+        # (which would scrape-retry and hang the executor pool).
+        if any(m in str(e).lower() for m in _VK_AUTH_ERROR_MARKERS):
+            _vk_disabled_until = time.monotonic() + _VK_COOLDOWN
+            logger.warning("VK disabled for %ss (auth/blocked): %s", _VK_COOLDOWN, e)
+            return []
         logger.debug("VK direct API search failed, falling back to web search: %s", e)
 
     try:
@@ -220,8 +239,9 @@ def _search_vk_sync(query: str, limit: int) -> list[dict]:
 
 
 async def search_vk(query: str, limit: int = 5) -> list[dict]:
-    """Search VK Music. Returns [] if VK_TOKEN not configured or on any error."""
-    if not settings.VK_TOKEN:
+    """Search VK Music. Returns [] if VK_TOKEN not configured, VK is on an
+    auth-error cooldown, or on any error."""
+    if not settings.VK_TOKEN or time.monotonic() < _vk_disabled_until:
         return []
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_vk_pool, _search_vk_sync, query, limit)
