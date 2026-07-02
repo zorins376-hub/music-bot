@@ -2488,14 +2488,14 @@ export function App() {
             letterSpacing: 4,
             color: "#ffd54f",
             textShadow: "0 0 20px rgba(255, 167, 38, 0.3)",
-          }}>𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀  𝐌 𝐔 𝐒 𝐈 𝐂</div>
+          }}>TEQUILA MUSIC</div>
           <div style={{
             fontSize: 9,
             color: "#c8a882",
             marginTop: 3,
             letterSpacing: 2,
             textTransform: "uppercase",
-          }}>inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘.</div>
+          }}>inspired by Tequila Sunshine.</div>
         </div>
       )}
 

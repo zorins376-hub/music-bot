@@ -41,8 +41,8 @@ export const themes: Theme[] = [
   },
   {
     id: "tequila",
-    name: "𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀",
-    subtitle: "inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘.",
+    name: "Tequila",
+    subtitle: "inspired by Tequila Sunshine.",
     bgColor: "#1a120b",
     secondaryBg: "rgba(40, 25, 15, 0.75)",
     textColor: "#fef0e0",

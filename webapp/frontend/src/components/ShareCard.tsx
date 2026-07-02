@@ -152,12 +152,12 @@ export const ShareCard = memo(function ShareCard({ track, onClose, accentColor =
     // Branding
     ctx.fillStyle = isTequila ? "rgba(255,213,79,0.72)" : "rgba(255,255,255,0.5)";
     ctx.font = "bold 36px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(isTequila ? "𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀  𝐌 𝐔 𝐒 𝐈 𝐂" : "BLACK ROOM", canvas.width / 2, 1700);
+    ctx.fillText(isTequila ? "TEQUILA MUSIC" : "BLACK ROOM", canvas.width / 2, 1700);
 
     if (isTequila) {
       ctx.fillStyle = "rgba(200,168,130,0.92)";
       ctx.font = "28px -apple-system, BlinkMacSystemFont, sans-serif";
-      ctx.fillText("inspired by 𝗧𝗘𝗤𝗨𝗜𝗟𝗔 𝗦𝗨𝗡𝗦𝗛𝗜𝗡𝗘.", canvas.width / 2, 1752);
+      ctx.fillText("inspired by Tequila Sunshine.", canvas.width / 2, 1752);
     }
 
     // Swipe up hint
