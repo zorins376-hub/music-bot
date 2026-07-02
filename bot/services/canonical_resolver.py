@@ -21,10 +21,16 @@ import logging
 import re
 import urllib.parse
 
+from bot.config import settings
 from bot.services.cache import cache
 from bot.services.http_session import get_session
 
 logger = logging.getLogger(__name__)
+
+# Genius's Cloudflare blocks common browser UAs from datacenter IPs; an unusual
+# UA passes. The API token still authorizes the request.
+_GENIUS_UA = "CompuServe Classic/1.22"
+_GENIUS_CACHE_PREFIX = "lyricsong:"
 
 _CACHE_TTL = 7 * 24 * 3600  # 7 days
 _CACHE_PREFIX = "canon:"
@@ -135,3 +141,84 @@ def canonical_match_index(results: list[dict], canon: str) -> int | None:
                 best_i, best_score = i, score
     # only promote on a strong (artist+title) match
     return best_i if best_score >= 100 else None
+
+
+async def resolve_lyric_song(query: str) -> tuple[str, str] | None:
+    """Resolve a lyric fragment ("words from a song") to (artist, title) via the
+    Genius API. Returns None when no token is configured, on error, or no hit.
+    Cached 7d. The title is the reliable signal; the artist may be a cover, so
+    callers should also search the title alone and boost by title.
+    """
+    token = (settings.GENIUS_ACCESS_TOKEN or "").strip()
+    if not token:
+        return None
+    q = _norm(query)
+    if not q or len(q.split()) < 3:  # too short to be a distinctive lyric line
+        return None
+
+    cache_key = _GENIUS_CACHE_PREFIX + q
+    try:
+        cached = await cache.redis.get(cache_key)
+        if cached is not None:
+            if not cached:
+                return None
+            artist, _, title = cached.partition("\t")
+            return (artist, title) if title else None
+    except Exception:
+        logger.debug("lyric cache read failed", exc_info=True)
+
+    result: tuple[str, str] | None = None
+    try:
+        url = "https://api.genius.com/search?q=" + urllib.parse.quote(query)
+        headers = {"Authorization": "Bearer " + token, "User-Agent": _GENIUS_UA}
+        async with get_session().get(url, headers=headers, timeout=_TIMEOUT + 2) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                hits = data.get("response", {}).get("hits", [])
+                for h in hits:
+                    r = h.get("result", {})
+                    artist = (r.get("primary_artist") or {}).get("name")
+                    title = r.get("title")
+                    if artist and title:
+                        # Genius appends "(English translation)" to non-English
+                        # titles — strip it so it doesn't pollute the search query.
+                        title = re.sub(r"\s*[\(\[].*$", "", title).strip() or title
+                        result = (artist, title)
+                        break
+            else:
+                logger.debug("genius search status %s", resp.status)
+    except Exception:
+        logger.debug("genius lyric resolve failed for %r", query, exc_info=True)
+
+    try:
+        await cache.redis.set(
+            cache_key, f"{result[0]}\t{result[1]}" if result else "", ex=_CACHE_TTL
+        )
+    except Exception:
+        logger.debug("lyric cache write failed", exc_info=True)
+
+    return result
+
+
+def title_match_index(results: list[dict], title: str) -> int | None:
+    """Index of the result whose title best matches `title` (title-only, for
+    lyric resolution where the artist may be a cover). Returns None if no result
+    has a clearly-matching title.
+    """
+    tn = _norm(title)
+    if not tn:
+        return None
+    best_i, best_score = None, 0
+    for i, t in enumerate(results):
+        rt = _norm(t.get("title") or "")
+        if not rt:
+            continue
+        if rt == tn:
+            score = 3
+        elif tn in rt or rt in tn:
+            score = 2
+        else:
+            continue
+        if score > best_score:
+            best_i, best_score = i, score
+    return best_i

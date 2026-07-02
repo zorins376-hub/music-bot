@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     SPOTIFY_CLIENT_ID: Optional[str] = None
     SPOTIFY_CLIENT_SECRET: Optional[str] = None
 
+    # ── Genius (lyric-fragment search: "words from a song" -> track) ──────
+    GENIUS_ACCESS_TOKEN: str = ""
+
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
     YANDEX_TOKENS: Optional[str] = None  # пул токенов через запятую (ротация)

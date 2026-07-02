@@ -877,6 +877,26 @@ async def _do_search(message: Message, query: str) -> None:
         except Exception:
             logger.debug("canonical yandex search failed for %r", canonical_query, exc_info=True)
 
+    # Lyric fragment ("words from a song") -> resolve the song via Genius, then
+    # search providers for it so the pool holds the intended track (raw providers
+    # can't match a lyric line to a title). Only for lyric-like queries with a
+    # Genius token; the resolved title is boosted after dedup. Fails soft.
+    lyric_song: tuple[str, str] | None = None
+    if len(provider_query.split()) >= 4 and settings.GENIUS_ACCESS_TOKEN:
+        try:
+            from bot.services.canonical_resolver import resolve_lyric_song
+            lyric_song = await resolve_lyric_song(provider_query)
+        except Exception:
+            lyric_song = None
+        if lyric_song:
+            _lartist, _ltitle = lyric_song
+            for _lq in (f"{_lartist} {_ltitle}", _ltitle):
+                try:
+                    _lb = await asyncio.wait_for(search_yandex(_lq, limit=max_results), timeout=8)
+                    all_results.extend(_lb)
+                except Exception:
+                    logger.debug("lyric-resolved yandex search failed", exc_info=True)
+
     # A-05: If few results and query is mono-language, try transliterated search
     if len(all_results) < 3:
         script = detect_script(provider_query)
@@ -1052,6 +1072,23 @@ async def _do_search(message: Message, query: str) -> None:
                 results.insert(0, results.pop(_bi))
         except Exception:
             logger.debug("canonical boost failed", exc_info=True)
+
+    # Promote the Genius-resolved song (by title) for a lyric-fragment query, so
+    # "words from a song" lands on the track. Title-only match (artist may be a
+    # cover). Only fires when a lyric song was resolved.
+    if lyric_song and results:
+        try:
+            from bot.services.canonical_resolver import canonical_match_index, title_match_index
+            _la, _lt = lyric_song
+            # Prefer an artist+title match (Genius artist correct, e.g. Звери);
+            # fall back to title-only (Genius gave a cover artist, e.g. IOWA).
+            _li = canonical_match_index(results, f"{_la} {_lt}")
+            if _li is None:
+                _li = title_match_index(results, _lt)
+            if _li is not None and _li > 0:
+                results.insert(0, results.pop(_li))
+        except Exception:
+            logger.debug("lyric boost failed", exc_info=True)
 
     # DMCA filter: remove blocked tracks, show appeal button if any were blocked
     blocked_count = 0
