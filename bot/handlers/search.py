@@ -603,6 +603,20 @@ def _group_relevance_rank(
         (r, _group_pick_score(r, provider_query=provider_query, parsed_query=parsed_query, source_rank=source_rank))
         for r in results
     ]
+    # If the query names an artist (a candidate's full multi-word artist name appears
+    # in the query), keep ONLY that artist's tracks — the user explicitly asked for
+    # that artist, so a same-titled track by someone else must never win (e.g.
+    # "Клава кока душный" must return Клава Кока, never another artist's "Душный").
+    # If that artist has no title match, their top track wins.
+    _pq_tok = set(normalize_query(provider_query).split())
+
+    def _artist_named(t: dict) -> bool:
+        _at = [x for x in normalize_query(t.get("uploader", "")).split() if len(x) >= 3]
+        return len(_at) >= 2 and all(x in _pq_tok for x in _at)
+
+    _artist_only = [item for item in ranked if _artist_named(item[0])]
+    if _artist_only:
+        ranked = _artist_only
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked
 
