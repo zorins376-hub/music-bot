@@ -1574,6 +1574,18 @@ async def _group_auto_play(
             except Exception:
                 pass
         _wt_kb = _wrong_track_keyboard(alt_sid, _num_alts) if _num_alts > 0 else None
+        # Curated pins / some results carry no duration -> caption showed "?:??".
+        # Read it from the downloaded file so the caption matches the audio bubble.
+        if not track_info.get("duration_fmt") and mp3_path:
+            try:
+                from mutagen import File as _MutFile
+                _mf = _MutFile(str(mp3_path))
+                if _mf and _mf.info and getattr(_mf.info, "length", 0):
+                    _sec = int(_mf.info.length)
+                    track_info["duration"] = _sec
+                    track_info["duration_fmt"] = _fmt_duration(_sec)
+            except Exception:
+                logger.debug("duration read failed for %s", mp3_path, exc_info=True)
         sent = await message.answer_audio(
             audio=FSInputFile(mp3_path),
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
