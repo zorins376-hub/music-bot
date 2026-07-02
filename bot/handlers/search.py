@@ -521,7 +521,17 @@ def _group_pick_score(
     if track.get("file_id"):
         rel += min(0.18, 0.05 + track.get("_downloads", 0) / 250)
     rel += source_rank.get(track.get("source", ""), 0) * 0.01
-    if parsed_query.get("artist_hint") and parsed_query.get("title_hint"):
+    # Named-artist match: if the result's (multi-word) artist name appears in full
+    # in the query, the user explicitly named that artist — that dominates. This
+    # also shields such results from the title-hint penalty below, which mishandles
+    # multi-word artist names (e.g. "Клава Кока" mis-parsed as artist="клава", which
+    # wrongly crushed "Клава Кока — ЛА ЛА ЛА" while promoting a same-titled "Душный"
+    # by a different artist).
+    _a_tokens = [t for t in normalize_query(track.get("uploader", "")).split() if len(t) >= 3]
+    _strong_artist = len(_a_tokens) >= 2 and all(t in pq_norm.split() for t in _a_tokens)
+    if _strong_artist:
+        rel += 2.0
+    if not _strong_artist and parsed_query.get("artist_hint") and parsed_query.get("title_hint"):
         tc = query_title_hint_coverage(pq_norm, track.get("title", ""), parsed_query)
         if tc >= 0.5:
             rel += 0.75 + tc * 0.45
