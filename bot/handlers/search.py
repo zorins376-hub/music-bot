@@ -239,29 +239,36 @@ def _audio_tags(track_info: dict) -> tuple[str, str]:
     return kw["performer"], kw["title"]
 
 
+# Bot @username, cached lazily (see _do_search) so the delivered-track caption can
+# link back to the bot for discovery from group chats.
+_BOT_USERNAME: str = ""
+
+
 def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool = False) -> str:
     """Premium track card caption.
 
-    line1  ♪ <b>Artist — Title</b>
+    The audio bubble already shows the performer — title from the file tags, so the
+    caption does NOT repeat them. Instead the top line is the bot's name (a link to
+    the bot), above the duration/bitrate:
+
+    line1  ◇ BLACK ROOM            (links to the bot)
     line2  <code>3:42 · 192 kbps · 2019</code>
-    line3  ◇ BLACK ROOM   (only for non ad-free users)
     """
     from bot.services.track_flair import track_extra_caption_lines
 
     dur = track_info.get("duration_fmt") or "?:??"
     year = track_info.get("upload_year")
     year_str = f" · {year}" if year else ""
-    artist, title = _audio_tags(track_info)
-    header = f"♪ <b>{html.escape(artist)} — {html.escape(title)}</b>"
+    brand = t(lang, "track_brand_line")
+    if _BOT_USERNAME:
+        brand = f'<a href="https://t.me/{_BOT_USERNAME}">{brand}</a>'
     base = t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
-    body = f"{header}\n{base}"
+    body = f"{brand}\n{base}"
     # Rare per-track dedication flair (already carries the BLACK ROOM mark).
     extra = track_extra_caption_lines(lang, track_info)
     if extra:
         return f"{body}\n{extra}"
-    if ad_free:
-        return body
-    return f"{body}\n{t(lang, 'track_brand_line')}"
+    return body
 
 
 def _is_ad_free(user) -> bool:
@@ -651,6 +658,13 @@ async def _do_search(message: Message, query: str) -> None:
 
     if user.is_banned:
         return
+
+    global _BOT_USERNAME
+    if not _BOT_USERNAME:
+        try:
+            _BOT_USERNAME = (await message.bot.me()).username or ""
+        except Exception:
+            pass
 
     is_group = message.chat.type in ("group", "supergroup")
     # Groups: only Yandex/Spotify links and text search — no YouTube URLs
