@@ -92,8 +92,11 @@ class Settings(BaseSettings):
     # ── Cache TTL ─────────────────────────────────────────────────────────
     CACHE_FILE_ID_TTL: int = 30 * 24 * 3600   # 30 дней
     SEARCH_SESSION_TTL: int = 300              # 5 минут
-    QCACHE_TTL: int = 24 * 3600               # provider-search result cache (was 120s)
-    RCACHE_TTL: int = 12 * 3600               # final ranked-result cache per query
+    # Search caches are long-lived; Redis maxmemory + volatile-lru is the real
+    # governor (evicts least-recently-used cache keys when the size cap is hit),
+    # so these TTLs are just a freshness ceiling, not the primary eviction driver.
+    QCACHE_TTL: int = 7 * 24 * 3600           # provider-search result cache (7d)
+    RCACHE_TTL: int = 7 * 24 * 3600           # final ranked-result cache per query (7d)
 
     # ── Paths ─────────────────────────────────────────────────────────────
     DOWNLOAD_DIR: Path = _BASE / "downloads"

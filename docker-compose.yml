@@ -167,7 +167,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 512mb
+      --maxmemory 1gb
       --maxmemory-policy volatile-lru
       --appendonly yes
       --appendfsync everysec
