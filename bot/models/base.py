@@ -106,6 +106,7 @@ async def init_db(retries: int = 5, delay: float = 5.0) -> None:
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avg_bpm INTEGER",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded BOOLEAN DEFAULT false",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS ad_free_until TIMESTAMPTZ",
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_source VARCHAR(20)",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS flac_credits INTEGER DEFAULT 0",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT",
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER DEFAULT 0",

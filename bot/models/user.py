@@ -16,6 +16,9 @@ class User(Base):
     quality: Mapped[str] = mapped_column(String(10), default="192")
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
     premium_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Where the current premium came from: family | purchase | promo | trial | referral | None.
+    # Used so leaving/being kicked from a family only revokes family-granted premium.
+    premium_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
     blocked_bot: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

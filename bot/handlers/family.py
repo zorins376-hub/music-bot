@@ -306,7 +306,7 @@ async def _join_family_by_code(message: Message, user: User, code: str) -> None:
         if family.is_premium:
             await session.execute(
                 update(User).where(User.id == user.id)
-                .values(is_premium=True, premium_until=family.premium_until)
+                .values(is_premium=True, premium_until=family.premium_until, premium_source="family")
             )
         
         await session.commit()
@@ -335,10 +335,11 @@ async def handle_family_leave(callback: CallbackQuery) -> None:
         await session.execute(
             delete(FamilyMember).where(FamilyMember.user_id == user.id)
         )
-        # Revoke premium if it came from family
+        # Revoke premium ONLY if it came from the family — never wipe a
+        # personally purchased/promo subscription (premium_source != "family").
         await session.execute(
-            update(User).where(User.id == user.id)
-            .values(is_premium=False, premium_until=None)
+            update(User).where(User.id == user.id, User.premium_source == "family")
+            .values(is_premium=False, premium_until=None, premium_source=None)
         )
         await session.commit()
     
@@ -429,8 +430,8 @@ async def handle_family_kick(callback: CallbackQuery) -> None:
             delete(FamilyMember).where(FamilyMember.user_id == target_id)
         )
         await session.execute(
-            update(User).where(User.id == target_id)
-            .values(is_premium=False, premium_until=None)
+            update(User).where(User.id == target_id, User.premium_source == "family")
+            .values(is_premium=False, premium_until=None, premium_source=None)
         )
         await session.commit()
     
@@ -564,7 +565,7 @@ async def handle_family_payment(message: Message) -> None:
             await session.execute(
                 update(User)
                 .where(User.id == member.user_id)
-                .values(is_premium=True, premium_until=premium_until)
+                .values(is_premium=True, premium_until=premium_until, premium_source="family")
             )
         
         # Record payment

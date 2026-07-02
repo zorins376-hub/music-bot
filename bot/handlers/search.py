@@ -767,7 +767,7 @@ async def _do_search(message: Message, query: str) -> None:
             if cached is not None:
                 # Cache hit — do NOT record a provider success event (no real call made)
                 return cached
-            res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=12)
+            res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=8)
             elapsed = time.monotonic() - t0
             record_provider_event(source, "search", elapsed, True)
             if res:
