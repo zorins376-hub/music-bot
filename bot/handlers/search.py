@@ -997,11 +997,25 @@ async def _do_search(message: Message, query: str) -> None:
         provider_query, top_track, parsed=parsed_query
     ) or (is_group and lyric_like and not _has_artist_title)
 
+    # An artist-named query (e.g. "Клава Кока душный") is NOT a lyric fragment: if
+    # any top result's full multi-word artist appears in the query, skip the lyric
+    # boost — it wrongly injects same-titled wrong-artist tracks (the "Душный" bug)
+    # and calls the slow lyric providers (a stuck one froze search ~24s).
+    if _run_lyrics_boost and results:
+        _pq_tok = set(normalize_query(provider_query).split())
+        for _r in results[:5]:
+            _at = [t for t in normalize_query(_r.get("uploader", "")).split() if len(t) >= 3]
+            if len(_at) >= 2 and all(t in _pq_tok for t in _at):
+                _run_lyrics_boost = False
+                break
+
     if _run_lyrics_boost:
         if not lyric_hints:
             try:
                 from bot.services.lyrics_provider import search_by_lyrics
-                lyric_hints = await search_by_lyrics(provider_query, limit=3)
+                lyric_hints = await asyncio.wait_for(
+                    search_by_lyrics(provider_query, limit=3), timeout=6
+                )
             except Exception:
                 lyric_hints = []
 
