@@ -858,6 +858,25 @@ async def _do_search(message: Message, query: str) -> None:
         )
         all_results.extend(alias_batch)
 
+    # Query understanding: when iTunes AND Deezer independently agree on the same
+    # "Artist - Title", we have a confident canonical for a vague/misspelled query
+    # (e.g. "мокрые кросы" -> "Тима Белорусских - Мокрые кроссы"). Search Yandex for
+    # it so the intended track is in the pool; a post-dedup boost then promotes it.
+    # No cross-source agreement -> canon is None -> search is left untouched (so this
+    # can only help, never regress). Cheap: cached resolve + one fast Yandex call.
+    canonical_query: str | None = None
+    try:
+        from bot.services.canonical_resolver import resolve_canonical
+        canonical_query = await resolve_canonical(provider_query)
+    except Exception:
+        canonical_query = None
+    if canonical_query and normalize_query(canonical_query) != normalize_query(provider_query):
+        try:
+            canon_batch = await asyncio.wait_for(search_yandex(canonical_query, limit=max_results), timeout=8)
+            all_results.extend(canon_batch)
+        except Exception:
+            logger.debug("canonical yandex search failed for %r", canonical_query, exc_info=True)
+
     # A-05: If few results and query is mono-language, try transliterated search
     if len(all_results) < 3:
         script = detect_script(provider_query)
@@ -1020,6 +1039,19 @@ async def _do_search(message: Message, query: str) -> None:
     if extra_tracks:
         all_results.extend(extra_tracks)
         results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results]
+
+    # Promote the confident canonical track to #1 when it is present in the results,
+    # so a vague/misspelled query lands on the intended song. Only fires when iTunes
+    # and Deezer agreed (canonical_query set) AND a result matches it by artist+title;
+    # otherwise ranking is left exactly as-is (no regression).
+    if canonical_query and results:
+        try:
+            from bot.services.canonical_resolver import canonical_match_index
+            _bi = canonical_match_index(results, canonical_query)
+            if _bi is not None and _bi > 0:
+                results.insert(0, results.pop(_bi))
+        except Exception:
+            logger.debug("canonical boost failed", exc_info=True)
 
     # DMCA filter: remove blocked tracks, show appeal button if any were blocked
     blocked_count = 0
