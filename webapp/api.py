@@ -465,9 +465,11 @@ async def debug_auth(
     request: Request,
     x_telegram_init_data: str | None = Header(None),
 ):
+    if not settings.WEBAPP_DEBUG_AUTH:
+        raise HTTPException(status_code=404, detail="Not found")
     auth_user = verify_init_data(x_telegram_init_data) if x_telegram_init_data else None
     init_keys = sorted(payload.initDataUnsafe.keys()) if isinstance(payload.initDataUnsafe, dict) else []
-    logger.warning(
+    logger.debug(
         "[TMA_DEBUG] auth_ok=%s user_id=%s telegram=%s webapp=%s init_len=%s hash=%s tg_ua=%s init_keys=%s origin=%s referer=%s request_ua=%s page_url=%s",
         bool(auth_user),
         auth_user.get("id") if auth_user else None,

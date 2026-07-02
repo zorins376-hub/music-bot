@@ -1,24 +1,39 @@
-import paramiko
-ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect('89.169.52.174', username='root', password='YjfWW9v6j2m5', timeout=30)
+"""Check remote Postgres health via SSH."""
+import sys
+from pathlib import Path
 
-# Check DB connections
-cmd = 'cd /opt/music-bot && docker compose exec -T postgres psql -U postgres -d musicbot -c "SELECT count(*) FROM pg_stat_activity;"'
-stdin, stdout, stderr = ssh.exec_command(cmd, timeout=30)
-print('DB Connections:')
-print(stdout.read().decode())
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ssh_common import connect_ssh
 
-# Check max_connections
-cmd2 = 'cd /opt/music-bot && docker compose exec -T postgres psql -U postgres -c "SHOW max_connections;"'
-stdin, stdout, stderr = ssh.exec_command(cmd2, timeout=30)
-print('Max connections:')
-print(stdout.read().decode())
+PROJECT_DIR = __import__("os").environ.get("DEPLOY_PROJECT_DIR", "/opt/music-bot").strip()
 
-# Check if YANDEX_TOKEN exists
-cmd3 = 'grep YANDEX_TOKEN /opt/music-bot/.env || echo "NOT SET"'
-stdin, stdout, stderr = ssh.exec_command(cmd3, timeout=30)
-print('YANDEX_TOKEN:')
-print(stdout.read().decode())
 
-ssh.close()
+def main():
+    ssh = connect_ssh(timeout=30)
+
+    cmd = (
+        f"cd {PROJECT_DIR} && docker compose exec -T postgres psql -U postgres -d musicbot "
+        '-c "SELECT count(*) FROM pg_stat_activity;"'
+    )
+    _, stdout, stderr = ssh.exec_command(cmd, timeout=30)
+    print("DB Connections:")
+    print(stdout.read().decode())
+
+    cmd2 = (
+        f"cd {PROJECT_DIR} && docker compose exec -T postgres psql -U postgres "
+        '-c "SHOW max_connections;"'
+    )
+    _, stdout, stderr = ssh.exec_command(cmd2, timeout=30)
+    print("Max connections:")
+    print(stdout.read().decode())
+
+    cmd3 = f"grep YANDEX_TOKEN {PROJECT_DIR}/.env || echo \"NOT SET\""
+    _, stdout, stderr = ssh.exec_command(cmd3, timeout=30)
+    print("YANDEX_TOKEN:")
+    print(stdout.read().decode())
+
+    ssh.close()
+
+
+if __name__ == "__main__":
+    main()

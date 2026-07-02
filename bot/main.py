@@ -93,6 +93,13 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.downloader import log_runtime_info
     log_runtime_info()
 
+    from bot.services.downloader import set_ytdl_alert_loop
+    from bot.services.youtube_cookies import startup_cookie_check, start_cookie_health_scheduler
+    set_ytdl_alert_loop(asyncio.get_running_loop())
+    # YouTube health probe can take minutes when proxy is slow — must not block webhook bind.
+    _fire_task(startup_cookie_check())
+    _fire_task(start_cookie_health_scheduler())
+
     # Cleanup stale downloads from previous runs
     _cleanup_stale_downloads()
 
@@ -140,6 +147,10 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.weekly_recap import start_weekly_recap_scheduler
     await start_weekly_recap_scheduler(bot)
 
+    # Premium lifecycle: auto-expire + expiry reminders
+    from bot.services.premium_scheduler import start_premium_scheduler
+    await start_premium_scheduler(bot)
+
     # ML training scheduler (nightly at ML_RETRAIN_HOUR) — skip if Supabase AI handles it
     if not app_settings.SUPABASE_AI_ENABLED:
         from recommender.train import start_ml_training_scheduler
@@ -185,13 +196,7 @@ async def on_startup(bot: Bot) -> None:
     except Exception as e:
         logger.warning("Failed to set bot commands (non-fatal): %s", e)
 
-    if app_settings.USE_WEBHOOK:
-        await bot.set_webhook(
-            url=f"{app_settings.WEBHOOK_URL}{app_settings.WEBHOOK_PATH}",
-            secret_token=app_settings.WEBHOOK_SECRET,
-        )
-        logger.info("Webhook set: %s%s", app_settings.WEBHOOK_URL, app_settings.WEBHOOK_PATH)
-    else:
+    if not app_settings.USE_WEBHOOK:
         logger.info("Bot started in polling mode")
 
 
@@ -507,6 +512,11 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     site = web.TCPSite(runner, app_settings.WEB_SERVER_HOST, app_settings.WEB_SERVER_PORT)
     await site.start()
     logger.info("Listening on %s:%d", app_settings.WEB_SERVER_HOST, app_settings.WEB_SERVER_PORT)
+    await bot.set_webhook(
+        url=f"{app_settings.WEBHOOK_URL}{app_settings.WEBHOOK_PATH}",
+        secret_token=app_settings.WEBHOOK_SECRET,
+    )
+    logger.info("Webhook set: %s%s", app_settings.WEBHOOK_URL, app_settings.WEBHOOK_PATH)
     await asyncio.Event().wait()  # run forever
 
 
@@ -526,7 +536,11 @@ async def main() -> None:
     dp = build_dispatcher()
 
     if app_settings.USE_WEBHOOK:
-        await _run_webhook(bot, dp)
+        tma_task = asyncio.create_task(_run_tma_server())
+        try:
+            await _run_webhook(bot, dp)
+        finally:
+            tma_task.cancel()
     else:
         # Always start TMA webapp alongside polling (serves frontend + API)
         tma_task = asyncio.create_task(_run_tma_server())
@@ -536,13 +550,21 @@ async def main() -> None:
             tma_task.cancel()
 
 
+def _tma_port() -> int:
+    if app_settings.TMA_PORT:
+        return app_settings.TMA_PORT
+    if app_settings.USE_WEBHOOK:
+        return 8082
+    return int(os.environ.get("PORT", "8080"))
+
+
 async def _run_tma_server() -> None:
     """Run TMA Player FastAPI server alongside the bot."""
     try:
         import uvicorn
         from webapp.api import app as tma_app
 
-        port = int(__import__("os").environ.get("PORT", "8080"))
+        port = _tma_port()
         config = uvicorn.Config(
             tma_app,
             host="0.0.0.0",

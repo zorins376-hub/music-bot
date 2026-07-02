@@ -1,12 +1,16 @@
 services:
   # ── Основной бот + TMA webapp (VPS-optimized) ──────────────────────────
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
     restart: unless-stopped
     env_file: .env
+    mem_limit: 1800m
     ports:
-      - "8080:8080"   # TMA webapp
-      - "9090:9090"   # Prometheus metrics
+      - "127.0.0.1:8080:8080"   # Webhook (USE_WEBHOOK) or TMA (polling)
+      - "127.0.0.1:8082:8082"   # TMA webapp when USE_WEBHOOK=true
+      - "127.0.0.1:9090:9090"   # Prometheus metrics
     volumes:
       - ./data:/app/data
       - ./downloads:/app/downloads
@@ -16,14 +20,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 3G
-        reservations:
-          memory: 512M
     healthcheck:
-      test: ["CMD", "python", "-c", "import redis, os; r = redis.Redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()"]
+      test: ["CMD", "python", "-c", "import os,urllib.request; p=os.environ.get('TMA_PORT','8082'); urllib.request.urlopen(f'http://127.0.0.1:{p}/readyz', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -133,10 +131,19 @@ services:
   bgutil-provider:
     image: brainicism/bgutil-ytdlp-pot-provider:1.3.1-deno
     restart: unless-stopped
+    environment:
+      NO_PROXY: 127.0.0.1,localhost,::1
+      no_proxy: 127.0.0.1,localhost,::1
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "deno", "eval", "fetch('http://127.0.0.1:4416/ping').then(r=>Deno.exit(r.ok?0:1)).catch(()=>Deno.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   # ── Redis (VPS-optimized) ─────────────────────────────────────────────────
   redis:
@@ -144,7 +151,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 1024mb
+      --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --appendonly yes
       --appendfsync everysec
@@ -168,11 +175,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     command: >
       postgres
-      -c shared_buffers=1GB
-      -c effective_cache_size=3GB
+      -c shared_buffers=256MB
+      -c effective_cache_size=1536MB
       -c maintenance_work_mem=128MB
       -c work_mem=16MB
-      -c max_connections=100
+      -c max_connections=50
       -c wal_buffers=16MB
       -c checkpoint_completion_target=0.9
       -c random_page_cost=1.1

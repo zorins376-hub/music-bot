@@ -312,6 +312,7 @@ async def index_spotify_popular() -> int:
         from bot.services.spotify_provider import _get_client
     except ImportError:
         return 0
+    logging.getLogger("spotipy.client").setLevel(logging.CRITICAL)
 
     total = 0
     loop = asyncio.get_event_loop()
@@ -401,6 +402,15 @@ async def index_spotify_popular() -> int:
                 "language": lang,
             }
 
+        def _spotify_auth_failed(exc: Exception) -> bool:
+            msg = str(exc).lower()
+            return (
+                " 401 " in msg
+                or " 403 " in msg
+                or "forbidden" in msg
+                or "valid user authentication required" in msg
+            )
+
         # 1. New releases (full album metadata — label, year, genre)
         try:
             releases = sp.new_releases(limit=50)
@@ -419,7 +429,10 @@ async def index_spotify_popular() -> int:
                             tracks.append(entry)
                 except Exception:
                     continue
-        except Exception:
+        except Exception as e:
+            if _spotify_auth_failed(e):
+                logger.warning("Spotify indexing disabled this cycle: API auth/permission error")
+                return []
             logger.debug("spotify new releases crawl failed", exc_info=True)
 
         # 2. Featured playlists (popular tracks with full metadata)
@@ -441,7 +454,9 @@ async def index_spotify_popular() -> int:
                             tracks.append(entry)
                 except Exception:
                     continue
-        except Exception:
+        except Exception as e:
+            if _spotify_auth_failed(e):
+                return tracks
             logger.debug("spotify featured playlists crawl failed", exc_info=True)
 
         # 3. Top 50 playlists (global & Russia)

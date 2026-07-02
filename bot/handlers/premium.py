@@ -63,12 +63,17 @@ async def handle_premium(callback: CallbackQuery) -> None:
     user = await get_or_create_user(callback.from_user)
     lang = user.language
 
+    promo_btn = InlineKeyboardButton(
+        text=t(lang, "promo_btn"),
+        callback_data="premium:promo",
+    )
+
     if user.is_premium:
         until = ""
         if user.premium_until:
             until = user.premium_until.strftime("%d.%m.%Y")
         text = t(lang, "premium_active", until=until)
-        keyboard = None
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[promo_btn]])
     else:
         text = t(lang, "premium_info")
         keyboard = InlineKeyboardMarkup(
@@ -105,6 +110,7 @@ async def handle_premium(callback: CallbackQuery) -> None:
                     text=t(lang, "gift_premium_btn"),
                     callback_data="premium:gift",
                 )],
+                [promo_btn],
             ]
         )
 
@@ -402,14 +408,45 @@ async def handle_gift_target(message: Message, state: FSMContext) -> None:
 
 # ── Promo Code ───────────────────────────────────────────────────────────
 
+class PromoState(StatesGroup):
+    waiting_code = State()
+
+
+@router.callback_query(lambda c: c.data == "premium:promo")
+async def handle_promo_btn(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    user = await get_or_create_user(callback.from_user)
+    await state.set_state(PromoState.waiting_code)
+    await callback.message.answer(t(user.language, "promo_prompt"), parse_mode="HTML")
+
+
+@router.message(PromoState.waiting_code)
+async def handle_promo_input(message: Message, state: FSMContext) -> None:
+    user = await get_or_create_user(message.from_user)
+    lang = user.language
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer(t(lang, "promo_prompt"), parse_mode="HTML")
+        return
+    await state.clear()
+    code = raw.split(maxsplit=1)[-1].strip().lstrip("/")
+    if code.lower().startswith("promo"):
+        code = code[5:].strip()
+    from bot.services.promo_service import activate_promo
+    success, msg_key = await activate_promo(code, user.id)
+    await message.answer(t(lang, msg_key), parse_mode="HTML")
+
+
 @router.message(Command("promo"))
-async def cmd_promo(message: Message) -> None:
+async def cmd_promo(message: Message, state: FSMContext) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer(t(lang, "promo_enter_code"), parse_mode="HTML")
+        await state.set_state(PromoState.waiting_code)
+        await message.answer(t(lang, "promo_prompt"), parse_mode="HTML")
         return
+    await state.clear()
     code = parts[1].strip()
     from bot.services.promo_service import activate_promo
     success, msg_key = await activate_promo(code, user.id)

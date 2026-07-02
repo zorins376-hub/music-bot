@@ -16,6 +16,25 @@ def make_premium_user(user_id: int = 500, is_premium: bool = False, premium_unti
 
 
 @pytest.mark.asyncio
+class TestHandlePromoButton:
+    async def test_promo_button_sets_waiting_state(self):
+        from bot.handlers.premium import handle_promo_btn, PromoState
+
+        user = make_premium_user(is_premium=False)
+        cb = AsyncMock()
+        cb.from_user = MagicMock(id=600)
+        cb.answer = AsyncMock()
+        cb.message.answer = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.premium.get_or_create_user", new_callable=AsyncMock, return_value=user):
+            await handle_promo_btn(cb, state)
+
+        state.set_state.assert_called_once_with(PromoState.waiting_code)
+        cb.message.answer.assert_called_once()
+
+
+@pytest.mark.asyncio
 class TestHandlePremium:
     async def test_shows_buy_button_for_regular_user(self):
         from bot.handlers.premium import handle_premium
@@ -49,8 +68,11 @@ class TestHandlePremium:
 
         cb.message.answer.assert_called_once()
         args, kwargs = cb.message.answer.call_args
-        # Нет кнопки покупки для уже premium
-        assert kwargs.get("reply_markup") is None
+        # У активного premium нет кнопок покупки, но есть кнопка промокода
+        kb = kwargs.get("reply_markup")
+        all_cb = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        assert "premium:promo" in all_cb
+        assert not any(cb and cb.startswith("premium:buy") for cb in all_cb)
 
 
 @pytest.mark.asyncio

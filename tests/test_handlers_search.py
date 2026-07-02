@@ -148,9 +148,22 @@ class TestFeedbackKeyboard:
     def test_keyboard_structure(self):
         from bot.handlers.search import _feedback_keyboard
         kb = _feedback_keyboard(42)
-        row = kb.inline_keyboard[0]
-        assert len(row) == 4  # like, dislike, add to playlist, add to queue
-        assert len(kb.inline_keyboard) == 3  # row2 = lyrics/fav/share, row3 = similar
+        vibe_row = kb.inline_keyboard[0]
+        more_row = kb.inline_keyboard[1]
+        assert len(vibe_row) == 5  # fire, sad, night, drive, love
+        assert len(more_row) == 1
+        assert "Ещё" in more_row[0].text
+        assert len(kb.inline_keyboard) == 2
+
+    def test_keyboard_expanded_structure(self):
+        from bot.handlers.search import _feedback_keyboard
+        kb = _feedback_keyboard(42, expanded=True)
+        vibe_row = kb.inline_keyboard[0]
+        action_row = kb.inline_keyboard[1]
+        assert len(vibe_row) == 5
+        assert len(action_row) == 4  # like, dislike, add to playlist, add to queue
+        assert len(kb.inline_keyboard) == 4
+        assert kb.inline_keyboard[-1][-1].text == "Скрыть"
 
 
 # ── cmd_search ───────────────────────────────────────────────────────────
@@ -341,21 +354,23 @@ class TestHandleText:
 
     @pytest.mark.asyncio
     @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
-    async def test_group_message_without_trigger_ignored(self, mock_do):
-        from bot.handlers.search import handle_text
-        msg = make_message("some song name", chat_type="group")
-        msg.text = "some song name"
-        await handle_text(msg)
-        mock_do.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
     async def test_group_message_with_trigger_prefix(self, mock_do):
         from bot.handlers.search import handle_text
         msg = make_message("включи Rammstein", chat_type="group")
         msg.text = "включи Rammstein"
+        msg.bot.me = AsyncMock(return_value=MagicMock(id=999, username="testbot"))
         await handle_text(msg)
         mock_do.assert_called_once_with(msg, "Rammstein")
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
+    async def test_group_message_without_trigger_ignored(self, mock_do):
+        from bot.handlers.search import handle_text
+        msg = make_message("some song name", chat_type="group")
+        msg.text = "some song name"
+        msg.bot.me = AsyncMock(return_value=MagicMock(id=999, username="testbot"))
+        await handle_text(msg)
+        mock_do.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
@@ -365,6 +380,58 @@ class TestHandleText:
         msg.text = "play Metallica"
         await handle_text(msg)
         mock_do.assert_called_once_with(msg, "Metallica")
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
+    async def test_group_reply_to_bot_triggers_search(self, mock_do):
+        from bot.handlers.search import handle_text
+        msg = make_message("кока лова", chat_type="supergroup")
+        msg.text = "кока лова"
+        bot_user = make_tg_user(999)
+        bot_user.id = 999
+        msg.reply_to_message = MagicMock()
+        msg.reply_to_message.from_user = bot_user
+        msg.bot.me = AsyncMock(return_value=MagicMock(id=999, username="testbot"))
+        await handle_text(msg)
+        mock_do.assert_called_once_with(msg, "кока лова")
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
+    async def test_group_at_mention_triggers_search(self, mock_do):
+        from aiogram.enums import MessageEntityType
+        from bot.handlers.search import handle_text
+        msg = make_message("@testbot кока лова", chat_type="group")
+        msg.text = "@testbot кока лова"
+        ent = MagicMock()
+        ent.type = MessageEntityType.MENTION
+        ent.offset = 0
+        ent.length = 8
+        msg.entities = [ent]
+        msg.bot.me = AsyncMock(return_value=MagicMock(id=999, username="testbot"))
+        await handle_text(msg)
+        mock_do.assert_called_once_with(msg, "кока лова")
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
+    async def test_group_youtube_link_ignored(self, mock_do):
+        from bot.handlers.search import handle_text
+        msg = make_message(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            chat_type="group",
+        )
+        msg.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        msg.bot.me = AsyncMock(return_value=MagicMock(id=999, username="testbot"))
+        await handle_text(msg)
+        mock_do.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.handlers.search.get_or_create_user", new_callable=AsyncMock)
+    async def test_group_youtube_url_do_search_silent(self, mock_goc):
+        from bot.handlers.search import _do_search
+        mock_goc.return_value = _make_user()
+        msg = make_message("yt", chat_type="group")
+        await _do_search(msg, "https://youtu.be/dQw4w9WgXcQ")
+        msg.answer.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("bot.handlers.search._do_search", new_callable=AsyncMock)
@@ -514,3 +581,129 @@ class TestGetBotSetting:
         mock_cache.redis.get = AsyncMock(return_value=None)
         result = await _get_bot_setting("max_results", "10")
         assert result == "10"
+
+
+class TestGroupPickScore:
+    def test_lyrics_hint_beats_wrong_cached(self):
+        from bot.handlers.search import _group_pick_score
+
+        query = "я теперь твоё воспоминанье"
+        parsed = {"artist_hint": None, "title_hint": None}
+        rank = {"yandex": 10, "youtube": 1}
+        wrong = {
+            "title": "Воспоминание",
+            "uploader": "NYUSHA",
+            "source": "yandex",
+            "_provider_pos": 0,
+            "file_id": "cached123",
+            "_downloads": 50,
+        }
+        resolved = {
+            "title": "Помню твоё тело",
+            "uploader": "Эллаи",
+            "source": "yandex",
+            "_provider_pos": 0,
+            "_score_query": "эллаи помню твоё тело",
+            "_hint_bonus": 2.45,
+            "_from_lyrics": True,
+        }
+        assert _group_pick_score(resolved, provider_query=query, parsed_query=parsed, source_rank=rank) > \
+            _group_pick_score(wrong, provider_query=query, parsed_query=parsed, source_rank=rank)
+
+    def test_group_choice_never_shown(self):
+        from bot.handlers.search import _group_choice_needed
+
+        assert _group_choice_needed([(object(), 0.1), (object(), 0.05)]) is False
+
+    def test_matrang_ruka_queue_excludes_krug(self):
+        from bot.handlers.search import _group_play_queue, _group_pick_score
+        from bot.services.search_engine import parse_query
+
+        q = "матранг рука"
+        parsed = parse_query(q)
+        rank = {"yandex": 10, "youtube": 1}
+        krug = {
+            "title": "Круг",
+            "uploader": "MATRANG",
+            "source": "channel",
+            "file_id": "cached",
+            "_downloads": 50,
+            "_provider_pos": 1,
+            "_from_parsed_hint": True,
+        }
+        ruka = {
+            "title": "Руки на руке",
+            "uploader": "MATRANG",
+            "source": "yandex",
+            "_provider_pos": 0,
+            "_from_parsed_hint": True,
+        }
+        queue = _group_play_queue(
+            [krug, ruka],
+            provider_query=q,
+            parsed_query=parsed,
+            source_rank=rank,
+        )
+        assert queue[0]["title"] == "Руки на руке"
+        assert all("круг" not in (t.get("title") or "").lower() for t in queue)
+        assert _group_pick_score(krug, provider_query=q, parsed_query=parsed, source_rank=rank) < \
+            _group_pick_score(ruka, provider_query=q, parsed_query=parsed, source_rank=rank)
+
+    def test_group_queue_skips_uncached_youtube_when_ym_available(self):
+        from bot.handlers.search import _group_play_queue
+        from bot.services.search_engine import parse_query
+
+        q = "104 приезжай"
+        parsed = parse_query(q)
+        ym = {
+            "title": "Приезжай",
+            "uploader": "104",
+            "source": "yandex",
+            "video_id": "ym1",
+            "ym_track_id": 1,
+            "_provider_pos": 1,
+        }
+        yt = {
+            "title": "Wrong",
+            "uploader": "104",
+            "source": "youtube",
+            "video_id": "ytdead",
+            "_provider_pos": 0,
+        }
+        queue = _group_play_queue(
+            [yt, ym],
+            provider_query=q,
+            parsed_query=parsed,
+            source_rank={"yandex": 10},
+        )
+        assert queue[0]["source"] == "yandex"
+        assert all(t.get("source") != "youtube" for t in queue)
+
+    def test_koka_lova_prefers_jax_over_klava(self):
+        from bot.handlers.search import _group_play_queue, _group_pick_score
+        from bot.services.search_engine import parse_query, deduplicate_results
+
+        q = "кока лова"
+        parsed = parse_query(q)
+        klava = {
+            "title": "ЛА ЛА ЛА",
+            "uploader": "Клава Кока, DFM",
+            "source": "yandex",
+            "video_id": "k1",
+            "_provider_pos": 0,
+        }
+        jax = {
+            "title": "Koka Lova",
+            "uploader": "Jax (02.14), Nel (02.14)",
+            "source": "yandex",
+            "video_id": "ym_114644167",
+            "ym_track_id": 114644167,
+            "_provider_pos": 1,
+        }
+        res = deduplicate_results([klava, jax], query=q, lang_hint="cyrillic")
+        queue = _group_play_queue(
+            res, provider_query=q, parsed_query=parsed, source_rank={"yandex": 10},
+        )
+        assert "koka" in (queue[0].get("title") or "").lower()
+        assert _group_pick_score(jax, provider_query=q, parsed_query=parsed, source_rank={"yandex": 10}) > \
+            _group_pick_score(klava, provider_query=q, parsed_query=parsed, source_rank={"yandex": 10})

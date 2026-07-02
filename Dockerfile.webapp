@@ -15,14 +15,14 @@ WORKDIR /app
 ENV DENO_VERSION=2.7.11
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl unzip \
-    && curl -fsSL -o /tmp/deno.zip \
+    && curl -fsSL -o /tmp/deno-x86_64-unknown-linux-gnu.zip \
     "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
-    && curl -fsSL -o /tmp/deno.zip.sha256sum \
+    && curl -fsSL -o /tmp/deno-x86_64-unknown-linux-gnu.zip.sha256sum \
     "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip.sha256sum" \
-    && cd /tmp && sha256sum -c deno.zip.sha256sum \
-    && unzip -o /tmp/deno.zip -d /usr/local/bin \
+    && cd /tmp && sha256sum -c deno-x86_64-unknown-linux-gnu.zip.sha256sum \
+    && unzip -o /tmp/deno-x86_64-unknown-linux-gnu.zip -d /usr/local/bin \
     && chmod +x /usr/local/bin/deno \
-    && rm /tmp/deno.zip /tmp/deno.zip.sha256sum \
+    && rm /tmp/deno-x86_64-unknown-linux-gnu.zip /tmp/deno-x86_64-unknown-linux-gnu.zip.sha256sum \
     && apt-get purge -y --auto-remove curl unzip \
     && rm -rf /var/lib/apt/lists/* \
     && deno --version
@@ -31,6 +31,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir fastapi uvicorn[standard]
 
+COPY alembic.ini .
+COPY migrations/ migrations/
 COPY bot/ bot/
 COPY recommender/ recommender/
 COPY mixer/ mixer/
@@ -39,7 +41,7 @@ COPY webapp/ webapp/
 # Copy built frontend to correct location (webapp/frontend/dist)
 COPY --from=frontend /build/dist webapp/frontend/dist
 
-EXPOSE 8080
+EXPOSE 8080 8082
 
 # Non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \

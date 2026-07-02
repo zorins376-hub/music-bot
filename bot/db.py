@@ -86,12 +86,15 @@ async def get_or_create_user_raw(
                 user = result.scalar_one_or_none()
 
                 if user is None:
+                    trial_days = 0 if admin else max(0, int(getattr(settings, "PREMIUM_TRIAL_DAYS", 0) or 0))
+                    trial_until = (now + timedelta(days=trial_days)) if trial_days > 0 else None
                     user = User(
                         id=user_id,
                         username=username,
                         first_name=first_name,
-                        is_premium=admin,
+                        is_premium=admin or trial_days > 0,
                         is_admin=admin,
+                        premium_until=trial_until,
                     )
                     session.add(user)
                     try:
@@ -103,6 +106,17 @@ async def get_or_create_user_raw(
                             raise
                         return user
                     await session.refresh(user)
+                    if trial_days > 0:
+                        try:
+                            from bot.services.cache import cache
+                            await cache.redis.set(
+                                f"premium:trial_granted:{user_id}",
+                                str(trial_days),
+                                ex=3600,
+                                nx=True,
+                            )
+                        except Exception:
+                            logger.debug("trial flag set failed for %s", user_id, exc_info=True)
                     # Mirror new user to Supabase
                     try:
                         from bot.services.supabase_mirror import mirror_user

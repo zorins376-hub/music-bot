@@ -9,7 +9,9 @@ Tracks found via Spotify are downloaded through Yandex Music or YouTube.
 import asyncio
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from bot.config import settings
 
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 _sp_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="spotify")
 
 _sp_client = None
+_sp_disabled_until = 0.0
+_SPOTIFY_AUTH_COOLDOWN_SEC = 3600
 
 _SPOTIFY_TRACK_RE = re.compile(
     r"https?://open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})"
@@ -29,6 +33,8 @@ _SPOTIFY_URL_RE = re.compile(
 
 def _get_client():
     global _sp_client
+    if _sp_disabled_until > time.time():
+        return None
     if _sp_client is not None:
         return _sp_client
     cid = settings.SPOTIFY_CLIENT_ID
@@ -38,13 +44,38 @@ def _get_client():
     try:
         import spotipy
         from spotipy.oauth2 import SpotifyClientCredentials
-        auth = SpotifyClientCredentials(client_id=cid, client_secret=secret)
+        # spotipy logs expected 401/403 API denials at ERROR before raising.
+        # We handle provider degradation ourselves and keep production logs clean.
+        logging.getLogger("spotipy.client").setLevel(logging.CRITICAL)
+        cache_dir = Path("/app/data") if Path("/app").exists() else Path("data")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        auth = SpotifyClientCredentials(
+            client_id=cid,
+            client_secret=secret,
+            cache_handler=spotipy.CacheFileHandler(cache_path=str(cache_dir / ".spotify_cache")),
+        )
         _sp_client = spotipy.Spotify(auth_manager=auth, requests_timeout=10)
         logger.info("Spotify provider initialised")
         return _sp_client
     except Exception as e:
         logger.error("Spotify init failed: %s", e)
         return None
+
+
+def _is_auth_or_forbidden_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return " 401 " in msg or " 403 " in msg or "forbidden" in msg or "valid user authentication required" in msg
+
+
+def _disable_temporarily(reason: Exception) -> None:
+    global _sp_client, _sp_disabled_until
+    _sp_client = None
+    _sp_disabled_until = time.time() + _SPOTIFY_AUTH_COOLDOWN_SEC
+    logger.warning(
+        "Spotify provider disabled for %ds due to API auth/permission error: %s",
+        _SPOTIFY_AUTH_COOLDOWN_SEC,
+        reason,
+    )
 
 
 from bot.utils import fmt_duration_ms as _fmt_dur
@@ -99,6 +130,9 @@ def _search_sync(query: str, limit: int) -> list[dict]:
                 break
         return tracks
     except Exception as e:
+        if _is_auth_or_forbidden_error(e):
+            _disable_temporarily(e)
+            return []
         logger.error("Spotify search error: %s", e)
         return []
 
@@ -117,6 +151,9 @@ def _resolve_sync(url: str) -> dict | None:
             return None
         return _track_to_dict(track)
     except Exception as e:
+        if _is_auth_or_forbidden_error(e):
+            _disable_temporarily(e)
+            return None
         logger.error("Spotify resolve error for %s: %s", track_id, e)
         return None
 

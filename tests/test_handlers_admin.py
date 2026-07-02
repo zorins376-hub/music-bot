@@ -33,6 +33,7 @@ class TestAdminPanelKeyboard:
         assert "◈ Рассылка" in all_texts
         assert "◇ Дать Premium" in all_texts
         assert "✖ Бан" in all_texts
+        assert "🎟 Промокод" in all_texts
 
 
 @pytest.mark.asyncio
@@ -201,7 +202,7 @@ class TestDetailedStatsCacheSection:
         session = AsyncMock()
         session.execute = AsyncMock(
             side_effect=[
-                _RowResult((1, 0, 0, 0, 0, 0, 0, 0, 0, 0)),  # users
+                _RowResult((1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),  # users (11 cols)
                 _RowResult((0, 0, 0)),                       # payments
                 _RowResult((0, 0)),                          # tracks
                 _RowResult((0, 0, 0, 0, 0)),                 # listening

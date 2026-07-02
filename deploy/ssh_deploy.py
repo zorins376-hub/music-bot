@@ -1,20 +1,23 @@
 """SSH deploy script — connects to VPS and sets up the music bot."""
-import paramiko
+import os
 import sys
 import time
-import os
 
-HOST = "89.169.52.174"
-USER = "root"
-PASS = "YjfWW9v6j2m5"
-REPO = "https://github.com/zorins376-hub/music-bot.git"
-BOT_TOKEN = "8561612277:AAHV80B9gjdwDY7MuQjZZnzAm7aNbQsM8Js"
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ssh_common import connect_ssh, get_ssh_config
+
+REPO = os.environ.get(
+    "DEPLOY_REPO_URL",
+    "https://github.com/zorins376-hub/music-bot.git",
+).strip()
 
 SETUP_SCRIPT = r"""#!/bin/bash
 set -euo pipefail
 
 echo "=== [0/6] Waiting for dpkg lock (unattended-upgrades) ==="
-# Wait for any running apt/dpkg processes to finish (up to 5 minutes)
 for i in $(seq 1 60); do
     if fuser /var/lib/dpkg/lock-frontend &>/dev/null; then
         echo "  dpkg locked by another process, waiting... ($i/60)"
@@ -24,7 +27,6 @@ for i in $(seq 1 60); do
         break
     fi
 done
-# Kill unattended-upgrades if still running
 systemctl stop unattended-upgrades 2>/dev/null || true
 killall -9 unattended-upgrades 2>/dev/null || true
 sleep 2
@@ -58,9 +60,10 @@ else
     cd "$REPO_DIR"
 fi
 
-echo "=== [5/6] Creating .env ==="
+echo "=== [5/6] Creating .env skeleton ==="
 cat > "$REPO_DIR/.env" << 'ENVEOF'
-BOT_TOKEN=TOKEN_PLACEHOLDER
+# Fill BOT_TOKEN and POSTGRES_PASSWORD before going live
+BOT_TOKEN=
 
 DATABASE_URL=postgresql+asyncpg://musicbot:changeme@postgres:5432/musicbot
 POSTGRES_DB=musicbot
@@ -82,6 +85,7 @@ SUPABASE_AI_ENABLED=false
 ENVEOF
 
 echo ".env created ($(wc -l < $REPO_DIR/.env) lines)"
+echo ">>> Edit $REPO_DIR/.env and set BOT_TOKEN + POSTGRES_PASSWORD"
 
 echo "=== [6/6] Building and starting containers ==="
 cd "$REPO_DIR"
@@ -96,17 +100,15 @@ echo "=== BOT LOGS (last 20 lines) ==="
 docker compose logs --tail=20 bot 2>&1 || true
 echo ""
 echo "=== DONE ==="
-""".replace("REPO_PLACEHOLDER", REPO).replace("TOKEN_PLACEHOLDER", BOT_TOKEN)
+""".replace("REPO_PLACEHOLDER", REPO)
 
 
 def main():
-    print(f"Connecting to {HOST}...")
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(HOST, username=USER, password=PASS, timeout=30)
+    host, _, _, _ = get_ssh_config()
+    print(f"Connecting to {host}...")
+    client = connect_ssh(timeout=30)
     print("Connected!\n")
 
-    # Upload setup script
     print("Uploading setup script...")
     sftp = client.open_sftp()
     with sftp.open("/tmp/setup_musicbot.sh", "w") as f:
@@ -114,37 +116,31 @@ def main():
     sftp.close()
     print("Script uploaded.\n")
 
-    # Execute the script with a long-running channel
     print("Executing setup script (this may take several minutes)...")
     print("=" * 60)
-    
+
     chan = client.get_transport().open_session()
-    chan.settimeout(None)  # no timeout
+    chan.settimeout(None)
     chan.exec_command("bash /tmp/setup_musicbot.sh 2>&1")
-    
-    # Stream output in real-time
+
     while True:
         if chan.recv_ready():
-            data = chan.recv(4096).decode(errors='replace')
-            print(data, end='', flush=True)
+            data = chan.recv(4096).decode(errors="replace")
+            print(data, end="", flush=True)
         elif chan.exit_status_ready():
-            # Read remaining data
             while chan.recv_ready():
-                data = chan.recv(4096).decode(errors='replace')
-                print(data, end='', flush=True)
+                data = chan.recv(4096).decode(errors="replace")
+                print(data, end="", flush=True)
             break
         else:
             time.sleep(0.5)
-    
+
     exit_code = chan.recv_exit_status()
     print(f"\nScript exit code: {exit_code}")
-    
+
     client.close()
     print("\n✓ Deployment complete!" if exit_code == 0 else "\n✗ Deployment failed!")
-
-
-if __name__ == "__main__":
-    main()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

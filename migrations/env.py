@@ -23,24 +23,34 @@ from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import all models so Alembic can see them
+# Import all models so Alembic can see them (keep in sync with bot/models/base.py init_db)
 from bot.models.base import Base
 from bot.models.user import User
-from bot.models.track import Track
+from bot.models.track import Track, ListeningHistory, Payment
 from bot.models.playlist import Playlist, PlaylistTrack
 from bot.models.daily_mix import DailyMix, DailyMixTrack
 from bot.models.favorite import FavoriteTrack
-from bot.models.party import PartySession, PartyTrack
+from bot.models.party import (
+    PartyChatMessage,
+    PartyEvent,
+    PartyMember,
+    PartyPlaybackState,
+    PartyReaction,
+    PartySession,
+    PartyTrack,
+    PartyTrackVote,
+)
 from bot.models.recommendation_log import RecommendationLog
 from bot.models.admin_log import AdminLog
 from bot.models.blocked_track import BlockedTrack
-from bot.models.dmca_appeal import DMCAAppeal
+from bot.models.dmca_appeal import DmcaAppeal
 from bot.models.share_link import ShareLink
-from bot.models.family_plan import FamilyPlan, FamilyMember
-from bot.models.promo_code import PromoCode, PromoCodeUsage
-from bot.models.sponsored import SponsoredTrack
+from bot.models.family_plan import FamilyPlan, FamilyMember, FamilyInvite
+from bot.models.promo_code import PromoCode, PromoActivation
+from bot.models.sponsored import SponsoredCampaign, SponsoredEvent
 from bot.models.release_notification import ReleaseNotification
 from bot.models.artist_watchlist import ArtistWatchlist
+from bot.models.bot_chat import BotChat
 
 # Import settings for DB URL
 from bot.config import settings

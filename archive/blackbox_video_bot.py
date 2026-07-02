@@ -3,6 +3,7 @@
 v4.0: queue, cache, limits, admin panel (broadcast/ban/users)
 """
 
+import os
 import re
 import asyncio
 import logging
@@ -18,8 +19,12 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes,
 )
 
-TOKEN = "7778709205:AAGfUz2Cj5AWRGv2hsiy-ItpNqtw5xuWCXI"
-ADMIN_IDS = {8558910353, 8258955906}
+# Archived bot — set BLACKBOX_BOT_TOKEN in env; never commit real tokens.
+TOKEN = os.environ.get("BLACKBOX_BOT_TOKEN", "").strip()
+if not TOKEN:
+    raise SystemExit("BLACKBOX_BOT_TOKEN environment variable is required")
+_admin_raw = os.environ.get("BLACKBOX_ADMIN_IDS", "")
+ADMIN_IDS = {int(x) for x in _admin_raw.split(",") if x.strip()} if _admin_raw else set()
 DOWNLOAD_DIR = Path("/tmp/blackbox_downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 MAX_TG_SIZE = 49 * 1024 * 1024

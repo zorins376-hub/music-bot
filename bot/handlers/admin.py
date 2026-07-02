@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -6,7 +7,14 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    CopyTextButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy import case, func, select, update, and_
 
 from bot.config import settings
@@ -26,6 +34,9 @@ _USERS_PER_PAGE = 10
 # Admin state for forwarding audio → LIVE
 # {user_id: {"label": str, "count": int, "track_ids": list[int]}}
 _admin_fwd_state: dict[int, dict] = {}
+
+# Admins awaiting cookies.txt upload after /admin ytcookies upload
+_yt_cookies_awaiting: set[int] = set()
 
 _LIVE_TRACKS_PER_PAGE = 8
 
@@ -465,6 +476,9 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✖ Бан", callback_data="adm:ban"),
             ],
             [
+                InlineKeyboardButton(text="🎟 Промокод", callback_data="adm:promo"),
+            ],
+            [
                 InlineKeyboardButton(text="◎ Пользователи", callback_data=AdmUserCb(act="list").pack()),
             ],
             [
@@ -787,10 +801,94 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         else:
             await message.answer("Трек не найден в списке заблокированных.")
 
+    # /admin ytcookies [status|upload|probe] — YouTube cookies
+    elif subcmd in ("ytcookies", "cookies", "yt_cookies"):
+        from bot.services.youtube_cookies import format_status_message, run_health_probe
+        parts = message.text.split(maxsplit=2)
+        action = parts[2].lower() if len(parts) > 2 else "status"
+        if action == "upload":
+            _yt_cookies_awaiting.add(message.from_user.id)
+            await message.answer(
+                "Отправь <b>cookies.txt</b> (Netscape) документом.\n"
+                "Экспорт: залогинься на youtube.com в Chrome → "
+                "расширение «Get cookies.txt LOCALLY».",
+                parse_mode="HTML",
+            )
+        elif action == "probe":
+            await message.answer("Проверяю доступ к YouTube…")
+            ok = await run_health_probe(notify_on_failure=False)
+            suffix = "✅ OK" if ok else "❌ ошибка (см. логи)"
+            await message.answer(
+                f"{suffix}\n\n{format_status_message()}",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(format_status_message(), parse_mode="HTML")
+
     # /admin proxy — proxy pool status
     elif subcmd == "proxy":
         from bot.services.proxy_pool import proxy_pool
         await message.answer(proxy_pool.get_status(), parse_mode="HTML")
+
+    # /admin searchfix <query> => <artist - title>
+    elif subcmd in ("searchfix", "search_fix"):
+        if len(args) < 3 or "=>" not in args[2]:
+            await message.answer(
+                "Использование:\n"
+                "<code>/admin searchfix запрос => исполнитель - трек</code>\n\n"
+                "Пример:\n"
+                "<code>/admin searchfix моя вечеринка => Скриптонит - Это моя вечеринка</code>",
+                parse_mode="HTML",
+            )
+            return
+        raw_query, _, target_query = args[2].partition("=>")
+        raw_query = raw_query.strip()
+        target_query = target_query.strip()
+        if len(raw_query) < 2 or len(target_query) < 2:
+            await message.answer("Запрос и целевой трек не должны быть пустыми.")
+            return
+        from bot.services.search_engine import deduplicate_results, detect_script
+        from bot.services.search_memory import remember_correction
+        from bot.services.yandex_provider import search_yandex
+        from bot.services.vk_provider import search_vk
+        from bot.services.spotify_provider import search_spotify
+        from bot.services.downloader import search_tracks
+
+        batches = await asyncio.gather(
+            search_yandex(target_query, limit=5),
+            search_vk(target_query, limit=5),
+            search_spotify(target_query, limit=5),
+            search_tracks(target_query, max_results=5, source="youtube"),
+            return_exceptions=True,
+        )
+        found: list[dict] = []
+        for batch in batches:
+            if isinstance(batch, Exception):
+                logger.debug("admin searchfix provider failed: %s", batch)
+                continue
+            found.extend(batch or [])
+        found = deduplicate_results(
+            found,
+            lang_hint=detect_script(target_query),
+            query=target_query,
+        )
+        if not found:
+            await message.answer("Не нашёл целевой трек. Попробуй точнее: исполнитель - название.")
+            return
+        chosen = found[0]
+        await remember_correction(raw_query, chosen, weight=5)
+        await log_admin_action(
+            message.from_user.id,
+            "searchfix",
+            details=f"{raw_query} => {chosen.get('uploader', '')} - {chosen.get('title', '')}",
+        )
+        await message.answer(
+            "✅ Закрепил поиск:\n"
+            f"<code>{raw_query}</code>\n→ "
+            f"<b>{chosen.get('uploader', '')} — {chosen.get('title', '')}</b>\n"
+            f"Источник: <code>{chosen.get('source', '?')}</code>",
+            parse_mode="HTML",
+        )
 
     # /admin promo create <code> <type> <uses> | /admin promo list
     elif subcmd == "promo":
@@ -800,11 +898,12 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         else:
             promo_sub = args[2] if len(args) > 2 else ""
         if promo_sub == "create":
-            # /admin promo create CODE type uses
+            # /admin promo create CODE type uses [expires_days]
             rest = text.split("create", 1)[-1].strip().split()
             if len(rest) < 3:
                 await message.answer(
-                    "Использование: /admin promo create &lt;код&gt; &lt;тип: premium_7d|premium_30d|flac_5&gt; &lt;кол-во&gt;",
+                    "Использование: /admin promo create &lt;код&gt; &lt;тип: premium_7d|premium_30d|flac_5&gt; "
+                    "&lt;кол-во&gt; [срок_дней]",
                     parse_mode="HTML",
                 )
                 return
@@ -817,10 +916,25 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             except ValueError:
                 await message.answer("Кол-во должно быть числом")
                 return
+            expires_days = None
+            if len(rest) >= 4:
+                try:
+                    expires_days = int(rest[3])
+                except ValueError:
+                    await message.answer("Срок (дней) должен быть числом")
+                    return
             from bot.services.promo_service import create_promo
-            promo = await create_promo(code, promo_type, max_uses, message.from_user.id)
+            promo = await create_promo(
+                code, promo_type, max_uses, message.from_user.id, expires_days=expires_days,
+            )
             if promo:
-                await message.answer(f"✅ Промокод <code>{code}</code> создан ({promo_type}, {max_uses} использований).", parse_mode="HTML")
+                expires_str = promo.expires_at.strftime("%d.%m.%Y") if promo.expires_at else "бессрочно"
+                await message.answer(
+                    f"✅ Промокод <code>{code}</code> создан ({promo_type}, {max_uses} использований, "
+                    f"до {expires_str}).",
+                    parse_mode="HTML",
+                    reply_markup=_promo_copy_keyboard(code),
+                )
                 await log_admin_action(message.from_user.id, "promo_create", details=f"{code} {promo_type} {max_uses}")
             else:
                 await message.answer("Промокод с таким кодом уже существует.")
@@ -832,7 +946,14 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             else:
                 lines = ["<b>Промокоды:</b>\n"]
                 for p in promos:
-                    lines.append(f"<code>{p['code']}</code> — {p['type']} | осталось: {p['uses_left']}/{p['max_uses']}")
+                    exp = ""
+                    if p.get("expires_at"):
+                        exp = " ⏳истёк" if p.get("expired") else f" · до {p['expires_at'][:10]}"
+                    lines.append(
+                        f"<code>{p['code']}</code> — {p['type']} | "
+                        f"осталось: {p['uses_left']}/{p['max_uses']} | "
+                        f"активаций: {p.get('activations', 0)}{exp}"
+                    )
                 await message.answer("\n".join(lines), parse_mode="HTML")
         else:
             await message.answer("Использование: /admin promo create|list")
@@ -944,6 +1065,9 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin export — экспорт статистики CSV\n"
             "/admin block &lt;source_id&gt; [причина] — заблокировать трек (DMCA)\n"
             "/admin unblock &lt;source_id&gt; — разблокировать трек\n"
+            "/admin ytcookies — статус YouTube cookies\n"
+            "/admin ytcookies upload — загрузить cookies.txt\n"
+            "/admin ytcookies probe — проверить YouTube\n"
             "/admin proxy — статус прокси-пула\n"
             "/admin promo create &lt;код&gt; &lt;тип&gt; &lt;кол-во&gt; — создать промокод\n"
             "/admin promo list — список промокодов\n"
@@ -1076,9 +1200,14 @@ async def handle_adm_health(callback: CallbackQuery) -> None:
     if not _is_admin(callback.from_user.id):
         return await callback.answer("⛔", show_alert=True)
     await callback.answer()
-    from bot.services.provider_health import get_health_summary
+    from bot.services.provider_health import ensure_stats_loaded, get_health_summary
+
+    await ensure_stats_loaded()
     text = get_health_summary()
-    await callback.message.answer(text, parse_mode="HTML")
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_back_to_panel_kb)
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=_back_to_panel_kb)
 
 
 @router.message(Command("searchaudit"))
@@ -1289,6 +1418,107 @@ async def handle_revoke_premium(callback: CallbackQuery, callback_data: AdmUserC
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
         logger.debug("edit premium revoke list failed", exc_info=True)
+
+
+_PROMO_TYPE_MAP = {
+    "7d": "premium_7d",
+    "30d": "premium_30d",
+}
+
+
+def _adm_promo_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Premium 7 дней (1×)", callback_data="adm:promo:7d"),
+                InlineKeyboardButton(text="Premium 30 дней (1×)", callback_data="adm:promo:30d"),
+            ],
+            [InlineKeyboardButton(text="📋 Список промокодов", callback_data="adm:promo:list")],
+            [InlineKeyboardButton(text="◁ Админ-панель", callback_data="action:admin")],
+        ]
+    )
+
+
+def _promo_copy_keyboard(code: str) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="📋 Копировать код",
+                copy_text=CopyTextButton(text=code),
+            ),
+        ],
+    ]
+    rows.extend(_adm_promo_menu_keyboard().inline_keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(lambda c: c.data == "adm:promo" or (c.data and c.data.startswith("adm:promo:")))
+async def handle_adm_promo(callback: CallbackQuery) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+
+    data = callback.data or ""
+    if data == "adm:promo":
+        await callback.answer()
+        text = (
+            "🎟 <b>Промокоды Premium</b>\n\n"
+            "Выбери тип — код сгенерируется автоматически.\n"
+            "Отправь его пользователю, он введёт через кнопку <b>Ввести промокод</b> в Premium."
+        )
+        try:
+            await callback.message.edit_text(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+        return
+
+    if data == "adm:promo:list":
+        await callback.answer()
+        from bot.services.promo_service import list_promos
+        promos = await list_promos()
+        if not promos:
+            text = "Промокодов пока нет."
+        else:
+            lines = ["<b>Промокоды:</b>\n"]
+            for p in promos[:20]:
+                lines.append(
+                    f"<code>{p['code']}</code> — {p['type']} | осталось: {p['uses_left']}/{p['max_uses']}"
+                )
+            text = "\n".join(lines)
+        try:
+            await callback.message.edit_text(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+        return
+
+    promo_key = data.rsplit(":", 1)[-1]
+    promo_type = _PROMO_TYPE_MAP.get(promo_key)
+    if not promo_type:
+        await callback.answer("Неизвестный тип промокода", show_alert=True)
+        return
+
+    from bot.services.promo_service import create_promo_auto
+    _PROMO_EXPIRES_DAYS = 30
+    promo = await create_promo_auto(
+        promo_type, 1, callback.from_user.id, expires_days=_PROMO_EXPIRES_DAYS,
+    )
+    if not promo:
+        await callback.answer("Не удалось создать промокод", show_alert=True)
+        return
+
+    await callback.answer("Промокод создан")
+    label = "7 дней" if promo_key == "7d" else "30 дней"
+    expires_str = promo.expires_at.strftime("%d.%m.%Y") if promo.expires_at else "бессрочно"
+    text = (
+        f"✅ Промокод создан: <b>Premium {label}</b>\n\n"
+        f"<code>{promo.code}</code>\n\n"
+        f"Использований: <b>1</b>\n"
+        f"Действует до: <b>{expires_str}</b>\n"
+        f"Нажми <b>Копировать код</b> ниже или тапни по коду.\n"
+        f"Пользователь: Premium → <b>Ввести промокод</b>"
+    )
+    await log_admin_action(callback.from_user.id, "promo_create", details=f"{promo.code} {promo_type} 1")
+    await callback.message.answer(text, reply_markup=_promo_copy_keyboard(promo.code), parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("adm:set:"))
@@ -1681,3 +1911,44 @@ async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
     await admin_msg.answer(
         f"Broadcast done.\nSent: {sent}\nFailed: {failed}"
     )
+
+
+@router.message(F.document)
+async def admin_upload_yt_cookies(message: Message, bot: Bot) -> None:
+    """Accept cookies.txt from admin (after /admin ytcookies upload or cookie* filename)."""
+    if not _is_admin(message.from_user.id):
+        return
+    doc = message.document
+    if not doc:
+        return
+    fname = (doc.file_name or "").lower()
+    awaiting = message.from_user.id in _yt_cookies_awaiting
+    if not awaiting and "cookie" not in fname:
+        return
+
+    from bot.services.youtube_cookies import format_status_message, run_health_probe, save_cookies_content
+
+    try:
+        file = await bot.get_file(doc.file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file.file_path, buf)
+        ok, detail = save_cookies_content(buf.getvalue())
+    except Exception as e:
+        logger.exception("yt cookies upload failed")
+        await message.answer(f"Ошибка загрузки: {e}")
+        return
+    finally:
+        _yt_cookies_awaiting.discard(message.from_user.id)
+
+    if not ok:
+        await message.answer(f"❌ {detail}")
+        return
+
+    await message.answer(f"✅ {detail}\n\nПроверяю YouTube…")
+    probe_ok = await run_health_probe(notify_on_failure=False)
+    probe_line = "Проверка: ✅ OK" if probe_ok else "Проверка: ❌ не прошла (см. /admin ytcookies probe)"
+    await message.answer(
+        f"{probe_line}\n\n{format_status_message()}",
+        parse_mode="HTML",
+    )
+    await log_admin_action(message.from_user.id, "yt_cookies_upload", details=detail)

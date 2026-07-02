@@ -7,8 +7,14 @@ from bot.services.search_engine import (
     transliterate_lat_to_cyr,
     deduplicate_results,
     suggest_query,
+    parse_query,
     _normalize_for_dedup,
     _jaccard_similarity,
+    _relevance_score,
+    is_lyric_like_query,
+    needs_lyrics_search_boost,
+    lyric_search_variants,
+    extract_distinctive_lyric_words,
 )
 
 
@@ -37,7 +43,8 @@ class TestNormalizeQuery:
         assert normalize_query("") == ""
 
     def test_brackets(self):
-        assert normalize_query("Track [remix]") == "track remix"
+        assert normalize_query("Track [remix]") == "track"
+        assert normalize_query("Track (official video)") == "track"
 
 
 # ── detect_script ─────────────────────────────────────────────────────────
@@ -189,3 +196,202 @@ class TestSuggestQuery:
 
     def test_empty_corpus(self):
         assert suggest_query("test", []) == []
+
+
+# ── Cyrillic artist + title relevance ─────────────────────────────────────
+
+class TestLyricFragmentSearch:
+    def test_parse_two_word_cyrillic(self):
+        parsed = parse_query("матранг рука")
+        assert parsed["artist_hint"] == "матранг"
+        assert parsed["title_hint"] == "рука"
+
+    def test_is_lyric_like_query(self):
+        assert is_lyric_like_query("любит небо")
+        assert is_lyric_like_query("хочется жить каждый день")
+        assert not is_lyric_like_query("AC/DC - Thunderstruck")
+
+    def test_matrang_ruka_prefers_matching_title(self):
+        query = "матранг рука"
+        qn = normalize_query(query)
+        parsed = parse_query(query)
+        with_ruka = {"title": "Руки на руке", "uploader": "MATRANG", "source": "yandex", "_provider_pos": 0}
+        with_krug = {"title": "Круг", "uploader": "MATRANG", "source": "yandex", "_provider_pos": 1}
+        assert _relevance_score(
+            qn, with_ruka["uploader"], with_ruka["title"], parsed=parsed
+        ) > _relevance_score(
+            qn, with_krug["uploader"], with_krug["title"], parsed=parsed
+        )
+
+    def test_priezzhai_prefers_title_word(self):
+        query = "104 приезжай"
+        qn = normalize_query(query)
+        parsed = parse_query(query)
+        correct = {"title": "Приезжай", "uploader": "104", "source": "yandex", "_provider_pos": 0}
+        wrong = {"title": "Движения", "uploader": "104, Скриптонит, Kali", "source": "yandex", "_provider_pos": 0}
+        assert _relevance_score(
+            qn, correct["uploader"], correct["title"], parsed=parsed
+        ) > _relevance_score(
+            qn, wrong["uploader"], wrong["title"], parsed=parsed
+        )
+
+    def test_needs_lyrics_boost_when_title_words_missing(self):
+        top = {"uploader": "Матранг", "title": "Круг", "_provider_pos": 0}
+        assert needs_lyrics_search_boost("матранг рука", top, parsed=parse_query("матранг рука"))
+        good = {"uploader": "MATRANG", "title": "Руки на руке", "_provider_pos": 0}
+        assert not needs_lyrics_search_boost("матранг рука", good, parsed=parse_query("матранг рука"))
+
+    def test_matrang_ruka_dedup_order(self):
+        query = "матранг рука"
+        results = deduplicate_results(
+            [
+                {"title": "Круг", "uploader": "MATRANG", "source": "yandex", "_provider_pos": 1},
+                {"title": "Руки на руке", "uploader": "MATRANG", "source": "yandex", "_provider_pos": 0},
+            ],
+            lang_hint="cyrillic",
+            query=query,
+        )
+        assert "рук" in normalize_query(results[0]["title"])
+
+
+class TestCyrillicArtistTitleRelevance:
+    def test_parse_query_splits_cyrillic_without_dash(self):
+        parsed = parse_query("Скриптонит это моя вечеринка")
+        assert parsed["artist_hint"] == "скриптонит"
+        assert parsed["title_hint"] == "это моя вечеринка"
+
+    def test_scriptonite_ranks_above_partial_yandex_match(self):
+        query = "Скриптонит это моя вечеринка"
+        qn = normalize_query(query)
+        parsed = parse_query(query)
+        correct = {
+            "title": "Это моя вечеринка",
+            "uploader": "Скриптонит",
+            "source": "youtube",
+            "_provider_pos": 1,
+        }
+        wrong = {
+            "title": "Моя вечеринка 2024",
+            "uploader": "DJ Smash",
+            "source": "yandex",
+            "_provider_pos": 0,
+        }
+        assert _relevance_score(
+            qn, correct["uploader"], correct["title"], parsed=parsed
+        ) > _relevance_score(
+            qn, wrong["uploader"], wrong["title"], parsed=parsed
+        )
+
+    def test_dedup_puts_scriptonite_first(self):
+        query = "Скриптонит это моя вечеринка"
+        results = deduplicate_results(
+            [
+                {
+                    "title": "Моя вечеринка 2024",
+                    "uploader": "DJ Smash",
+                    "source": "yandex",
+                    "_provider_pos": 0,
+                },
+                {
+                    "title": "Это моя вечеринка",
+                    "uploader": "Скриптонит",
+                    "source": "youtube",
+                    "_provider_pos": 1,
+                },
+            ],
+            lang_hint="cyrillic",
+            query=query,
+        )
+        assert results[0]["uploader"] == "Скриптонит"
+
+
+class TestTypoAndAliasRelevance:
+    def test_parse_asxa_prince_short_title(self):
+        parsed = parse_query("асха принц су")
+        assert parsed["artist_hint"] == "асха принц"
+        assert parsed["title_hint"] == "су"
+
+    def test_typo_surname_artist_only(self):
+        q = "леонид партной"
+        parsed = parse_query(q)
+        qn = normalize_query(q)
+        sc = _relevance_score(qn, "Леонид Портной", "Кто тебя создал такую", parsed=parsed)
+        assert sc >= 1.0
+
+    def test_asxa_prince_typo_title_ranks_high(self):
+        q = "асха принц гододная собака"
+        parsed = parse_query(q)
+        qn = normalize_query(q)
+        good = _relevance_score(qn, "V $ X V PRiNCE", "Голодная собака", parsed=parsed)
+        wrong = _relevance_score(qn, "V $ X V PRiNCE", "Модная подруга", parsed=parsed)
+        assert good >= 1.45
+        assert good > wrong + 0.3
+
+    def test_lyric_kokaina_title_word(self):
+        q = "Дай нам мам кокаина"
+        parsed = parse_query(q)
+        qn = normalize_query(q)
+        sc = _relevance_score(qn, "Alesya Anis, LEO.K", "Кокаина", parsed=parsed)
+        assert sc >= 0.9
+
+    def test_lyric_wrong_song_penalized(self):
+        q = "я теперь твоё воспоминанье"
+        parsed = parse_query(q)
+        qn = normalize_query(q)
+        wrong = _relevance_score(qn, "Ellai", "Помню твоё тело", parsed=parsed)
+        ideal = _relevance_score(
+            qn, "Artist", "Я теперь твоё воспоминанье", parsed=parsed,
+        )
+        assert wrong < ideal
+
+
+class TestLyricSearchVariants:
+    def test_vospominanie_variants(self):
+        q = "я теперь твоё воспоминанье"
+        variants = lyric_search_variants(q)
+        assert variants[0] == normalize_query(q)
+        assert "воспоминанье" in variants
+        assert any("твоё" in v for v in variants)
+
+    def test_distinctive_word_kokaina(self):
+        words = extract_distinctive_lyric_words("дай нам мам кокаина")
+        assert "кокаина" in words
+
+    def test_koka_lova_not_artist_title_split(self):
+        parsed = parse_query("кока лова")
+        assert parsed.get("artist_hint") is None
+        assert parsed.get("title_hint") is None
+        assert is_lyric_like_query("кока лова", parsed)
+
+    def test_koka_lova_aliases(self):
+        from bot.services.search_engine import get_query_search_aliases
+        aliases = get_query_search_aliases("кока лова")
+        assert "Koka Lova" in aliases
+        assert "Jax 02.14 Koka Lova" in aliases
+        assert "кокаина" not in aliases
+
+    def test_koka_stem_matches_kokaina_title(self):
+        from bot.services.search_engine import query_title_hint_coverage, normalize_query
+        # «кока лова» is the song title Koka Lova, not «Кокаина»
+        cov = query_title_hint_coverage(normalize_query("koka lova"), "Koka Lova", None)
+        assert cov >= 0.5
+
+    def test_lyrics_hint_track_ranks_with_score_query(self):
+        query = "я теперь твоё воспоминанье"
+        wrong = {
+            "title": "Помню твоё тело",
+            "uploader": "Ellai",
+            "source": "yandex",
+            "_provider_pos": 0,
+        }
+        resolved = {
+            "title": "Помню как было",
+            "uploader": "Ellai",
+            "source": "yandex",
+            "_provider_pos": 0,
+            "_score_query": "ellai помню как было",
+            "_hint_bonus": 2.45,
+            "_from_lyrics": True,
+        }
+        ranked = deduplicate_results([wrong, resolved], query=query)
+        assert ranked[0]["title"] == "Помню как было"

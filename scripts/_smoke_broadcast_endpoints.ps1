@@ -1,8 +1,10 @@
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\_deploy_env.ps1"
+$d = Get-DeploySsh
 
 function Invoke-RemoteStatus([string] $label, [string] $curlArgs) {
     Write-Output $label
-    ssh root@89.169.52.174 "curl -s -o /dev/null -w '%{http_code}' $curlArgs"
+    ssh $($d.Ssh) "curl -s -o /dev/null -w '%{http_code}' $curlArgs"
     Write-Output ""
 }
 

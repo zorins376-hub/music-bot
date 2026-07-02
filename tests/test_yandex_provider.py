@@ -154,6 +154,52 @@ class TestDownloadYandex:
         assert dest.stat().st_size > 1024
 
 
+class TestYandexUrlDetection:
+    def test_album_track_url(self):
+        from bot.services.yandex_provider import is_yandex_music_url, _yandex_track_id_from_url
+        url = "https://music.yandex.ru/album/5374565/track/48592103"
+        assert is_yandex_music_url(url)
+        assert _yandex_track_id_from_url(url) == 48592103
+
+    def test_short_track_url(self):
+        from bot.services.yandex_provider import is_yandex_music_url, _yandex_track_id_from_url
+        url = "https://music.yandex.ru/track/48592103"
+        assert is_yandex_music_url(url)
+        assert _yandex_track_id_from_url(url) == 48592103
+
+    def test_url_with_query_params(self):
+        from bot.services.yandex_provider import is_yandex_music_url
+        url = "https://music.yandex.com/album/5374565/track/48592103?utm_source=app"
+        assert is_yandex_music_url(url)
+
+
+@pytest.mark.asyncio
+class TestResolveYandexUrl:
+    async def test_attaches_ym_token(self):
+        mock_artist = MagicMock()
+        mock_artist.name = "Artist"
+        mock_track = MagicMock()
+        mock_track.id = 48592103
+        mock_track.title = "Song"
+        mock_track.artists = [mock_artist]
+        mock_track.duration_ms = 180000
+
+        mock_client = AsyncMock()
+        mock_client.tracks = AsyncMock(return_value=[mock_track])
+
+        with patch("bot.services.yandex_provider._next_token", return_value="tok_resolve"), \
+             patch("bot.services.yandex_provider._refresh_token_if_needed", return_value="tok_resolve"), \
+             patch("bot.services.yandex_provider._get_client", new_callable=AsyncMock, return_value=mock_client):
+            from bot.services.yandex_provider import resolve_yandex_url
+            result = await resolve_yandex_url(
+                "https://music.yandex.ru/track/48592103"
+            )
+
+        assert result is not None
+        assert result["_ym_token"] == "tok_resolve"
+        assert result["ym_track_id"] == 48592103
+
+
 class TestTrackToDict:
     def test_valid_track(self):
         from bot.services.yandex_provider import _track_to_dict

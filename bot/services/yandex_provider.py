@@ -188,9 +188,15 @@ async def _get_client(token: str):
         kwargs: dict = {}
         if proxy:
             kwargs["proxy_url"] = proxy
-        client = await ClientAsync(token, **kwargs).init()
+        client = await asyncio.wait_for(
+            ClientAsync(token, **kwargs).init(),
+            timeout=12,
+        )
         _clients[token] = client
         return client
+    except asyncio.TimeoutError:
+        logger.warning("Yandex client init timed out")
+        return None
     except Exception as e:
         logger.error("Yandex client init failed: %s", e)
         return None
@@ -275,7 +281,10 @@ async def search_yandex(query: str, limit: int = 5) -> list[dict]:
         client = await _get_client(token)
         if client is None:
             return []
-        result = await client.search(query, type_="track", page=0)
+        result = await asyncio.wait_for(
+            client.search(query, type_="track", page=0),
+            timeout=12,
+        )
         if not result or not result.tracks:
             return []
         tracks = []
@@ -288,6 +297,10 @@ async def search_yandex(query: str, limit: int = 5) -> list[dict]:
             if len(tracks) >= limit:
                 break
         return tracks
+    except asyncio.TimeoutError:
+        logger.warning("Yandex search timed out for %r", query[:60])
+        _clients.pop(token, None)
+        return []
     except Exception as e:
         logger.error("Yandex search error: %s", e)
         # Invalidate cached client so next call re-inits with next token
@@ -354,12 +367,19 @@ async def download_yandex(track_id: int, dest: Path, bitrate: int = 320, token: 
 # ── Yandex Music link resolver ───────────────────────────────────────────
 
 _YANDEX_TRACK_RE = re.compile(
-    r"https?://music\.yandex\.(?:ru|com|kz|by|uz)/album/\d+/track/(\d+)"
+    r"https?://music\.yandex\.(?:ru|com|kz|by|uz)/(?:album/\d+/track/|track/)(\d+)"
 )
 
 
+def _yandex_track_id_from_url(text: str) -> int | None:
+    m = _YANDEX_TRACK_RE.search(text)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
 def is_yandex_music_url(text: str) -> bool:
-    return bool(_YANDEX_TRACK_RE.search(text))
+    return _yandex_track_id_from_url(text) is not None
 
 
 async def resolve_yandex_url(url: str) -> dict | None:
@@ -368,10 +388,9 @@ async def resolve_yandex_url(url: str) -> dict | None:
     Returns a dict compatible with search results (video_id, ym_track_id,
     title, uploader, duration, source='yandex') or None on failure.
     """
-    m = _YANDEX_TRACK_RE.search(url)
-    if not m:
+    track_id = _yandex_track_id_from_url(url)
+    if not track_id:
         return None
-    track_id = int(m.group(1))
 
     token = await _next_token()
     if not token:
@@ -392,7 +411,10 @@ async def resolve_yandex_url(url: str) -> dict | None:
         tracks = await client.tracks([track_id])
         if not tracks:
             return None
-        return _track_to_dict(tracks[0], source_id=f"ym_{track_id}")
+        d = _track_to_dict(tracks[0], source_id=f"ym_{track_id}")
+        if d:
+            d["_ym_token"] = token
+        return d
     except Exception as e:
         logger.error("resolve_yandex_url error for track %s: %s", track_id, e)
         _clients.pop(token, None)

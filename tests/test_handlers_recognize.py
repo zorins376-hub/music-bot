@@ -112,6 +112,37 @@ class TestHandleAudio:
 
 
 @pytest.mark.asyncio
+class TestGroupMediaIgnored:
+    async def test_voice_ignored_in_group(self):
+        from bot.handlers.recognize import handle_voice
+
+        msg = AsyncMock()
+        msg.chat = MagicMock(type="group")
+        msg.from_user = MagicMock(id=100)
+        msg.voice = MagicMock(duration=30, file_size=1000, file_id="f")
+        msg.answer = AsyncMock()
+
+        with patch("bot.handlers.recognize._recognize_and_search", new_callable=AsyncMock) as mock_rec:
+            await handle_voice(msg)
+        mock_rec.assert_not_called()
+        msg.answer.assert_not_called()
+
+    async def test_video_ignored_in_group(self):
+        from bot.handlers.recognize import handle_video
+
+        msg = AsyncMock()
+        msg.chat = MagicMock(type="supergroup")
+        msg.from_user = MagicMock(id=100)
+        msg.video = MagicMock(duration=30, file_size=1000, file_id="f")
+        msg.answer = AsyncMock()
+
+        with patch("bot.handlers.recognize._recognize_and_search", new_callable=AsyncMock) as mock_rec:
+            await handle_video(msg)
+        mock_rec.assert_not_called()
+        msg.answer.assert_not_called()
+
+
+@pytest.mark.asyncio
 class TestHandleVideoNote:
     async def test_too_short_video_note(self):
         from bot.handlers.recognize import handle_video_note

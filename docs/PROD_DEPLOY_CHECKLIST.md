@@ -5,6 +5,8 @@
 
 ## 0) Preflight
 
+- [ ] Firewall (VPS): `ufw allow 22,80,443/tcp` и `ufw enable` — не открывайте Postgres/Redis наружу; только bot `:8080` за nginx или localhost
+- [ ] `METRICS_PORT=9090` слушает внутри контейнера — не публикуйте `9090:9090` в интернет без auth/reverse-proxy
 - [ ] Проверить env в production:
   - `DATABASE_URL`
   - `BOT_TOKEN`

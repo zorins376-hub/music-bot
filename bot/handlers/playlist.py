@@ -20,6 +20,7 @@ from aiogram.types import (
 from sqlalchemy import delete, func, select, update
 
 from bot.config import settings
+from bot.services.track_format import audio_tag_kwargs
 from bot.db import get_or_create_user
 from bot.i18n import t
 from bot.models.base import async_session
@@ -346,9 +347,8 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
     if track.file_id:
         await message.answer_audio(
             audio=track.file_id,
-            title=track.title,
-            performer=track.artist,
             duration=track.duration,
+            **audio_tag_kwargs(track.artist or "", track.title or ""),
         )
         return True
 
@@ -359,9 +359,8 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
             try:
                 await message.answer_audio(
                     audio=fid,
-                    title=track.title,
-                    performer=track.artist,
                     duration=track.duration,
+                    **audio_tag_kwargs(track.artist or "", track.title or ""),
                 )
                 async with async_session() as session:
                     await session.execute(
@@ -379,9 +378,8 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
             if db_fid:
                 await message.answer_audio(
                     audio=db_fid,
-                    title=track.title,
-                    performer=track.artist,
                     duration=track.duration,
+                    **audio_tag_kwargs(track.artist or "", track.title or ""),
                 )
                 return True
         except Exception:
@@ -401,9 +399,8 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
         mp3_path = await download_track(source_id, bitrate=bitrate, dl_id=uuid.uuid4().hex[:8])
         sent = await message.answer_audio(
             audio=FSInputFile(mp3_path),
-            title=track.title,
-            performer=track.artist,
             duration=track.duration,
+            **audio_tag_kwargs(track.artist or "", track.title or ""),
         )
         fid = sent.audio.file_id if sent and sent.audio else None
         if fid:

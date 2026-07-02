@@ -12,6 +12,9 @@ Endpoints:
   DELETE /admin/api/tracks/{id} — удалить трек
   POST /admin/api/users/{id}/ban — забанить юзера
   POST /admin/api/users/{id}/premium — выдать премиум
+  POST /admin/api/users/grant-premium — выдать/снять премиум по @username или ID
+  GET  /admin/api/promos          — список промокодов
+  POST /admin/api/promos          — создать промокод Premium
 """
 import asyncio
 import os
@@ -34,6 +37,13 @@ from bot.models.track import Track, ListeningHistory, Payment
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
+
+
+def _is_production() -> bool:
+    env = (os.environ.get("ENVIRONMENT") or "").strip().lower()
+    if env in ("production", "prod"):
+        return True
+    return Path("/.dockerenv").exists()
 
 
 async def _read_cpu_percent(sample_seconds: float = 0.2) -> float:
@@ -67,10 +77,23 @@ ADMIN_USERNAME = (os.environ.get("ADMIN_USERNAME") or "").strip()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 _SESSION_SECRET = (os.environ.get("ADMIN_SESSION_SECRET") or "").strip()
 
-if not ADMIN_USERNAME or not ADMIN_PASSWORD or not _SESSION_SECRET:
-    logger.warning(
-        "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET must all be set; admin panel disabled"
-    )
+_ADMIN_CONFIGURED = bool(ADMIN_USERNAME and ADMIN_PASSWORD and _SESSION_SECRET)
+
+if not _ADMIN_CONFIGURED:
+    if _is_production():
+        logger.error(
+            "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET required in production; "
+            "admin API returns 503"
+        )
+    else:
+        logger.warning(
+            "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET must all be set; admin panel disabled"
+        )
+
+
+async def require_admin_configured() -> None:
+    if not _ADMIN_CONFIGURED:
+        raise HTTPException(status_code=503, detail="Admin panel not configured")
 
 _SESSION_TTL = 86400 * 7  # 7 days
 _LOGIN_WINDOW_SECONDS = 300
@@ -155,7 +178,7 @@ class LoginRequest(BaseModel):
     password: str
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(require_admin_configured)])
 async def admin_login(body: LoginRequest, request: Request):
     """Authenticate admin and return session token."""
     _check_login_rate_limit(request)
@@ -169,7 +192,10 @@ async def admin_login(body: LoginRequest, request: Request):
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
-async def verify_admin(authorization: str = Header(None)) -> bool:
+async def verify_admin(
+    authorization: str = Header(None),
+    _: None = Depends(require_admin_configured),
+) -> bool:
     """Verify session token from Authorization header."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
@@ -591,6 +617,60 @@ async def get_user_growth(
     return {"growth": growth}
 
 
+class GrantPremiumRequest(BaseModel):
+    username: str
+    remove: bool = False
+
+
+async def _resolve_user_identifier(identifier: str) -> User | None:
+    """Resolve user by numeric ID or Telegram @username (case-insensitive)."""
+    identifier = identifier.strip().lstrip("@")
+    if not identifier:
+        return None
+    async with async_session() as session:
+        try:
+            uid = int(identifier)
+            return await session.get(User, uid)
+        except ValueError:
+            result = await session.execute(
+                select(User).where(func.lower(User.username) == identifier.lower())
+            )
+            return result.scalar_one_or_none()
+
+
+@router.post("/users/grant-premium")
+async def grant_premium_by_username(
+    body: GrantPremiumRequest,
+    _: bool = Depends(verify_admin),
+):
+    """Grant or remove premium by Telegram @username or user ID."""
+    user = await _resolve_user_identifier(body.username)
+    if not user:
+        label = body.username.strip().lstrip("@")
+        raise HTTPException(status_code=404, detail=f"User @{label} not found")
+
+    async with async_session() as session:
+        db_user = await session.get(User, user.id)
+        if not db_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        db_user.is_premium = not body.remove
+        if body.remove:
+            db_user.premium_until = None
+        else:
+            db_user.premium_until = None  # admin premium = unlimited
+            badges = db_user.badges or []
+            if "premium" not in badges:
+                db_user.badges = badges + ["premium"]
+        await session.commit()
+
+    return {
+        "ok": True,
+        "user_id": user.id,
+        "username": user.username,
+        "is_premium": not body.remove,
+    }
+
+
 @router.post("/users/{user_id}/ban")
 async def ban_user(user_id: int, unban: bool = Query(False), _: bool = Depends(verify_admin)):
     """Ban or unban a user."""
@@ -601,6 +681,53 @@ async def ban_user(user_id: int, unban: bool = Query(False), _: bool = Depends(v
         user.is_banned = not unban
         await session.commit()
     return {"ok": True, "user_id": user_id, "is_banned": not unban}
+
+
+class CreatePromoRequest(BaseModel):
+    promo_type: str  # premium_7d, premium_30d
+    max_uses: int = 1
+    code: Optional[str] = None
+    expires_days: Optional[int] = None
+
+
+@router.get("/promos")
+async def get_promos(_: bool = Depends(verify_admin)):
+    """List promo codes."""
+    from bot.services.promo_service import list_promos
+    return {"items": await list_promos()}
+
+
+@router.post("/promos")
+async def create_promo_code(body: CreatePromoRequest, _: bool = Depends(verify_admin)):
+    """Create a premium promo code (auto-generated if code omitted)."""
+    if body.promo_type not in ("premium_7d", "premium_30d"):
+        raise HTTPException(status_code=400, detail="promo_type must be premium_7d or premium_30d")
+    if body.max_uses < 1 or body.max_uses > 1000:
+        raise HTTPException(status_code=400, detail="max_uses must be between 1 and 1000")
+
+    expires_days = body.expires_days
+    if expires_days is not None and (expires_days < 0 or expires_days > 365):
+        raise HTTPException(status_code=400, detail="expires_days must be between 0 and 365")
+
+    from bot.services.promo_service import create_promo_auto
+    promo = await create_promo_auto(
+        body.promo_type,
+        body.max_uses,
+        created_by=0,
+        code=body.code.strip().upper() if body.code else None,
+        expires_days=expires_days or None,
+    )
+    if not promo:
+        raise HTTPException(status_code=409, detail="Promo code already exists or could not be generated")
+
+    return {
+        "ok": True,
+        "code": promo.code,
+        "promo_type": promo.promo_type,
+        "max_uses": promo.max_uses,
+        "uses_left": promo.uses_left,
+        "expires_at": promo.expires_at.isoformat() if promo.expires_at else None,
+    }
 
 
 @router.post("/users/{user_id}/premium")

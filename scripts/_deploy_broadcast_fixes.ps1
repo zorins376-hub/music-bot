@@ -1,6 +1,8 @@
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\_deploy_env.ps1"
+$d = Get-DeploySsh
 
-$remote = "root@89.169.52.174:/root/music-bot"
+$remote = $d.Remote
 $files = @(
     "webapp/api.py",
     "webapp/frontend/index.html",
@@ -17,5 +19,5 @@ foreach ($file in $files) {
     scp $file "$remote/$file"
 }
 
-ssh root@89.169.52.174 "cd /root/music-bot && docker compose up -d --build bot"
+ssh $($d.Ssh) "cd $($d.ProjectDir) && docker compose up -d --build bot"
 Write-Output "Deploy completed"

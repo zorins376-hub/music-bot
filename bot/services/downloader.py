@@ -12,6 +12,8 @@ import uuid
 import yt_dlp
 
 from bot.config import settings, _COOKIES_PATH
+from bot.services import youtube_cookies as _yt_cookies
+from bot.services.track_format import clean_title as _clean_title, parse_artist_title as _parse_artist_title
 from bot.utils import fmt_duration as _utils_fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,33 @@ _EXPECTED_RESTRICTION_PATTERNS = [
     "Requested format is not available",
     "does not look like a Netscape format cookies file",
 ]
+
+
+_alert_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_ytdl_alert_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Register main event loop so worker threads can schedule cookie alerts."""
+    global _alert_loop
+    _alert_loop = loop
+
+
+def _maybe_notify_youtube_auth_error(error: Exception, *, context: str) -> None:
+    if not _yt_cookies.is_youtube_auth_error(error):
+        return
+    loop = _alert_loop
+    if loop is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("YouTube auth error (no event loop): %s", error)
+            return
+    coro = _yt_cookies.handle_auth_failure(error, context=context)
+    try:
+        running = asyncio.get_running_loop()
+        running.create_task(coro)
+    except RuntimeError:
+        asyncio.run_coroutine_threadsafe(coro, loop)
 
 
 def _mark_permanent_failure(video_id: str) -> None:
@@ -140,23 +169,82 @@ def log_runtime_info() -> None:
                 logger.warning("Explicit runtime '%s': exists but failed: %s", explicit, e)
         else:
             logger.warning("Explicit runtime '%s': NOT FOUND or not executable", explicit)
-    logger.info("Cookies file: %s (exists=%s)", _COOKIES_PATH, _COOKIES_PATH.exists())
+    info = _yt_cookies.validate_cookie_file()
+    logger.info(
+        "Cookies file: %s (exists=%s, valid=%s, auth=%s)",
+        _COOKIES_PATH,
+        info.get("exists"),
+        info.get("valid"),
+        info.get("auth_cookies"),
+    )
+    logger.info("bgutil PO Token URL: %s", settings.BGUTIL_POT_BASE_URL)
+    yt_proxy = (getattr(settings, "YOUTUBE_PROXY", None) or "").strip()
+    if yt_proxy:
+        logger.info("YouTube proxy: %s", yt_proxy.split("@")[-1][:60])
+    else:
+        from bot.services.proxy_pool import proxy_pool
+        if proxy_pool.size:
+            logger.info("YouTube proxy: PROXY_POOL (%d entries)", proxy_pool.size)
+        else:
+            logger.warning(
+                "YouTube proxy: none — datacenter VPS may need YOUTUBE_PROXY or PROXY_POOL"
+            )
 
 
-def _base_opts() -> dict:
-    """Return base yt-dlp options: cookies + remote EJS components + proxy."""
-    opts: dict = {"remote_components": {"ejs:github"}}
-    # Enable JS runtimes for signature solving
-    # Use deno (single static binary) with explicit path for container reliability
-    opts["js_runtimes"] = {"deno": {"path": "/usr/local/bin/deno"}, "node": {}}
-    # PO Token provider (bgutil HTTP server) + use mweb client (recommended for PO Token)
-    opts["extractor_args"] = {
-        "youtube": {"player_client": ["mweb"]},
-        "youtubepot-bgutilhttp": {"base_url": ["http://bgutil-provider:4416"]},
-    }
-    # Proxy rotation
+def _youtube_proxy() -> str | None:
+    """Proxy for YouTube requests (YOUTUBE_PROXY wins, else PROXY_POOL round-robin)."""
+    direct = (getattr(settings, "YOUTUBE_PROXY", None) or "").strip()
+    if direct:
+        return direct
     from bot.services.proxy_pool import proxy_pool
-    proxy = proxy_pool.get_next()
+    return proxy_pool.get_next()
+
+
+def _youtube_player_clients(*, has_auth_cookies: bool) -> list[str]:
+    """yt-dlp 2026.x player_client ordering.
+
+    Order matters: the first client that returns playable formats wins.
+
+    * ``android_vr`` and ``web_embedded`` are the most resilient against the
+      "Sign in to confirm you're not a bot" / LOGIN_REQUIRED walls that affect
+      datacenter IPs, even when routed through a residential / WARP proxy.
+    * ``tv_simply`` (the new TV client) often has formats when others do not.
+    * ``mweb`` + ``ios`` are kept as backups since they sometimes provide higher-
+      bitrate audio streams.
+    * ``tv_embedded`` is unsupported in current yt-dlp and was removed.
+    """
+    if has_auth_cookies:
+        return ["android_vr", "web_embedded", "tv_simply", "mweb", "web", "ios"]
+    return ["android_vr", "web_embedded", "tv_simply", "mweb", "web", "ios"]
+
+
+def _youtube_extractor_args(*, has_auth_cookies: bool) -> dict:
+    youtube_args = {
+        "player_client": _youtube_player_clients(has_auth_cookies=has_auth_cookies),
+    }
+    # yt-dlp forwards its proxy to the bgutil PO-token plugin. With local
+    # Cloudflare WARP this makes the provider fail fetching BotGuard JS, while
+    # the selected clients work through WARP without PO tokens.
+    proxy = _youtube_proxy() or ""
+    if proxy.startswith(("socks5://172.17.0.1:", "socks5h://172.17.0.1:", "socks5://127.0.0.1:", "socks5h://127.0.0.1:")):
+        return {"youtube": youtube_args}
+    pot_url = (settings.BGUTIL_POT_BASE_URL or "").strip().rstrip("/")
+    return {
+        "youtube": youtube_args,
+        "youtubepot-bgutilhttp": {"base_url": [pot_url or "http://bgutil-provider:4416"]},
+    }
+
+
+def _base_opts(*, has_auth_cookies: bool | None = None) -> dict:
+    """Return base yt-dlp options: cookies + remote EJS components + proxy."""
+    if has_auth_cookies is None:
+        has_auth_cookies = _COOKIES_PATH.exists() and bool(
+            _yt_cookies.validate_cookie_file().get("auth_cookies")
+        )
+    opts: dict = {"remote_components": {"ejs:github"}}
+    opts["js_runtimes"] = {"deno": {"path": "/usr/local/bin/deno"}, "node": {}}
+    opts["extractor_args"] = _youtube_extractor_args(has_auth_cookies=has_auth_cookies)
+    proxy = _youtube_proxy()
     if proxy:
         opts["proxy"] = proxy
     return opts
@@ -267,6 +355,7 @@ def _resolve_youtube_sync(video_id: str) -> dict | None:
             }
     except Exception as e:
         _check_permanent_failure(video_id, e)
+        _maybe_notify_youtube_auth_error(e, context=f"resolve {video_id}")
         if _is_expected_restriction_error(e):
             logger.warning("YouTube resolve unavailable for %s: %s", video_id, e)
         else:
@@ -321,6 +410,7 @@ def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
             return best_audio_url
     except Exception as e:
         _check_permanent_failure(video_id, e)
+        _maybe_notify_youtube_auth_error(e, context=f"audio url {video_id}")
         if _is_expected_restriction_error(e):
             logger.warning("YouTube audio URL resolve unavailable for %s: %s", video_id, e)
         else:
@@ -328,84 +418,6 @@ def _resolve_youtube_audio_stream_url_sync(video_id: str) -> str | None:
         return None
     finally:
         _cleanup_temp_cookie(temp_cookie)
-
-# Junk to strip from YouTube titles
-_TITLE_JUNK_RE = re.compile(
-    r"\s*[\(\[]"
-    r"(?:official\s*(?:music\s*)?video|official\s*audio|official\s*lyric[s]?\s*video"
-    r"|lyric[s]?\s*video|lyric[s]?|audio|music\s*video|видеоклип|клип|текст"
-    r"|hd|hq|4k|1080p|720p|mv|m/v"
-    r"|remaster(?:ed)?(?:\s*\d{4})?"
-    r"|live(?:\s+(?:at|from|in)\s+[^)\]]+)?"
-    r"|explicit|clean|censored|deluxe(?:\s*edition)?"
-    r"|bonus\s*track|acoustic(?:\s*version)?"
-    r"|animated\s*video|visualizer"
-    r"|prod\.?\s*(?:by\s*)?[^)\]]*"
-    r"|премьера\s*(?:клипа)?\s*,?\s*\d{4}|премьера\s*\d{4}"
-    r"|ft\.?[^)\]]*|feat\.?[^)\]]*)\s*[\)\]]",
-    re.IGNORECASE,
-)
-_EXTRA_JUNK_RE = re.compile(
-    r"\s*\|.*$"
-    r"|\s*//.*$"
-    r"|\s*#\w+"
-    r"|\s*-\s*(?:YouTube|Topic|Тема)\s*$"
-    r"|\s*\(\s*\)"
-    r"|\s*\[\s*\]",
-    re.IGNORECASE,
-)
-# Emoji / special Unicode blocks
-_EMOJI_RE = re.compile(
-    "[\U0001F300-\U0001F9FF\U00002700-\U000027BF\U0000FE00-\U0000FE0F"
-    "\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF\U00002600-\U000026FF]+",
-)
-
-
-def _clean_title(raw_title: str) -> str:
-    """Strip common YouTube junk from title."""
-    cleaned = _TITLE_JUNK_RE.sub("", raw_title)
-    cleaned = _EXTRA_JUNK_RE.sub("", cleaned)
-    cleaned = _EMOJI_RE.sub("", cleaned)
-    # Strip trailing standalone words: "lyrics", "audio", "video", "текст"
-    cleaned = re.sub(r"\s+(?:lyrics|audio|video|текст)\s*$", "", cleaned, flags=re.IGNORECASE)
-    # Normalize whitespace
-    cleaned = re.sub(r"\s{2,}", " ", cleaned)
-    return cleaned.strip()
-
-
-def _parse_artist_title(raw_title: str, uploader: str) -> tuple[str, str]:
-    """Extract clean (artist, title) from YouTube video title.
-
-    Tries to split on ' - ', ' — ', ' – '. If found, returns parsed pair.
-    Otherwise uses uploader as artist and cleaned title as song name.
-    Strips ' - Topic' from YouTube auto-generated channel names.
-    """
-    cleaned = _clean_title(raw_title)
-
-    # Try splitting on common separators
-    for sep in (" — ", " – ", " - "):
-        if sep in cleaned:
-            parts = cleaned.split(sep, 1)
-            artist = parts[0].strip()
-            title = parts[1].strip()
-            if artist and title:
-                return artist, title
-
-    # Fallback: use uploader as artist, cleaned title as song
-    artist = uploader or "Unknown"
-    # Strip " - Topic" from YouTube auto-generated channels
-    if artist.endswith(" - Topic"):
-        artist = artist[:-8].strip()
-    elif artist.endswith(" - Тема"):
-        artist = artist[:-7].strip()
-    # Strip "VEVO" suffix
-    if artist.upper().endswith("VEVO"):
-        artist = artist[:-4].strip()
-
-    return artist, cleaned or raw_title
-
-
-# _fmt_duration imported from bot.utils
 
 
 def _extract_year(entry: dict) -> str | None:
@@ -489,6 +501,7 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
             )
         return tracks[:max_results]
     except Exception as e:
+        _maybe_notify_youtube_auth_error(e, context="search")
         logger.error("Search error: %s", e)
         return []
     finally:
@@ -576,6 +589,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
             ydl.download([url])
     except Exception as e:
         _check_permanent_failure(video_id, e)
+        _maybe_notify_youtube_auth_error(e, context=f"download {video_id}")
         if _is_expected_restriction_error(e):
             logger.warning("Download unavailable for %s: %s", video_id, e)
         else:
@@ -585,6 +599,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
     finally:
         _cleanup_temp_cookie(temp_cookie)
 
+    _yt_cookies.note_download_success()
     mp3_path = output_dir / f"{file_stem}.mp3"
     if mp3_path.exists():
         return mp3_path
@@ -621,6 +636,7 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
     url = f"https://www.youtube.com/watch?v={video_id}"
     height = int(quality)
     output_template = str(output_dir / f"{video_id}_v{quality}.%(ext)s")
+    cookiefile, temp_cookie = _prepare_cookiefile()
     ydl_opts = {
         "format": f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]",
         "outtmpl": output_template,
@@ -636,16 +652,21 @@ def _download_video_sync(video_id: str, output_dir: Path, quality: str) -> Path:
             f"duration <= {settings.MAX_DURATION}"
         ),
     }
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:
         _check_permanent_failure(video_id, e)
+        _maybe_notify_youtube_auth_error(e, context=f"video {video_id}")
         if _is_expected_restriction_error(e):
             logger.warning("Video download unavailable for %s: %s", video_id, e)
         else:
             logger.error("Video download failed for %s: %s", video_id, e)
         raise
+    finally:
+        _cleanup_temp_cookie(temp_cookie)
 
     mp4_path = output_dir / f"{video_id}_v{quality}.mp4"
     if mp4_path.exists():

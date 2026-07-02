@@ -17,6 +17,7 @@ from bot.models.track import Track
 from bot.services.cache import cache
 from bot.services.downloader import download_track
 from bot.config import settings
+from bot.services.track_format import audio_tag_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -148,10 +149,9 @@ async def handle_live_play(callback: CallbackQuery, callback_data: LiveCb) -> No
             dur_str = f"{tr.duration // 60}:{tr.duration % 60:02d}" if tr.duration else "?:??"
             await callback.message.answer_audio(
                 audio=tr.file_id,
-                title=tr.title or "Unknown",
-                performer=tr.artist or label,
                 duration=tr.duration,
                 caption=f"◷ {dur_str} · {label}",
+                **audio_tag_kwargs(tr.artist or label, tr.title or "Unknown"),
             )
             await asyncio.sleep(0.3)
         except Exception as e:

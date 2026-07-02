@@ -12,6 +12,31 @@ from bot.services.provider_health import (
 )
 
 
+class TestHealthSummary:
+    def setup_method(self):
+        _stats.clear()
+        _disabled_providers.clear()
+
+    def test_empty_summary_in_russian(self):
+        from bot.services.provider_health import get_health_summary
+
+        text = get_health_summary()
+        assert "No provider data yet" not in text
+        assert "Здоровье провайдеров" in text
+
+    def test_serialize_roundtrip(self):
+        from bot.services.provider_health import _deserialize_stats, _serialize_stats
+
+        record_provider_event("yandex", "search", 1.2, True)
+        record_provider_event("youtube", "download", 3.4, False, "timeout")
+        raw = _serialize_stats()
+        _stats.clear()
+        _deserialize_stats(raw)
+        assert _stats["yandex:search"].successes == 1
+        assert _stats["youtube:download"].failures == 1
+        assert _stats["youtube:download"].last_error == "timeout"
+
+
 class TestAutoDisable:
     def setup_method(self):
         _stats.clear()

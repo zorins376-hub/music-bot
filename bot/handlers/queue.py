@@ -16,6 +16,7 @@ from bot.callbacks import QueueCb, AddToQueueCb
 from bot.db import get_or_create_user
 from bot.i18n import t
 from bot.services.cache import cache
+from bot.services.track_format import audio_tag_kwargs_from_info as _audio_tag_kwargs
 from bot.utils import fmt_duration
 
 router = Router()
@@ -124,9 +125,8 @@ async def cmd_next(message: Message) -> None:
         dur = int(track["duration"]) if track.get("duration") else 0
         await message.answer_audio(
             audio=file_id,
-            title=title,
-            performer=artist,
             duration=dur,
+            **_audio_tag_kwargs(track),
         )
     else:
         # No cached file — tell user to search
@@ -160,9 +160,8 @@ async def handle_queue_cb(callback: CallbackQuery, callback_data: QueueCb) -> No
         if file_id:
             await callback.message.answer_audio(
                 audio=file_id,
-                title=track.get("title", "Unknown"),
-                performer=track.get("uploader", "Unknown"),
                 duration=int(track["duration"]) if track.get("duration") else 0,
+                **_audio_tag_kwargs(track),
             )
         else:
             title = f"{track.get('uploader', '?')} — {track.get('title', '?')}"

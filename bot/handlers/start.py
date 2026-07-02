@@ -1,9 +1,10 @@
 import base64
 import logging
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select, update
 from sqlalchemy.sql import func
 
@@ -17,6 +18,53 @@ from bot.version import VERSION, get_new_features, get_changelog_text, CHANGELOG
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+_RANKS = [
+    (0, "Listener"),
+    (10, "Night Rider"),
+    (50, "Black Soul"),
+    (150, "Black Premium"),
+    (500, "Black Room Elite"),
+]
+
+_VIBE_NAMES = {
+    "vibe_fire": "огонь",
+    "vibe_sad": "грустный вайб",
+    "vibe_night": "ночной вайб",
+    "vibe_drive": "дорога",
+    "vibe_love": "black love",
+}
+
+
+def _rank_for(play_count: int, *, premium: bool = False, admin: bool = False) -> tuple[str, int, int]:
+    if admin:
+        return "Founder", play_count, max(play_count, 1)
+    if premium and play_count >= 50:
+        return "Black Premium", 50, 150
+    current = _RANKS[0]
+    next_threshold = _RANKS[-1][0]
+    for idx, rank in enumerate(_RANKS):
+        if play_count >= rank[0]:
+            current = rank
+            if idx + 1 < len(_RANKS):
+                next_threshold = _RANKS[idx + 1][0]
+            else:
+                next_threshold = rank[0]
+    return current[1], current[0], next_threshold
+
+
+def _progress_bar(value: int, start: int, end: int, width: int = 10) -> str:
+    if end <= start:
+        return "■" * width
+    ratio = max(0.0, min(1.0, (value - start) / (end - start)))
+    filled = int(round(ratio * width))
+    return "■" * filled + "□" * (width - filled)
+
+
+def _is_night_mode() -> bool:
+    local_hour = (datetime.now(timezone.utc) + timedelta(hours=6)).hour
+    return local_hour >= 22 or local_hour < 6
 
 
 def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> InlineKeyboardMarkup:
@@ -182,6 +230,23 @@ async def cmd_start(message: Message) -> None:
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
+
+    # Free Premium trial welcome (flag set in get_or_create_user on first creation)
+    try:
+        from bot.services.cache import cache
+        trial_days = await cache.redis.get(f"premium:trial_granted:{user.id}")
+        if trial_days:
+            await cache.redis.delete(f"premium:trial_granted:{user.id}")
+            days = trial_days if isinstance(trial_days, str) else trial_days.decode()
+            await message.answer(
+                t(user.language, "premium_trial_welcome", days=days),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
+                ]]),
+                parse_mode="HTML",
+            )
+    except Exception:
+        logger.debug("trial welcome failed for %s", user.id, exc_info=True)
 
     # Smart Onboarding v2: nudge new un-onboarded users
     if not user.onboarded:
@@ -361,11 +426,35 @@ async def _show_profile(message: Message, tg_user) -> None:
                 ListeningHistory.action == "play",
             )
         ) or 0
+        top_vibe_row = (
+            await session.execute(
+                select(ListeningHistory.action, func.count().label("cnt"))
+                .where(
+                    ListeningHistory.user_id == user.id,
+                    ListeningHistory.action.like("vibe_%"),
+                )
+                .group_by(ListeningHistory.action)
+                .order_by(func.count().desc())
+                .limit(1)
+            )
+        ).first()
 
     admin = is_admin(tg_user.id, tg_user.username)
+    rank_name, rank_start, rank_next = _rank_for(
+        play_count,
+        premium=bool(user.is_premium),
+        admin=admin,
+    )
+    progress = _progress_bar(play_count, rank_start, rank_next)
+    next_left = max(0, rank_next - play_count)
+    fav_vibe = user.fav_vibe
+    if top_vibe_row:
+        fav_vibe = _VIBE_NAMES.get(top_vibe_row[0], fav_vibe or "black")
 
     lines = [t(lang, "profile_header")]
     lines.append(t(lang, "profile_name", name=tg_user.first_name or tg_user.username or str(tg_user.id)))
+    lines.append(f"▸ Ранг: <b>{rank_name}</b>")
+    lines.append(f"▸ Прогресс: <code>{progress}</code>" + (f" до следующего: <b>{next_left}</b>" if next_left else " максимум"))
 
     if admin:
         lines.append(t(lang, "profile_status_admin"))
@@ -378,16 +467,146 @@ async def _show_profile(message: Message, tg_user) -> None:
 
     lines.append(t(lang, "profile_quality", quality=user.quality))
     lines.append(t(lang, "profile_tracks", count=play_count))
+    lines.append(f"▸ XP: <b>{user.xp or 0}</b> · Level <b>{user.level or 1}</b>")
+    lines.append(f"▸ Streak: <b>{user.streak_days or 0}</b> дн.")
     lines.append(t(lang, "profile_joined", date=user.created_at.strftime("%d.%m.%Y")))
 
     if user.fav_genres:
         lines.append(t(lang, "profile_genres", genres=", ".join(user.fav_genres)))
-    if user.fav_vibe:
-        lines.append(t(lang, "profile_vibe", vibe=user.fav_vibe))
+    if fav_vibe:
+        lines.append(t(lang, "profile_vibe", vibe=fav_vibe))
     if user.fav_artists:
         lines.append(t(lang, "profile_artists", artists=", ".join(user.fav_artists)))
+    if _is_night_mode():
+        lines.append("")
+        lines.append("◑ Night mode: сейчас BLACK ROOM звучит темнее.")
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="BLACK ROOM Wrapped", callback_data="action:wrapped")],
+        [InlineKeyboardButton(text="Мой вкус", callback_data="action:taste")],
+    ])
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+
+
+@router.message(Command("wrapped"))
+async def cmd_wrapped(message: Message) -> None:
+    await _show_wrapped(message, message.from_user)
+
+
+@router.callback_query(lambda c: c.data == "action:wrapped")
+async def handle_wrapped_button(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _show_wrapped(callback.message, callback.from_user)
+
+
+async def _show_wrapped(message: Message, tg_user) -> None:
+    user = await get_or_create_user(tg_user)
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+    async with async_session() as session:
+        play_count = await session.scalar(
+            select(func.count(ListeningHistory.id)).where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
+            )
+        ) or 0
+        if play_count < 3:
+            await message.answer(
+                "◉ <b>BLACK ROOM Wrapped</b>\n\n"
+                "Пока мало данных за неделю. Послушай ещё несколько треков — и я соберу красивую карточку.",
+                parse_mode="HTML",
+            )
+            return
+
+        top_artists_r = await session.execute(
+            select(Track.artist, func.count().label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
+                Track.artist.isnot(None),
+                Track.artist != "",
+            )
+            .group_by(Track.artist)
+            .order_by(func.count().desc())
+            .limit(5)
+        )
+        top_artists = [(row[0], row[1]) for row in top_artists_r.all()]
+
+        top_track_r = await session.execute(
+            select(Track.artist, Track.title, func.count().label("cnt"))
+            .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.action == "play",
+                ListeningHistory.created_at >= week_ago,
+            )
+            .group_by(Track.id, Track.artist, Track.title)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+        top_track = top_track_r.first()
+
+        top_source_r = await session.execute(
+            select(ListeningHistory.source, func.count().label("cnt"))
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.created_at >= week_ago,
+                ListeningHistory.source.isnot(None),
+            )
+            .group_by(ListeningHistory.source)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+        top_source = top_source_r.first()
+
+        top_vibe_r = await session.execute(
+            select(ListeningHistory.action, func.count().label("cnt"))
+            .where(
+                ListeningHistory.user_id == user.id,
+                ListeningHistory.created_at >= week_ago,
+                ListeningHistory.action.like("vibe_%"),
+            )
+            .group_by(ListeningHistory.action)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+        top_vibe = top_vibe_r.first()
+
+    top_track_str = f"{top_track[0]} — {top_track[1]}" if top_track else ""
+    lines = [
+        "◉ <b>BLACK ROOM Wrapped</b>",
+        f"▸ За неделю: <b>{play_count}</b> треков",
+    ]
+    if _is_night_mode():
+        lines.append("◑ Night edition")
+    if top_track_str:
+        lines.append(f"▸ Трек недели: <b>{top_track_str}</b>")
+    if top_artists:
+        lines.append("▸ Артисты: " + ", ".join(a for a, _ in top_artists[:3]))
+    if top_source:
+        lines.append(f"▸ Источник недели: <b>{top_source[0]}</b>")
+    if top_vibe:
+        lines.append(f"▸ Вайб недели: <b>{_VIBE_NAMES.get(top_vibe[0], 'black')}</b>")
+
+    from bot.services.story_cards import generate_recap_card
+
+    card_bytes = generate_recap_card(
+        user_name=tg_user.first_name or tg_user.username or str(tg_user.id),
+        play_count=play_count,
+        top_artists=[artist for artist, _ in top_artists],
+        top_track=top_track_str,
+    )
+    if card_bytes:
+        await message.answer_photo(
+            BufferedInputFile(card_bytes, filename="black_room_wrapped.png"),
+            caption="\n".join(lines),
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 # ── Family Plan ──────────────────────────────────────────────────────────

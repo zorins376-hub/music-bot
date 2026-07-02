@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     WEBHOOK_PATH: str = "/webhook"
     WEB_SERVER_HOST: str = "0.0.0.0"
     WEB_SERVER_PORT: int = 8080
+    TMA_PORT: int = 0  # 0 = auto (8082 when USE_WEBHOOK, else PORT/8080)
     WEBAPP_CORS_ORIGINS: List[str] = []
 
     # ── Admins ────────────────────────────────────────────────────────────
@@ -53,13 +54,27 @@ class Settings(BaseSettings):
             return [x.strip() for x in v.split(",") if x.strip()]
         return v
 
+    # ── Webapp / admin ────────────────────────────────────────────────────
+    WEBAPP_DEBUG_AUTH: bool = False
+    ENVIRONMENT: str = ""
+
     @model_validator(mode="after")
     def validate_required_runtime_settings(self):
         if not self.BOT_TOKEN or not self.BOT_TOKEN.strip():
             raise ValueError("BOT_TOKEN is required and cannot be empty")
+        if self.USE_WEBHOOK and not (self.WEBHOOK_SECRET or "").strip():
+            raise ValueError("WEBHOOK_SECRET is required when USE_WEBHOOK=true")
         if not self.ADMIN_IDS and not self.ADMIN_USERNAMES:
             import warnings
             warnings.warn("No ADMIN_IDS or ADMIN_USERNAMES configured; admin commands will be unavailable until loaded from Redis")
+        env_name = (self.ENVIRONMENT or "").strip().lower()
+        in_prod = env_name == "production" or (_IN_DOCKER and env_name != "development")
+        if in_prod and not (self.YOUTUBE_PROXY or "").strip() and not (self.PROXY_POOL or "").strip():
+            import warnings
+            warnings.warn(
+                "YOUTUBE_PROXY (or PROXY_POOL) is not set in production; "
+                "YouTube downloads often fail on datacenter VPS without a residential proxy"
+            )
         return self
 
     @field_validator("WEBAPP_CORS_ORIGINS", mode="before")
@@ -108,6 +123,11 @@ class Settings(BaseSettings):
 
     # ── YouTube cookies (base64-encoded Netscape cookies.txt) ────────────
     YT_COOKIES: Optional[str] = None
+    YT_COOKIE_ALERT_TELEGRAM: bool = True
+    # bgutil PO Token HTTP provider (docker service name or URL)
+    BGUTIL_POT_BASE_URL: str = "http://bgutil-provider:4416"
+    # Dedicated proxy for YouTube + bgutil (residential). Falls back to PROXY_POOL.
+    YOUTUBE_PROXY: Optional[str] = None
 
     # ── Spotify (v1.2) ────────────────────────────────────────────────────
     SPOTIFY_CLIENT_ID: Optional[str] = None
@@ -145,6 +165,7 @@ class Settings(BaseSettings):
     # ── Genius (lyrics) ──────────────────────────────────────────────────
     GENIUS_TOKEN: Optional[str] = None
     GENIUS_PROXY_URL: Optional[str] = None  # e.g. http://proxy:8080 for DNS-blocked envs
+    MUSIXMATCH_API_KEY: Optional[str] = None  # lyrics search; public demo key often 401
 
     # ── Prometheus metrics ────────────────────────────────────────────
     METRICS_PORT: int = 9090  # VPS: enabled (0 = disabled)
@@ -165,6 +186,8 @@ class Settings(BaseSettings):
     # ── Premium (Telegram Stars) ─────────────────────────────────────────
     PREMIUM_STAR_PRICE: int = 150  # цена в Stars (~$2-3)
     PREMIUM_DAYS: int = 30
+    # Free Premium trial granted to brand-new users on first /start (0 = off)
+    PREMIUM_TRIAL_DAYS: int = 3
 
     # ── TMA Player (1.1) ─────────────────────────────────────────────────
     TMA_URL: Optional[str] = None  # e.g. https://example.com/tma/
@@ -212,8 +235,18 @@ config = settings
 settings.DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Write YouTube cookies file from env var if provided
 _COOKIES_PATH = settings.DATA_DIR / "cookies.txt"
-if settings.YT_COOKIES:
+
+
+def sync_cookies_from_env() -> bool:
+    """Write cookies.txt from YT_COOKIES env (base64 Netscape file). Returns True if written."""
+    raw = settings.YT_COOKIES
+    if not raw or not raw.strip():
+        return False
     import base64 as _b64
-    _COOKIES_PATH.write_bytes(_b64.b64decode(settings.YT_COOKIES))
+    _COOKIES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _COOKIES_PATH.write_bytes(_b64.b64decode(raw.strip()))
+    return True
+
+
+sync_cookies_from_env()

@@ -7,9 +7,10 @@ import uuid
 from pathlib import Path
 
 from aiogram import Router
-from aiogram.enums import ChatAction
+from aiogram.enums import ChatAction, MessageEntityType
 from aiogram.filters import Command
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     CopyTextButton,
     FSInputFile,
@@ -28,10 +29,22 @@ from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
 from bot.services.metrics import cache_hits, cache_misses, requests_total
 from bot.services.provider_health import record_provider_event
-from bot.services.search_engine import _relevance_score, deduplicate_results, normalize_query, parse_query, suggest_query
+from bot.services.search_engine import (
+    _relevance_score,
+    deduplicate_results,
+    is_lyric_like_query,
+    needs_lyrics_search_boost,
+    normalize_query,
+    parse_query,
+    query_title_hint_coverage,
+    suggest_query,
+    detect_script,
+    transliterate_cyr_to_lat,
+    transliterate_lat_to_cyr,
+)
 from bot.services.analytics import track_event
 from bot.services.share_links import create_share_link, resolve_share_link
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb, WrongTrackPickCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb, TrackCardCb, TrackMenuCb, WrongTrackPickCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -47,6 +60,9 @@ _EFFECT_FIRE = "5104841245755180586"
 
 def _classify_download_error(err_msg: str) -> str:
     """Return i18n key for a download error message."""
+    from bot.services.youtube_cookies import is_youtube_auth_error
+    if is_youtube_auth_error(err_msg):
+        return "error_yt_auth"
     if "Sign in to confirm your age" in err_msg:
         return "error_age_restricted"
     if "not available" in err_msg.lower() or "geo" in err_msg.lower() or "blocked" in err_msg.lower():
@@ -173,12 +189,18 @@ async def _get_bot_setting(key: str, default: str) -> str:
 
 # session_id → {chat_id, user_msg_id, status_msg_id, created_at}
 _group_sessions: dict[str, dict] = {}
+_group_sessions_lock = asyncio.Lock()
+
+
+async def _group_sessions_pop(session_id: str) -> dict | None:
+    async with _group_sessions_lock:
+        return _group_sessions.pop(session_id, None)
 
 
 async def _schedule_group_cleanup(bot, session_id: str) -> None:
     """Delete search messages in group if no track selected within timeout."""
     await asyncio.sleep(_GROUP_CLEANUP_SEC)
-    info = _group_sessions.pop(session_id, None)
+    info = await _group_sessions_pop(session_id)
     if not info:
         return
     for mid in (info.get("status_msg_id"), info.get("user_msg_id")):
@@ -191,7 +213,7 @@ async def _schedule_group_cleanup(bot, session_id: str) -> None:
 
 async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> None:
     """After track is selected in group: delete original message + search results."""
-    info = _group_sessions.pop(session_id, None)
+    info = await _group_sessions_pop(session_id)
     # Delete the search results message (the inline keyboard message)
     try:
         await results_msg.delete()
@@ -207,18 +229,32 @@ async def _cleanup_group_search(bot, session_id: str, results_msg: Message) -> N
             logger.debug("cleanup group user msg delete failed", exc_info=True)
 
 
-# TrackCallback, FeedbackCallback, AddToPlCb imported from bot.callbacks
+from bot.services.track_format import audio_tag_kwargs_from_info as _audio_tag_kwargs, format_track_line
+
+
+def _audio_tags(track_info: dict) -> tuple[str, str]:
+    """Clean performer/title for Telegram audio bubble."""
+    kw = _audio_tag_kwargs(track_info)
+    return kw["performer"], kw["title"]
 
 
 def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool = False) -> str:
     """Build caption line: ◷ 3:42 · 192 kbps · 2019 · ◉ BLACK ROOM"""
+    from bot.services.track_flair import track_extra_caption_lines
+
     dur = track_info.get("duration_fmt") or "?:??"
     year = track_info.get("upload_year")
     year_str = f" · {year}" if year else ""
+    artist, title = _audio_tags(track_info)
+    header = f"♪ <b>{artist}</b> — {title}"
     base = t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
+    body = f"{header}\n{base}"
+    extra = track_extra_caption_lines(lang, track_info)
+    if extra:
+        body = f"{body}\n{extra}"
     if ad_free:
-        return base
-    return f"{base}\n◉ BLACK ROOM"
+        return body
+    return f"{body}\n◉ BLACK ROOM"
 
 
 def _is_ad_free(user) -> bool:
@@ -229,6 +265,179 @@ def _is_ad_free(user) -> bool:
     if user.ad_free_until and user.ad_free_until > datetime.now(tz.utc):
         return True
     return False
+
+
+async def _fetch_tracks_for_lyrics_hints(
+    lyric_hints: list[dict],
+    *,
+    search_yandex_fn,
+    search_vk_fn,
+    search_spotify_fn,
+    search_yt_fn,
+) -> list[dict]:
+    """Resolve lyrics DB hits (Genius/Musixmatch) into playable track candidates."""
+    hint_tracks: list[dict] = []
+    seen_hint_queries: set[str] = set()
+
+    for hint in lyric_hints:
+        artist_hint = (hint.get("artist") or "").strip()
+        title_hint = (hint.get("title") or "").strip()
+        if not artist_hint or not title_hint:
+            continue
+        hint_query = f"{artist_hint} {title_hint}".strip()
+        if hint_query in seen_hint_queries:
+            continue
+        seen_hint_queries.add(hint_query)
+
+        try:
+            hint_yandex, hint_vk, hint_spotify, hint_youtube = await asyncio.gather(
+                asyncio.wait_for(search_yandex_fn(hint_query, limit=2), timeout=10),
+                asyncio.wait_for(search_vk_fn(hint_query, limit=2), timeout=10),
+                asyncio.wait_for(search_spotify_fn(hint_query, limit=2), timeout=10),
+                asyncio.wait_for(search_yt_fn(hint_query, limit=2), timeout=10),
+            )
+        except Exception:
+            logger.debug("lyrics hint provider search failed q=%r", hint_query[:60], exc_info=True)
+            continue
+
+        merged = (hint_yandex or []) + (hint_vk or []) + (hint_spotify or []) + (hint_youtube or [])
+        for idx, track in enumerate(merged):
+            track["_provider_pos"] = idx
+            track["_score_query"] = hint_query
+            track["_hint_bonus"] = 2.45 if idx == 0 else 1.75
+            track["_from_lyrics"] = True
+            hint_tracks.append(track)
+
+    return hint_tracks
+
+
+async def _fetch_lyric_fallback_tracks(
+    query: str,
+    parsed: dict,
+    *,
+    search_yandex_fn,
+    search_vk_fn,
+    search_yt_fn,
+) -> list[dict]:
+    """When lyrics DB is empty, search providers directly with lyric phrasing variants."""
+    from bot.services.search_engine import (
+        extract_distinctive_lyric_words,
+        lyric_search_variants,
+        normalize_query,
+        _hint_word_in_title,
+    )
+
+    variants = lyric_search_variants(query, parsed)
+    distinctive = extract_distinctive_lyric_words(query)
+    fallback_tracks: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for v_idx, variant in enumerate(variants[:4]):
+        try:
+            yandex, vk, youtube = await asyncio.gather(
+                asyncio.wait_for(search_yandex_fn(variant, limit=3), timeout=10),
+                asyncio.wait_for(search_vk_fn(variant, limit=3), timeout=10),
+                asyncio.wait_for(search_yt_fn(variant, limit=2), timeout=10),
+            )
+        except Exception:
+            logger.debug("lyric fallback search failed q=%r", variant[:60], exc_info=True)
+            continue
+
+        merged = (yandex or []) + (vk or []) + (youtube or [])
+        for idx, track in enumerate(merged):
+            vid = track.get("video_id", "")
+            if vid and vid in seen_ids:
+                continue
+            title_n = normalize_query(track.get("title", ""))
+            blob = f"{normalize_query(track.get('uploader', ''))} {title_n}"
+            if distinctive and v_idx > 0:
+                if not any(
+                    _hint_word_in_title(w, title_n) or w in blob
+                    for w in distinctive
+                ):
+                    continue
+            if vid:
+                seen_ids.add(vid)
+            track["_provider_pos"] = idx
+            track["_score_query"] = variant
+            track["_hint_bonus"] = 1.55 if v_idx == 0 and idx == 0 else 1.25
+            track["_from_lyric_fallback"] = True
+            fallback_tracks.append(track)
+
+    return fallback_tracks
+
+
+async def _fetch_parsed_hint_tracks(
+    parsed: dict,
+    *,
+    search_yandex_fn,
+    search_vk_fn,
+    search_spotify_fn,
+    search_yt_fn,
+    include_youtube: bool = True,
+) -> list[dict]:
+    """Targeted search for parsed artist + title (e.g. 'матранг' + 'рука')."""
+    artist = (parsed.get("artist_hint") or "").strip()
+    title = (parsed.get("title_hint") or "").strip()
+    if not artist or not title:
+        return []
+
+    queries = [f"{artist} {title}", f"{artist} - {title}"]
+    if detect_script(artist) == "cyrillic":
+        lat_a = transliterate_cyr_to_lat(artist)
+        lat_t = transliterate_cyr_to_lat(title)
+        if lat_a and lat_t:
+            queries.append(f"{lat_a} {lat_t}")
+
+    hint_tracks: list[dict] = []
+    seen_ids: set[str] = set()
+    for q_idx, hint_query in enumerate(dict.fromkeys(queries)):
+        try:
+            yandex_coro = asyncio.wait_for(search_yandex_fn(hint_query, limit=3), timeout=10)
+            vk_coro = asyncio.wait_for(search_vk_fn(hint_query, limit=3), timeout=10)
+            spotify_coro = asyncio.wait_for(search_spotify_fn(hint_query, limit=3), timeout=10)
+            if include_youtube:
+                youtube_coro = asyncio.wait_for(search_yt_fn(hint_query, limit=3), timeout=8)
+                yandex, vk, spotify, youtube = await asyncio.gather(
+                    yandex_coro, vk_coro, spotify_coro, youtube_coro,
+                )
+            else:
+                yandex, vk, spotify = await asyncio.gather(
+                    yandex_coro, vk_coro, spotify_coro,
+                )
+                youtube = []
+        except Exception:
+            logger.debug("parsed hint search failed q=%r", hint_query[:60], exc_info=True)
+            continue
+
+        merged = (yandex or []) + (vk or []) + (spotify or []) + (youtube or [])
+        for idx, track in enumerate(merged):
+            vid = track.get("video_id", "")
+            if vid and vid in seen_ids:
+                continue
+            if vid:
+                seen_ids.add(vid)
+            track["_provider_pos"] = idx
+            track["_hint_bonus"] = 1.35 if q_idx == 0 and idx == 0 else 1.15
+            track["_from_parsed_hint"] = True
+            hint_tracks.append(track)
+
+    return hint_tracks
+
+
+def _filter_lyric_hints_for_artist(lyric_hints: list[dict], artist_hint: str) -> list[dict]:
+    """Prefer lyrics DB hits whose artist matches the parsed artist hint."""
+    if not artist_hint or not lyric_hints:
+        return lyric_hints
+    from bot.services.search_engine import _token_set_sim
+
+    ah = normalize_query(artist_hint)
+    matched = [
+        h for h in lyric_hints
+        if _token_set_sim(ah, normalize_query(h.get("artist", ""))) >= 0.65
+        or ah in normalize_query(h.get("artist", ""))
+    ]
+    return matched or lyric_hints
 
 
 _SEARCH_LOGO = "\u25c9 <b>BLACK ROOM</b>"
@@ -252,6 +461,130 @@ def _build_results_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def _group_pick_score(
+    track: dict,
+    *,
+    provider_query: str,
+    parsed_query: dict,
+    source_rank: dict[str, int],
+) -> float:
+    """Unified relevance score for group auto-play (matches dedup + lyrics hints)."""
+    pq_norm = normalize_query(provider_query)
+    score_q = track.get("_score_query") or pq_norm
+    parsed = parsed_query
+    if track.get("_from_lyrics") or track.get("_from_lyric_fallback"):
+        parsed = None
+    rel = _relevance_score(
+        score_q,
+        track.get("uploader", ""),
+        track.get("title", ""),
+        position=track.get("_provider_pos", 5),
+        parsed=parsed,
+    )
+    rel += float(track.get("_hint_bonus", 0.0))
+    if track.get("_from_lyrics"):
+        rel += 0.4
+    if track.get("source") != "youtube":
+        rel += 0.35
+    if track.get("file_id"):
+        rel += min(0.18, 0.05 + track.get("_downloads", 0) / 250)
+    rel += source_rank.get(track.get("source", ""), 0) * 0.01
+    if parsed_query.get("artist_hint") and parsed_query.get("title_hint"):
+        tc = query_title_hint_coverage(pq_norm, track.get("title", ""), parsed_query)
+        if tc >= 0.5:
+            rel += 0.75 + tc * 0.45
+        elif tc < 0.3:
+            rel *= 0.12
+    return rel
+
+
+def _group_play_queue(
+    results: list[dict],
+    *,
+    provider_query: str,
+    parsed_query: dict,
+    source_rank: dict[str, int],
+    best: dict | None = None,
+    max_tries: int = 5,
+) -> list[dict]:
+    """Order group download attempts by relevance; drop obvious title mismatches."""
+    ranked = _group_relevance_rank(
+        results,
+        provider_query=provider_query,
+        parsed_query=parsed_query,
+        source_rank=source_rank,
+    )
+    ordered = [t for t, _ in ranked]
+    if best is not None:
+        best_vid = best.get("video_id")
+        ordered = [best] + [t for t in ordered if t.get("video_id") != best_vid]
+
+    if parsed_query.get("title_hint"):
+        pq_norm = normalize_query(provider_query)
+
+        def _title_cov(t: dict) -> float:
+            return query_title_hint_coverage(pq_norm, t.get("title", ""), parsed_query)
+
+        title_ok = [
+            t for t in ordered
+            if t.get("_curated") or _title_cov(t) >= 0.35
+        ]
+        if title_ok:
+            ordered = title_ok
+        else:
+            # No strong match — still prefer best title overlap over random Yandex #1
+            ordered = sorted(ordered, key=_title_cov, reverse=True)
+            ordered = [t for t in ordered if _title_cov(t) > 0] or ordered[:1]
+        if best is not None and all(t.get("video_id") != best.get("video_id") for t in ordered):
+            ordered = [best] + ordered
+
+    # Dead YouTube proxy: don't burn 30s×N on uncached yt downloads when YM/VK exist
+    non_yt = [
+        t for t in ordered
+        if t.get("source") != "youtube" or t.get("file_id")
+    ]
+    if non_yt:
+        ordered = non_yt
+
+    return ordered[:max_tries]
+
+
+def _group_relevance_rank(
+    results: list[dict],
+    *,
+    provider_query: str,
+    parsed_query: dict,
+    source_rank: dict[str, int],
+) -> list[tuple[dict, float]]:
+    """Rank group candidates by relevance (lyrics hints, parsed artist/title, source)."""
+    ranked = [
+        (r, _group_pick_score(r, provider_query=provider_query, parsed_query=parsed_query, source_rank=source_rank))
+        for r in results
+    ]
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked
+
+
+def _group_choice_needed(ranked: list[tuple[dict, float]]) -> bool:
+    """Groups always auto-play — no inline choice menu in chats."""
+    return False
+
+
+def _build_group_choice_keyboard(session_id: str, results: list[dict]) -> InlineKeyboardMarkup:
+    buttons = []
+    for i, track in enumerate(results[:3]):
+        title = (track.get("title") or "")[:34]
+        artist = (track.get("uploader") or "")[:24]
+        duration = track.get("duration_fmt") or "?:??"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{i + 1}. {artist} — {title} ({duration})",
+                callback_data=WrongTrackPickCb(sid=session_id, i=i).pack(),
+            )
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 async def _do_search(message: Message, query: str) -> None:
     try:
         user = await get_or_create_user(message.from_user)
@@ -261,6 +594,15 @@ async def _do_search(message: Message, query: str) -> None:
     lang = user.language
 
     if user.is_banned:
+        return
+
+    is_group = message.chat.type in ("group", "supergroup")
+    # Groups: only Yandex/Spotify links and text search — no YouTube URLs
+    if is_group and is_youtube_url(query):
+        return
+
+    from bot.services.search_curated import is_junk_search_query
+    if is_junk_search_query(query):
         return
 
     # Admins bypass rate limits
@@ -286,7 +628,6 @@ async def _do_search(message: Message, query: str) -> None:
             user_id=user.id, query=query[:500], action="search", source="spotify"
         )
         requests_total.labels(source="spotify").inc()
-        is_group = message.chat.type in ("group", "supergroup")
         if is_group:
             await _group_auto_play(message, status, user, track_info)
         else:
@@ -312,9 +653,42 @@ async def _do_search(message: Message, query: str) -> None:
             user_id=user.id, query=query[:500], action="search", source="yandex"
         )
         requests_total.labels(source="yandex").inc()
-        is_group = message.chat.type in ("group", "supergroup")
         if is_group:
-            await _group_auto_play(message, status, user, track_info)
+            try:
+                await _group_auto_play(message, status, user, track_info, raise_on_error=True)
+            except Exception as dl_err:
+                failed_ym = track_info.get("ym_track_id")
+                logger.warning(
+                    "Yandex link auto-play failed ym=%s: %s — provider fallback",
+                    failed_ym, dl_err,
+                )
+                fallback_q = f"{track_info.get('uploader', '')} {track_info.get('title', '')}".strip()
+                alt: dict | None = None
+                if fallback_q:
+                    for batch in (
+                        await search_yandex(fallback_q, limit=5) or [],
+                        await search_vk(fallback_q, limit=3) or [],
+                    ):
+                        for cand in batch:
+                            if cand.get("ym_track_id") == failed_ym:
+                                continue
+                            if cand.get("video_id") == track_info.get("video_id"):
+                                continue
+                            alt = cand
+                            break
+                        if alt:
+                            break
+                if alt:
+                    try:
+                        await status.edit_text(t(lang, "downloading"))
+                    except Exception:
+                        pass
+                    await _group_auto_play(message, status, user, alt, raise_on_error=False)
+                else:
+                    try:
+                        await status.edit_text(t(lang, "error_download"))
+                    except Exception:
+                        pass
         else:
             session_id = secrets.token_urlsafe(6)
             await cache.store_search(session_id, [track_info])
@@ -341,7 +715,6 @@ async def _do_search(message: Message, query: str) -> None:
             user_id=user.id, query=query[:500], action="search", source="youtube"
         )
         requests_total.labels(source="youtube").inc()
-        is_group = message.chat.type in ("group", "supergroup")
         if is_group:
             await _group_auto_play(message, status, user, track_info)
         else:
@@ -361,7 +734,6 @@ async def _do_search(message: Message, query: str) -> None:
         status = await message.answer(t(lang, "searching"))
 
     _search_t0 = time.monotonic()
-    is_group = message.chat.type in ("group", "supergroup")
     if is_group:
         max_results = _MAX_RESULTS_GROUP
     else:
@@ -392,6 +764,7 @@ async def _do_search(message: Message, query: str) -> None:
         try:
             cached = await cache.get_query_cache(provider_query, source)
             if cached is not None:
+                record_provider_event(source, "search", time.monotonic() - t0, True)
                 return cached
             res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=12)
             elapsed = time.monotonic() - t0
@@ -412,19 +785,46 @@ async def _do_search(message: Message, query: str) -> None:
     async def _search_yt(query_: str, limit: int = 5) -> list[dict]:
         return await search_tracks(query_, max_results=limit, source="youtube")
 
-    from bot.services.search_engine import detect_script, transliterate_cyr_to_lat, transliterate_lat_to_cyr
+    lyric_like = is_lyric_like_query(provider_query, parsed_query)
+    lyrics_task = None
+    if lyric_like or len(provider_query.split()) >= 3:
+        async def _lyrics_lookup() -> list[dict]:
+            try:
+                from bot.services.lyrics_provider import search_by_lyrics
+                return await asyncio.wait_for(
+                    search_by_lyrics(provider_query, limit=3),
+                    timeout=10,
+                )
+            except Exception:
+                logger.debug("parallel lyrics search failed", exc_info=True)
+                return []
+
+        lyrics_task = asyncio.create_task(_lyrics_lookup())
+
+    from bot.services.search_engine import detect_script, transliterate_cyr_to_lat, transliterate_lat_to_cyr, get_query_search_aliases
 
     tasks = [
         _search_source("yandex", search_yandex, max_results),
         _search_source("spotify", search_spotify, max_results),
-        _search_source("soundcloud", _search_sc, max_results),
         _search_source("vk", search_vk, max_results),
-        _search_source("youtube", _search_yt, max_results),
     ]
+    if not is_group:
+        tasks.extend([
+            _search_source("soundcloud", _search_sc, max_results),
+            _search_source("youtube", _search_yt, max_results),
+        ])
     source_results = await asyncio.gather(*tasks)
     all_results: list[dict] = []
     for batch in source_results:
         all_results.extend(batch)
+
+    for alias_q in get_query_search_aliases(provider_query):
+        alias_batch = await _search_source(
+            "yandex",
+            lambda q, limit, aq=alias_q: search_yandex(aq, limit=limit),
+            max_results,
+        )
+        all_results.extend(alias_batch)
 
     # A-05: If few results and query is mono-language, try transliterated search
     if len(all_results) < 3:
@@ -436,67 +836,158 @@ async def _do_search(message: Message, query: str) -> None:
             alt_query = transliterate_lat_to_cyr(provider_query)
         if alt_query and alt_query != provider_query:
             alt_tasks = [
-                _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
                 _search_source("yandex", lambda q, limit=5: search_yandex(alt_query, limit=limit), max_results),
             ]
+            if not is_group:
+                alt_tasks.insert(
+                    0,
+                    _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
+                )
             alt_results = await asyncio.gather(*alt_tasks)
             for batch in alt_results:
+                all_results.extend(batch)
+
+    # Spell-correction fallback: typos in the query → poor provider hits.
+    # Only triggered when results are weak, to keep latency low.
+    if len(all_results) < 3:
+        try:
+            from bot.services.speller import correct_query
+            corrected = await correct_query(provider_query)
+        except Exception:
+            corrected = None
+        if corrected and normalize_query(corrected) != normalize_query(provider_query):
+            logger.info("search: spell-corrected %r -> %r", provider_query, corrected)
+            spell_tasks = [
+                _search_source("yandex", lambda q, limit=5: search_yandex(corrected, limit=limit), max_results),
+            ]
+            if not is_group:
+                spell_tasks.append(
+                    _search_source("youtube", lambda q, limit=5: search_tracks(corrected, max_results=limit, source="youtube"), max_results),
+                )
+            spell_results = await asyncio.gather(*spell_tasks)
+            for batch in spell_results:
                 all_results.extend(batch)
 
     # Merge local + external results, then deduplicate
     all_results = local_results + all_results
 
+    from bot.services.search_curated import inject_curated_track
+    all_results = inject_curated_track(all_results, provider_query)
+
     # Deduplicate across sources (language-aware ranking)
     script = detect_script(provider_query)
     results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results] if all_results else []
 
-    # Lyrics hint fallback: for lyric fragments with weak top-1, use lyrics search to
-    # identify likely canonical artist/title and search providers again by that hint.
-    should_try_lyrics_hint = len(provider_query.split()) >= 3
-    if should_try_lyrics_hint:
-        top_score = 0.0
-        if results:
-            top_score = _relevance_score(
+    # Parsed artist+title / lyrics enrichment when top-1 is weak.
+    lyric_hints: list[dict] = []
+    if lyrics_task is not None:
+        try:
+            lyric_hints = await lyrics_task
+        except Exception:
+            lyric_hints = []
+
+    extra_tracks: list[dict] = []
+    top_track = results[0] if results else None
+    if parsed_query.get("artist_hint") and parsed_query.get("title_hint"):
+        title_cov = (
+            query_title_hint_coverage(
                 normalize_query(provider_query),
-                results[0].get("uploader", ""),
-                results[0].get("title", ""),
-                position=results[0].get("_provider_pos", 5),
+                top_track.get("title", ""),
+                parsed_query,
             )
-        if not results or top_score < 0.85:
+            if top_track else 0.0
+        )
+        if is_group or title_cov < 0.85:
+            extra_tracks.extend(
+                await _fetch_parsed_hint_tracks(
+                    parsed_query,
+                    search_yandex_fn=search_yandex,
+                    search_vk_fn=search_vk,
+                    search_spotify_fn=search_spotify,
+                    search_yt_fn=_search_yt,
+                    include_youtube=not is_group,
+                )
+            )
+
+    _has_artist_title = bool(
+        parsed_query.get("artist_hint") and parsed_query.get("title_hint")
+    )
+    _run_lyrics_boost = needs_lyrics_search_boost(
+        provider_query, top_track, parsed=parsed_query
+    ) or (is_group and lyric_like and not _has_artist_title)
+
+    if _run_lyrics_boost:
+        if not lyric_hints:
             try:
                 from bot.services.lyrics_provider import search_by_lyrics
-
-                lyric_hints = await search_by_lyrics(provider_query, limit=2)
+                lyric_hints = await search_by_lyrics(provider_query, limit=3)
             except Exception:
                 lyric_hints = []
 
-            hint_tracks: list[dict] = []
-            seen_hint_queries: set[str] = set()
-            for hint in lyric_hints:
-                artist_hint = hint.get("artist", "").strip()
-                title_hint = hint.get("title", "").strip()
-                if not artist_hint or not title_hint:
-                    continue
-                hint_query = f"{artist_hint} {title_hint}".strip()
-                if hint_query in seen_hint_queries:
-                    continue
-                seen_hint_queries.add(hint_query)
-                try:
-                    hint_yandex, hint_youtube = await asyncio.gather(
-                        asyncio.wait_for(search_yandex(hint_query, limit=2), timeout=10),
-                        asyncio.wait_for(_search_yt(hint_query, limit=2), timeout=10),
+        artist_hint = parsed_query.get("artist_hint") or ""
+        lyric_hints = _filter_lyric_hints_for_artist(lyric_hints, artist_hint)
+
+        if not lyric_hints and all_results:
+            try:
+                from bot.services.lyrics_provider import (
+                    gather_lyric_verify_pool,
+                    resolve_lyrics_from_candidates,
+                    search_lrclib_catalog,
+                )
+                verify_pool = await gather_lyric_verify_pool(
+                    provider_query,
+                    all_results[:25],
+                    search_yandex_fn=search_yandex,
+                    search_vk_fn=search_vk,
+                    parsed=parsed_query,
+                )
+                lyric_hints = await resolve_lyrics_from_candidates(
+                    provider_query,
+                    verify_pool,
+                    limit=3,
+                )
+                if not lyric_hints:
+                    lyric_hints = await search_lrclib_catalog(provider_query, limit=3)
+                if lyric_hints:
+                    logger.info(
+                        "search: LRCLib verified q=%r hits=%s",
+                        provider_query[:60],
+                        [f"{h.get('artist')} - {h.get('title')}" for h in lyric_hints[:2]],
                     )
-                except Exception:
-                    continue
+            except Exception:
+                logger.debug("LRCLib candidate verify failed", exc_info=True)
 
-                for idx, track in enumerate((hint_yandex or []) + (hint_youtube or [])):
-                    track["_provider_pos"] = idx
-                    track["_hint_bonus"] = 0.85 if idx == 0 else 0.65
-                    hint_tracks.append(track)
+        if lyric_hints:
+            logger.info(
+                "search: lyrics boost q=%r hints=%s top=%s",
+                provider_query[:60],
+                [f"{h.get('artist')} - {h.get('title')}" for h in lyric_hints[:2]],
+                f"{top_track.get('uploader')} - {top_track.get('title')}" if top_track else "none",
+            )
+            extra_tracks.extend(
+                await _fetch_tracks_for_lyrics_hints(
+                    lyric_hints,
+                    search_yandex_fn=search_yandex,
+                    search_vk_fn=search_vk,
+                    search_spotify_fn=search_spotify,
+                    search_yt_fn=_search_yt,
+                )
+            )
+        else:
+            logger.info("search: lyrics DB empty, provider fallback q=%r", provider_query[:60])
+            extra_tracks.extend(
+                await _fetch_lyric_fallback_tracks(
+                    provider_query,
+                    parsed_query,
+                    search_yandex_fn=search_yandex,
+                    search_vk_fn=search_vk,
+                    search_yt_fn=_search_yt,
+                )
+            )
 
-            if hint_tracks:
-                all_results.extend(hint_tracks)
-                results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results]
+    if extra_tracks:
+        all_results.extend(extra_tracks)
+        results = deduplicate_results(all_results, lang_hint=script, query=provider_query)[:max_results]
 
     # DMCA filter: remove blocked tracks, show appeal button if any were blocked
     blocked_count = 0
@@ -554,6 +1045,7 @@ async def _do_search(message: Message, query: str) -> None:
             "t": "search",
             "ts": int(time.time()),
             "uid": user.id,
+            "grp": is_group,
             "q": query[:300],
             "pq": provider_query[:300],
             "n": len(results),
@@ -567,6 +1059,50 @@ async def _do_search(message: Message, query: str) -> None:
     except Exception:
         logger.debug("search audit log failed", exc_info=True)
 
+    # Tag every result with the originating query so downstream handlers
+    # (e.g. "🔁 Не тот трек?") can learn the correct track for this query.
+    for _r in results:
+        _r["_query"] = query
+
+    # Self-improving search: pin the track previously confirmed correct for this
+    # query (learned from "🔁 Не тот трек?" picks) to the top of results.
+    _learned_pin = None
+    try:
+        from bot.services.search_memory import get_learned_track
+        from bot.services.search_curated import curated_track_for_query
+
+        _curated = curated_track_for_query(query) or curated_track_for_query(provider_query)
+        _learned = None
+        for _lq in (query, provider_query):
+            _learned = await get_learned_track(_lq)
+            if _learned:
+                break
+        # Curated catalog pins override stale/wrong learned mappings.
+        if _curated and _learned and _learned.get("video_id") != _curated.get("video_id"):
+            _learned = None
+        pin = _curated or _learned
+        if pin and pin.get("video_id"):
+            _match = next(
+                (c for c in results if c.get("video_id") == pin.get("video_id")),
+                None,
+            )
+            _learned_pin = _match or pin
+            _learned_pin["_query"] = query
+            if _curated and _learned_pin is pin:
+                _learned_pin["_curated"] = True
+                _learned_pin["_hint_bonus"] = max(
+                    float(_learned_pin.get("_hint_bonus", 0.0)), 3.0,
+                )
+            results = [_learned_pin] + [
+                r for r in results if r.get("video_id") != _learned_pin.get("video_id")
+            ]
+            logger.info(
+                "search: pin vid=%s title=%s curated=%s",
+                _learned_pin.get("video_id"), _learned_pin.get("title"), bool(_curated),
+            )
+    except Exception:
+        logger.debug("learned pin failed", exc_info=True)
+
     # Groups: auto-play first track — prefer cached tracks for instant delivery
     if is_group:
         import re as _re_grp
@@ -574,46 +1110,37 @@ async def _do_search(message: Message, query: str) -> None:
         _q_has_cyr = bool(_re_grp.search(r'[а-яёА-ЯЁ]', provider_query))
         _grp_rank = _SOURCE_RANK_CYR if _q_has_cyr else _SRC_RANK_MIX
 
-        # First priority: any cached track (file_id = instant delivery)
-        best = None
-        for candidate in results[:5]:
-            if candidate.get("file_id"):
-                best = candidate
-                break
-            fid = await cache.get_file_id(candidate.get("video_id", ""), bitrate=192)
-            if fid:
-                candidate["file_id"] = fid
-                best = candidate
-                break
+        # Highest priority: a track previously confirmed correct for this query.
+        best = _learned_pin
 
-        # Second priority: for Cyrillic queries pick best Yandex/VK track;
-        # for Latin queries fall back to deduplicated rank order (results[0])
         if best is None:
-            if _q_has_cyr:
-                # Sort top-5 by Cyrillic-friendly source rank (yandex=6, vk=5 > youtube=1)
-                _grp_candidates = sorted(
-                    results[:5],
-                    key=lambda r: _grp_rank.get(r.get("source", ""), 0),
-                    reverse=True,
-                )
-                best = _grp_candidates[0]
-                logger.info(
-                    "Group: Cyrillic query → chose src=%s vid=%s title=%s",
-                    best.get("source"), best.get("video_id"), best.get("title"),
-                )
-            else:
-                best = results[0]
+            _ranked = _group_relevance_rank(
+                results,
+                provider_query=provider_query,
+                parsed_query=parsed_query,
+                source_rank=_grp_rank,
+            )
+            best = _ranked[0][0]
+            logger.info(
+                "Group: relevance pick score=%.3f src=%s vid=%s title=%s",
+                _ranked[0][1], best.get("source"), best.get("video_id"), best.get("title"),
+            )
 
-        # Build alternate-candidates list (everything except best), store for "🔁 Не тот трек?" button
-        _candidates = [r for r in results if r.get("video_id") != best.get("video_id")]
-        _alt_sid: str | None = None
-        if _candidates:
-            _alt_sid = secrets.token_urlsafe(6)
-            await cache.store_search(_alt_sid, _candidates[:4])
+        if not best.get("file_id"):
+            fid = await cache.get_file_id(best.get("video_id", ""), bitrate=192)
+            if fid:
+                best["file_id"] = fid
 
-        # Retry loop: try best first, then up to 4 other candidates
+        # Build play queue: score-sorted, title-hint filtered (no Круг on «матранг рука»)
         from bot.services.downloader import _is_permanently_failed as _pf_check
-        _play_queue = [best] + _candidates[:4]
+        _play_queue = _group_play_queue(
+            results,
+            provider_query=provider_query,
+            parsed_query=parsed_query,
+            source_rank=_grp_rank,
+            best=best,
+            max_tries=5,
+        )
         _played = False
         for _pi, _play_cand in enumerate(_play_queue):
             _vid = _play_cand.get("video_id", "")
@@ -762,10 +1289,9 @@ async def _group_auto_play(
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
             audio=local_fid,
-            title=track_info["title"],
-            performer=track_info["uploader"],
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
+            **_audio_tag_kwargs(track_info),
         )
         await _post_download(user.id, track_info, local_fid, bitrate)
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
@@ -777,10 +1303,9 @@ async def _group_auto_play(
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
             audio=file_id,
-            title=track_info["title"],
-            performer=track_info["uploader"],
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
+            **_audio_tag_kwargs(track_info),
         )
         await _post_download(user.id, track_info, file_id, bitrate)
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
@@ -854,11 +1379,10 @@ async def _group_auto_play(
         _wt_kb = _wrong_track_keyboard(alt_sid, _num_alts) if _num_alts > 0 else None
         sent = await message.answer_audio(
             audio=FSInputFile(mp3_path),
-            title=track_info["title"],
-            performer=track_info["uploader"],
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
             reply_markup=_wt_kb,
+            **_audio_tag_kwargs(track_info),
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
         await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
@@ -1064,13 +1588,20 @@ async def cb_wrong_track_pick(callback: CallbackQuery, callback_data: WrongTrack
         sent = await callback.bot.send_audio(
             chat_id=chat_id,
             audio=FSInputFile(sent_path),
-            title=sent_track.get("title", ""),
-            performer=sent_track.get("uploader", ""),
             duration=int(sent_track["duration"]) if sent_track.get("duration") else None,
             caption=_track_caption(lang, sent_track, bitrate, ad_free=_af),
+            **_audio_tag_kwargs(sent_track),
         )
         await cache.set_file_id(sent_track.get("video_id", ""), sent.audio.file_id, bitrate)
         await _post_download(user.id, sent_track, sent.audio.file_id, bitrate)
+        # Learn: this corrected pick is the right track for the original query.
+        try:
+            _learn_q = primary.get("_query") or sent_track.get("_query")
+            if _learn_q:
+                from bot.services.search_memory import remember_correction
+                await remember_correction(_learn_q, sent_track)
+        except Exception:
+            logger.debug("search_memory remember (wrong-pick) failed", exc_info=True)
         for mid in [status.message_id, orig_msg_id]:
             try:
                 await callback.bot.delete_message(chat_id, mid)
@@ -1134,6 +1665,89 @@ async def cb_dmca_appeal(callback: CallbackQuery, callback_data: AppealCb) -> No
         await callback.answer(t(lang, "dmca_appeal_error"), show_alert=True)
 
 
+_GROUP_SEARCH_PREFIXES = (
+    "включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ",
+    "музыка ", "песня ",
+)
+
+
+def _strip_bot_mention_text(text: str, bot_username: str | None) -> tuple[str, bool]:
+    if not bot_username:
+        return text, False
+    lower = text.lower()
+    at_tag = f"@{bot_username}"
+    idx = lower.find(at_tag.lower())
+    if idx == -1:
+        return text, False
+    return (text[:idx] + text[idx + len(at_tag):]).strip(), True
+
+
+def _strip_bot_mention_entities(
+    text: str, message: Message, bot_id: int, bot_username: str | None,
+) -> tuple[str, bool]:
+    if not message.entities or not message.text:
+        return text, False
+    matched = False
+    spans: list[tuple[int, int]] = []
+    for ent in message.entities:
+        if ent.type == MessageEntityType.MENTION and bot_username:
+            mention = message.text[ent.offset : ent.offset + ent.length]
+            if mention.lstrip("@").lower() == bot_username.lower():
+                matched = True
+                spans.append((ent.offset, ent.length))
+        elif ent.type == MessageEntityType.TEXT_MENTION and ent.user and ent.user.id == bot_id:
+            matched = True
+            spans.append((ent.offset, ent.length))
+    if not matched:
+        return text, False
+    raw = message.text
+    for offset, length in sorted(spans, reverse=True):
+        raw = raw[:offset] + raw[offset + length :]
+    return raw.strip()[:500], True
+
+
+def _is_reply_to_bot(message: Message, bot_id: int) -> bool:
+    reply = message.reply_to_message
+    return bool(reply and reply.from_user and reply.from_user.id == bot_id)
+
+
+def _strip_search_prefix(text: str) -> tuple[str, bool]:
+    lower = text.lower()
+    for prefix in _GROUP_SEARCH_PREFIXES:
+        if lower.startswith(prefix):
+            return text[len(prefix):].strip(), True
+    return text, False
+
+
+async def _parse_group_search_text(message: Message) -> tuple[str, bool]:
+    """Extract query from a group message; return (query, should_search)."""
+    text = (message.text or "").strip()[:500]
+    if not text:
+        return "", False
+
+    bot_me = await message.bot.me()
+    triggered = _is_reply_to_bot(message, bot_me.id)
+
+    text, mention = _strip_bot_mention_text(text, bot_me.username)
+    if mention:
+        triggered = True
+
+    text, ent_mention = _strip_bot_mention_entities(text, message, bot_me.id, bot_me.username)
+    if ent_mention:
+        triggered = True
+
+    text, prefix = _strip_search_prefix(text)
+    if prefix:
+        triggered = True
+
+    if not triggered:
+        if is_spotify_url(text) or is_yandex_music_url(text):
+            return text, True
+        return text, False
+
+    return text, True
+
+
 @router.message(Command("search"))
 async def cmd_search(message: Message) -> None:
     query = message.text.removeprefix("/search").strip()[:500]
@@ -1158,37 +1772,19 @@ async def handle_text(message: Message) -> None:
 
     is_group = message.chat.type in ("group", "supergroup")
 
-    matched_prefix = False
-
-    # Handle @bot_username mentions in groups — simple text-based detection
     if is_group:
-        bot_me = await message.bot.me()
-        if bot_me.username:
-            at_tag = f"@{bot_me.username}"
-            # Case-insensitive check
-            idx = lower.find(at_tag.lower())
-            if idx != -1:
-                text = (text[:idx] + text[idx + len(at_tag):]).strip()
-                lower = text.lower()
-                matched_prefix = True
-
-    # Natural language triggers: "включи", "поставь", "хочу послушать", "трек"
-    _PREFIXES = ("включи ", "поставь ", "хочу послушать ", "play ", "найди ", "трек ")
-    if not matched_prefix:
-        for prefix in _PREFIXES:
-            if lower.startswith(prefix):
-                text = text[len(prefix):].strip()
-                matched_prefix = True
-                break
-
-    # In groups: auto-convert YouTube/Spotify/Yandex links even without trigger prefix
-    if is_group and not matched_prefix:
-        if is_youtube_url(text) or is_spotify_url(text) or is_yandex_music_url(text):
-            await _do_search(message, text)
+        text, triggered = await _parse_group_search_text(message)
+        if not triggered:
             return
+    else:
+        text, prefix = _strip_search_prefix(text)
+        # prefix stripping optional in DM — keep going even without prefix
+
+    # In groups: links already handled inside _parse_group_search_text
+    if is_group and not text:
         return
 
-    if not text:
+    if not is_group and not text:
         return
 
     # Intent detection: "random", "рандом", "что-нибудь", "любой трек", etc.
@@ -1252,6 +1848,8 @@ async def handle_track_select(
             "t": "pick",
             "ts": int(time.time()),
             "uid": user.id,
+            "grp": is_group,
+            "q": (track_info.get("_query") or "")[:300],
             "idx": callback_data.i,
             "n": len(results),
             "artist": track_info.get("uploader", "")[:120],
@@ -1280,11 +1878,10 @@ async def handle_track_select(
             caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
             await callback.message.answer_audio(
                 audio=local_fid,
-                title=track_info["title"],
-                performer=track_info["uploader"],
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=caption,
                 message_effect_id=_EFFECT_FIRE if not is_group else None,
+                **_audio_tag_kwargs(track_info),
             )
             tid = await _post_download(user.id, track_info, local_fid, bitrate)
             if is_group:
@@ -1305,11 +1902,10 @@ async def handle_track_select(
             caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
             await callback.message.answer_audio(
                 audio=file_id,
-                title=track_info["title"],
-                performer=track_info["uploader"],
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=caption,
                 message_effect_id=_EFFECT_FIRE if not is_group else None,
+                **_audio_tag_kwargs(track_info),
             )
             tid = await _post_download(user.id, track_info, file_id, bitrate)
             if is_group:
@@ -1330,6 +1926,8 @@ async def handle_track_select(
         progress_cb = _make_progress_cb(status, lang)
         mp3_path: Path | None = None
         _dl_id = uuid.uuid4().hex[:8]
+        _dl_t0 = time.monotonic()
+        _dl_src = track_info.get("source", "youtube")
 
         try:
             if track_info.get("source") == "yandex" and track_info.get("ym_track_id"):
@@ -1381,14 +1979,14 @@ async def handle_track_select(
 
             sent = await callback.message.answer_audio(
                 audio=FSInputFile(mp3_path),
-                title=track_info["title"],
-                performer=track_info["uploader"],
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
                 message_effect_id=_EFFECT_FIRE if not is_group else None,
+                **_audio_tag_kwargs(track_info),
             )
 
             await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+            record_provider_event(_dl_src, "download", time.monotonic() - _dl_t0, True)
             tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
             await status.delete()
             if is_group:
@@ -1403,6 +2001,7 @@ async def handle_track_select(
 
         except Exception as e:
             err_msg = str(e)
+            record_provider_event(_dl_src, "download", time.monotonic() - _dl_t0, False, err_msg)
             logger.error("Download error for %s: %s", video_id, err_msg)
             # C-07: Auto-retry with a different source (only if the original source was not YouTube)
             failed_source = track_info.get("source", "youtube")
@@ -1420,10 +2019,9 @@ async def handle_track_select(
                         try:
                             sent = await callback.message.answer_audio(
                                 audio=FSInputFile(retry_path),
-                                title=track_info["title"],
-                                performer=track_info["uploader"],
                                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                                 caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+                                **_audio_tag_kwargs(track_info),
                             )
                             await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
                             tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
@@ -1462,14 +2060,18 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
     """Records track in DB and listening event. Returns track DB id (0 on DB error)."""
     await increment_request_count(user_id)
     try:
+        _tags = _audio_tag_kwargs(track_info)
         track = await upsert_track(
             source_id=track_info["video_id"],
-            title=track_info["title"],
-            artist=track_info["uploader"],
+            title=_tags["title"],
+            artist=_tags["performer"],
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             file_id=file_id,
             source=track_info.get("source", "youtube"),
             channel="external",
+            cover_url=track_info.get("cover_url"),
+            album=track_info.get("album"),
+            release_year=track_info.get("upload_year") or track_info.get("release_year"),
         )
     except Exception as e:
         logger.warning("_post_download: upsert_track failed: %s", e)
@@ -1518,8 +2120,48 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
     return track.id
 
 
-def _feedback_keyboard(track_id: int, share_query: str = "", share_url: str = "") -> InlineKeyboardMarkup:
+def _feedback_keyboard(
+    track_id: int,
+    share_query: str = "",
+    share_url: str = "",
+    *,
+    expanded: bool = False,
+) -> InlineKeyboardMarkup:
+    vibe_row = [
+        InlineKeyboardButton(
+            text="🔥",
+            callback_data=FeedbackCallback(tid=track_id, act="vibe_fire").pack(),
+        ),
+        InlineKeyboardButton(
+            text="💔",
+            callback_data=FeedbackCallback(tid=track_id, act="vibe_sad").pack(),
+        ),
+        InlineKeyboardButton(
+            text="🌙",
+            callback_data=FeedbackCallback(tid=track_id, act="vibe_night").pack(),
+        ),
+        InlineKeyboardButton(
+            text="🚗",
+            callback_data=FeedbackCallback(tid=track_id, act="vibe_drive").pack(),
+        ),
+        InlineKeyboardButton(
+            text="🖤",
+            callback_data=FeedbackCallback(tid=track_id, act="vibe_love").pack(),
+        ),
+    ]
+    if not expanded:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            vibe_row,
+            [
+                InlineKeyboardButton(
+                    text="⋯ Ещё",
+                    callback_data=TrackMenuCb(tid=track_id, act="more").pack(),
+                )
+            ],
+        ])
+
     rows = [
+        vibe_row,
         [
             InlineKeyboardButton(
                 text="\u2764\ufe0f",
@@ -1558,14 +2200,22 @@ def _feedback_keyboard(track_id: int, share_query: str = "", share_url: str = ""
                 callback_data=SimilarCb(tid=track_id).pack(),
             ),
             InlineKeyboardButton(
+                text="◩ Карточка",
+                callback_data=TrackCardCb(tid=track_id).pack(),
+            ),
+            InlineKeyboardButton(
                 text="📸 Story",
                 callback_data=StoryCb(tid=track_id).pack(),
+            ),
+            InlineKeyboardButton(
+                text="Скрыть",
+                callback_data=TrackMenuCb(tid=track_id, act="hide").pack(),
             ),
         ],
     ]
     # Copy-to-clipboard: share link
     if share_url:
-        rows[2].append(
+        rows[3].append(
             InlineKeyboardButton(
                 text="\U0001f4cb \u0421\u0441\u044b\u043b\u043a\u0430",
                 copy_text=CopyTextButton(text=share_url),
@@ -1573,13 +2223,36 @@ def _feedback_keyboard(track_id: int, share_query: str = "", share_url: str = ""
         )
     # E-03: Share button
     if share_query:
-        rows[1].append(
+        rows[2].append(
             InlineKeyboardButton(
                 text="\U0001f4e8",
                 switch_inline_query=share_query[:64],
             )
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(TrackMenuCb.filter())
+async def handle_track_menu(callback: CallbackQuery, callback_data: TrackMenuCb) -> None:
+    """Expand/collapse the post-track action keyboard."""
+    await callback.answer()
+    share_url = ""
+    if callback_data.act == "more":
+        try:
+            bot_me = await callback.bot.me()
+            share_url = f"https://t.me/{bot_me.username}?start=tr_{callback_data.tid}"
+        except Exception:
+            logger.debug("track menu share url build failed", exc_info=True)
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=_feedback_keyboard(
+                callback_data.tid,
+                share_url=share_url,
+                expanded=callback_data.act == "more",
+            )
+        )
+    except Exception:
+        logger.debug("track menu edit failed", exc_info=True)
 
 
 @router.callback_query(FeedbackCallback.filter())
@@ -1597,6 +2270,30 @@ async def handle_feedback(
         action=callback_data.act,
         source="search",
     )
+    if callback_data.act.startswith("vibe_"):
+        vibe_labels = {
+            "vibe_fire": "огонь",
+            "vibe_sad": "грусть",
+            "vibe_night": "ночь",
+            "vibe_drive": "дорога",
+            "vibe_love": "black love",
+        }
+        try:
+            from bot.models.base import async_session as _async_session
+            from bot.models.user import User as _User
+            from sqlalchemy import update as _update
+
+            async with _async_session() as session:
+                await session.execute(
+                    _update(_User)
+                    .where(_User.id == user.id)
+                    .values(fav_vibe=vibe_labels.get(callback_data.act, "black"))
+                )
+                await session.commit()
+        except Exception:
+            logger.debug("vibe fav update failed user=%s", user.id, exc_info=True)
+        await callback.answer(f"Запомнил вайб: {vibe_labels.get(callback_data.act, 'black')}")
+        return
     emoji = "❤️" if callback_data.act == "like" else "👎"
     await callback.answer(t(user.language, "feedback_recorded", emoji=emoji))
     await callback.message.edit_text(
@@ -1655,50 +2352,93 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
         await callback.answer()
         await callback.message.answer_audio(
             audio=track.file_id,
-            title=track.title or "Unknown",
-            performer=track.artist or "Unknown",
             duration=int(track.duration) if track.duration else None,
             caption=t(lang, "shared_track_caption"),
+            **_audio_tag_kwargs({"uploader": track.artist, "title": track.title}),
         )
     else:
         await callback.answer()
         await callback.message.answer(t(lang, "share_track_no_file"))
 
 
-@router.callback_query(StoryCb.filter())
-async def handle_story_card(callback: CallbackQuery, callback_data: StoryCb) -> None:
-    """Generate and send a story card for a track."""
-    user = await get_or_create_user(callback.from_user)
-
+async def _load_track_by_id(track_id: int):
     from bot.models.base import async_session
     from bot.models.track import Track
     from sqlalchemy import select as _sel
 
     async with async_session() as session:
-        track = (await session.execute(_sel(Track).where(Track.id == callback_data.tid))).scalar_one_or_none()
+        return (await session.execute(_sel(Track).where(Track.id == track_id))).scalar_one_or_none()
+
+
+async def _fetch_cover_bytes(cover_url: str | None) -> bytes | None:
+    if not cover_url:
+        return None
+    try:
+        from bot.services.http_session import get_session
+
+        async with get_session().get(cover_url, timeout=8) as resp:
+            if resp.status != 200:
+                return None
+            content_type = resp.headers.get("content-type", "")
+            if "image" not in content_type:
+                return None
+            return await resp.read()
+    except Exception:
+        logger.debug("cover fetch failed url=%s", cover_url, exc_info=True)
+        return None
+
+
+async def _send_track_card(callback: CallbackQuery, track_id: int, *, story: bool) -> None:
+    """Generate and send either a compact card or a story-style card."""
+    try:
+        user = await get_or_create_user(callback.from_user)
+        lang = user.language
+    except Exception:
+        lang = "ru"
+    track = await _load_track_by_id(track_id)
 
     if not track:
         await callback.answer("⚠️ Трек не найден", show_alert=True)
         return
 
-    await callback.answer("📸 Генерирую карточку...")
+    await callback.answer("Генерирую карточку...")
     from bot.services.story_cards import generate_track_card
     from bot.utils import fmt_duration
-    from aiogram.types import BufferedInputFile
+
+    cover_bytes = await _fetch_cover_bytes(track.cover_url)
 
     card_bytes = generate_track_card(
         artist=track.artist or "Unknown",
         title=track.title or "Unknown",
         track_id=track.id,
         duration=fmt_duration(track.duration or 0),
+        cover_bytes=cover_bytes,
     )
     if card_bytes:
+        filename = "black_room_story.png" if story else "black_room_card.png"
+        caption = (
+            "Готово. Вертикальная Story-карточка для Telegram Stories."
+            if story
+            else f"◉ BLACK ROOM\n{track.artist or 'Unknown'} — {track.title or 'Unknown'}"
+        )
         await callback.message.answer_photo(
-            photo=BufferedInputFile(card_bytes, filename="story.png"),
-            caption="📸 Поделись этой карточкой в Stories!",
+            photo=BufferedInputFile(card_bytes, filename=filename),
+            caption=caption,
         )
     else:
-        await callback.message.answer("⚠️ Не удалось сгенерировать карточку (Pillow не установлен)")
+        await callback.message.answer(t(lang, "story_card_error"))
+
+
+@router.callback_query(TrackCardCb.filter())
+async def handle_track_card(callback: CallbackQuery, callback_data: TrackCardCb) -> None:
+    """Generate and send a visual track card."""
+    await _send_track_card(callback, callback_data.tid, story=False)
+
+
+@router.callback_query(StoryCb.filter())
+async def handle_story_card(callback: CallbackQuery, callback_data: StoryCb) -> None:
+    """Generate and send a story card for a track."""
+    await _send_track_card(callback, callback_data.tid, story=True)
 
 
 async def show_shared_track(message: Message, share_id: str) -> None:

@@ -28,9 +28,38 @@ router = Router()
 
 _BONUS_PER_REF = 5
 _MAX_BONUS = 50
+_PREMIUM_3_DAYS = 7
 _PREMIUM_10_DAYS = 3
 _PREMIUM_50_DAYS = 30
 _MIN_DOWNLOADS_TO_COUNT = 3
+
+# milestone -> (premium_days, i18n_key)
+_MILESTONES = {
+    3: (_PREMIUM_3_DAYS, "referral_reward_3"),
+    10: (_PREMIUM_10_DAYS, "referral_reward_10"),
+    50: (_PREMIUM_50_DAYS, "referral_reward_50"),
+}
+
+
+async def _notify_referrer(referrer_id: int, lang: str, key: str, **kwargs) -> None:
+    """Send a Telegram message to the referrer without needing a bot instance."""
+    import aiohttp
+
+    from bot.config import settings
+
+    if not settings.BOT_TOKEN:
+        return
+    text = t(lang, key, **kwargs)
+    url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+    try:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            await session.post(
+                url,
+                json={"chat_id": referrer_id, "text": text, "parse_mode": "HTML"},
+            )
+    except Exception:
+        logger.debug("notify referrer %s failed", referrer_id, exc_info=True)
 
 
 @router.message(Command("referral"))
@@ -102,21 +131,27 @@ async def check_referral_activation(user_id: int, download_count: int) -> None:
 
         values = {"referral_count": new_count, "referral_bonus_tracks": new_bonus}
 
-        # Premium rewards
-        if new_count == 10:
-            until = datetime.now(timezone.utc) + timedelta(days=_PREMIUM_10_DAYS)
-            if not referrer.premium_until or referrer.premium_until < until:
-                values["is_premium"] = True
-                values["premium_until"] = until
-        elif new_count == 50:
-            until = datetime.now(timezone.utc) + timedelta(days=_PREMIUM_50_DAYS)
+        # Premium rewards at milestones
+        reward = _MILESTONES.get(new_count)
+        premium_days = 0
+        if reward:
+            premium_days, _key = reward
+            until = datetime.now(timezone.utc) + timedelta(days=premium_days)
             if not referrer.premium_until or referrer.premium_until < until:
                 values["is_premium"] = True
                 values["premium_until"] = until
 
+        referrer_lang = referrer.language or "ru"
         await session.execute(
             update(User).where(User.id == referrer.id).values(**values)
         )
         await session.commit()
 
     logger.info("Referral activated: user %s referred by %s (count=%d)", user_id, referrer.id, new_count)
+
+    # Notify the referrer about the new referral and any milestone reward
+    if reward:
+        _days, key = reward
+        await _notify_referrer(referrer.id, referrer_lang, key, count=new_count, days=premium_days)
+    else:
+        await _notify_referrer(referrer.id, referrer_lang, "referral_new", count=new_count, bonus=new_bonus)

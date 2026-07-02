@@ -61,6 +61,17 @@ class StoryCb(CallbackData, prefix="sty"):
     tid: int  # track DB id
 
 
+class TrackCardCb(CallbackData, prefix="tcard"):
+    """Generate compact visual track card callback."""
+    tid: int  # track DB id
+
+
+class TrackMenuCb(CallbackData, prefix="tm"):
+    """Expand compact post-track action menu."""
+    tid: int
+    act: str  # more / hide
+
+
 class MixCb(CallbackData, prefix="mix"):
     """Daily mix callback actions."""
     act: str  # save

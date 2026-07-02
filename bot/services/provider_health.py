@@ -4,16 +4,20 @@ provider_health.py — Track provider latency and reliability.
 Records search/download timings and success rates per provider.
 Provides health scores and admin-visible stats.
 """
+import asyncio
+import json
 import logging
 import time
 from collections import defaultdict
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 _WINDOW = 100  # keep last N events per provider
+_REDIS_KEY = "provider_health:v1"
+_REDIS_TTL = 7 * 24 * 3600  # 7 days
+_persist_task: asyncio.Task | None = None
 
 
 @dataclass
@@ -109,6 +113,7 @@ class provider_timer:
         else:
             _stats[key].record_failure(elapsed, str(exc_val or ""))
         _check_auto_disable(self.provider)
+        _schedule_persist()
         return False  # don't suppress exception
 
 
@@ -119,8 +124,78 @@ def record_provider_event(provider: str, operation: str, latency: float, success
         _stats[key].record_success(latency)
     else:
         _stats[key].record_failure(latency, error)
-    # Auto-disable check after recording
     _check_auto_disable(provider)
+    _schedule_persist()
+
+
+def _has_any_data() -> bool:
+    return any(stat.total > 0 for stat in _stats.values())
+
+
+def _serialize_stats() -> dict:
+    out: dict = {}
+    for key, stat in _stats.items():
+        if stat.total == 0:
+            continue
+        out[key] = {
+            "successes": stat.successes,
+            "failures": stat.failures,
+            "latencies": stat.latencies[-_WINDOW:],
+            "last_error": stat.last_error,
+            "last_error_at": stat.last_error_at.isoformat() if stat.last_error_at else None,
+        }
+    return out
+
+
+def _deserialize_stats(data: dict) -> None:
+    for key, raw in data.items():
+        stat = _stats[key]
+        stat.successes = int(raw.get("successes", 0))
+        stat.failures = int(raw.get("failures", 0))
+        stat.latencies = list(raw.get("latencies") or [])[-_WINDOW:]
+        stat.last_error = raw.get("last_error")
+        ts = raw.get("last_error_at")
+        stat.last_error_at = datetime.fromisoformat(ts) if ts else None
+
+
+def _schedule_persist() -> None:
+    global _persist_task
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if _persist_task is None or _persist_task.done():
+        _persist_task = loop.create_task(_persist_stats_to_redis())
+
+
+async def _persist_stats_to_redis() -> None:
+    await asyncio.sleep(1)
+    payload = _serialize_stats()
+    if not payload:
+        return
+    try:
+        from bot.services.cache import cache
+
+        await cache.redis.setex(_REDIS_KEY, _REDIS_TTL, json.dumps(payload))
+    except Exception:
+        logger.debug("provider_health persist failed", exc_info=True)
+
+
+async def ensure_stats_loaded() -> None:
+    """Load persisted stats from Redis when in-memory window is empty."""
+    if _has_any_data():
+        return
+    try:
+        from bot.services.cache import cache
+
+        raw = await cache.redis.get(_REDIS_KEY)
+        if not raw:
+            return
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            _deserialize_stats(data)
+    except Exception:
+        logger.debug("provider_health load failed", exc_info=True)
 
 
 def _check_auto_disable(provider: str) -> None:
@@ -170,10 +245,14 @@ def get_provider_health(provider: str | None = None) -> dict:
 
 def get_health_summary() -> str:
     """Format a human-readable health summary for admin panel."""
-    if not _stats:
-        return "No provider data yet."
+    if not _has_any_data():
+        return (
+            "<b>🩺 Здоровье провайдеров</b>\n\n"
+            "Пока нет статистики — она появится после первых поисков и скачиваний.\n"
+            "Если только что перезапускали бота, подождите пару запросов от пользователей."
+        )
 
-    lines = ["<b>Provider Health</b>\n"]
+    lines = ["<b>🩺 Здоровье провайдеров</b>\n"]
     for key in sorted(_stats.keys()):
         stat = _stats[key]
         if stat.total == 0:
@@ -187,9 +266,15 @@ def get_health_summary() -> str:
             f"n={stat.total}"
         )
         if stat.last_error:
-            lines.append(f"   └ last err: {stat.last_error[:60]}")
+            lines.append(f"   └ {stat.last_error[:80]}")
 
-    return "\n".join(lines) if len(lines) > 1 else "No provider data yet."
+    if _disabled_providers:
+        lines.append("\n<b>Отключены автоматически:</b> " + ", ".join(sorted(_disabled_providers)))
+
+    return "\n".join(lines) if len(lines) > 1 else (
+        "<b>🩺 Здоровье провайдеров</b>\n\n"
+        "Пока нет статистики — она появится после первых поисков и скачиваний."
+    )
 
 
 def _stat_to_dict(stat: _ProviderStat) -> dict:
