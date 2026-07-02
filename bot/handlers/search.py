@@ -1038,75 +1038,63 @@ async def _do_search(message: Message, query: str) -> None:
                 break
 
     if _run_lyrics_boost:
-        if not lyric_hints:
-            try:
-                from bot.services.lyrics_provider import search_by_lyrics
-                lyric_hints = await asyncio.wait_for(
-                    search_by_lyrics(provider_query, limit=3), timeout=6
-                )
-            except Exception:
-                lyric_hints = []
+        # The lyric-verify machinery (verify pool + per-candidate lyric fetches +
+        # provider fallback) is otherwise unbounded and has hung searches for 2+
+        # minutes when the lyric providers are slow/rate-limited. Wrap the WHOLE
+        # boost in a single hard deadline so it can never dominate a search.
+        async def _run_lyric_boost() -> list[dict]:
+            _hints = lyric_hints
+            if not _hints:
+                try:
+                    from bot.services.lyrics_provider import search_by_lyrics
+                    _hints = await search_by_lyrics(provider_query, limit=3)
+                except Exception:
+                    _hints = []
+            _hints = _filter_lyric_hints_for_artist(_hints, parsed_query.get("artist_hint") or "")
 
-        artist_hint = parsed_query.get("artist_hint") or ""
-        lyric_hints = _filter_lyric_hints_for_artist(lyric_hints, artist_hint)
-
-        if not lyric_hints and all_results:
-            try:
-                from bot.services.lyrics_provider import (
-                    gather_lyric_verify_pool,
-                    resolve_lyrics_from_candidates,
-                    search_lrclib_catalog,
-                )
-                verify_pool = await gather_lyric_verify_pool(
-                    provider_query,
-                    all_results[:25],
-                    search_yandex_fn=search_yandex,
-                    search_vk_fn=search_vk,
-                    parsed=parsed_query,
-                )
-                lyric_hints = await resolve_lyrics_from_candidates(
-                    provider_query,
-                    verify_pool,
-                    limit=3,
-                )
-                if not lyric_hints:
-                    lyric_hints = await search_lrclib_catalog(provider_query, limit=3)
-                if lyric_hints:
-                    logger.info(
-                        "search: LRCLib verified q=%r hits=%s",
-                        provider_query[:60],
-                        [f"{h.get('artist')} - {h.get('title')}" for h in lyric_hints[:2]],
+            if not _hints and all_results:
+                try:
+                    from bot.services.lyrics_provider import (
+                        gather_lyric_verify_pool,
+                        resolve_lyrics_from_candidates,
+                        search_lrclib_catalog,
                     )
-            except Exception:
-                logger.debug("LRCLib candidate verify failed", exc_info=True)
+                    verify_pool = await gather_lyric_verify_pool(
+                        provider_query, all_results[:25],
+                        search_yandex_fn=search_yandex, search_vk_fn=search_vk,
+                        parsed=parsed_query,
+                    )
+                    _hints = await resolve_lyrics_from_candidates(provider_query, verify_pool, limit=3)
+                    if not _hints:
+                        _hints = await search_lrclib_catalog(provider_query, limit=3)
+                    if _hints:
+                        logger.info(
+                            "search: LRCLib verified q=%r hits=%s", provider_query[:60],
+                            [f"{h.get('artist')} - {h.get('title')}" for h in _hints[:2]],
+                        )
+                except Exception:
+                    logger.debug("LRCLib candidate verify failed", exc_info=True)
 
-        if lyric_hints:
-            logger.info(
-                "search: lyrics boost q=%r hints=%s top=%s",
-                provider_query[:60],
-                [f"{h.get('artist')} - {h.get('title')}" for h in lyric_hints[:2]],
-                f"{top_track.get('uploader')} - {top_track.get('title')}" if top_track else "none",
-            )
-            extra_tracks.extend(
-                await _fetch_tracks_for_lyrics_hints(
-                    lyric_hints,
-                    search_yandex_fn=search_yandex,
-                    search_vk_fn=search_vk,
-                    search_spotify_fn=search_spotify,
-                    search_yt_fn=_search_yt,
+            if _hints:
+                logger.info(
+                    "search: lyrics boost q=%r hints=%s top=%s", provider_query[:60],
+                    [f"{h.get('artist')} - {h.get('title')}" for h in _hints[:2]],
+                    f"{top_track.get('uploader')} - {top_track.get('title')}" if top_track else "none",
                 )
-            )
-        else:
+                return await _fetch_tracks_for_lyrics_hints(
+                    _hints, search_yandex_fn=search_yandex, search_vk_fn=search_vk,
+                    search_spotify_fn=search_spotify, search_yt_fn=_search_yt,
+                )
             logger.info("search: lyrics DB empty, provider fallback q=%r", provider_query[:60])
-            extra_tracks.extend(
-                await _fetch_lyric_fallback_tracks(
-                    provider_query,
-                    parsed_query,
-                    search_yandex_fn=search_yandex,
-                    search_vk_fn=search_vk,
-                    search_yt_fn=_search_yt,
-                )
+            return await _fetch_lyric_fallback_tracks(
+                provider_query, parsed_query,
+                search_yandex_fn=search_yandex, search_vk_fn=search_vk, search_yt_fn=_search_yt,
             )
+
+        try:
+            extra_tracks.extend(await asyncio.wait_for(_run_lyric_boost(), timeout=12))
+        except Exception:
+            logger.debug("lyric boost timed out/failed for %r", provider_query[:60], exc_info=True)
 
     if extra_tracks:
         all_results.extend(extra_tracks)
