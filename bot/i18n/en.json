@@ -79,7 +79,7 @@
   "micro_flac_desc": "Download one track in FLAC quality",
   "micro_flac_success": "✧ FLAC credit added! Use it on your next download.",
 
-  "referral_info": "🤝 <b>Referral Program</b>\n\nYour link: <code>{link}</code>\n\n👥 Invited: {count}\n🎵 Bonus tracks/day: +{bonus}\n\n• +5 tracks/day per friend (up to +50)\n• 3 friends → 7 days Premium\n• 10 friends → 3 days Premium\n• 50 friends → 30 days Premium",
+  "referral_info": "🤝 <b>Referral Program</b>\n\nYour link: <code>{link}</code>\n\n👥 Invited: {count}\n🎵 Bonus tracks/day: +{bonus}\n\n• +5 tracks/day per friend (up to +50)\n• 3 friends → 3 days Premium\n• 10 friends → 7 days Premium\n• 50 friends → 30 days Premium",
   "referral_welcome": "👋 You were invited by a friend! Welcome to BLACK ROOM.",
   "referral_new": "🎉 A new friend joined via your link! Total invited: <b>{count}</b>.\nBonus tracks/day: +{bonus}",
   "referral_reward_3": "🎁 <b>3 friends invited!</b>\nYou earned <b>{days} days of Premium</b>. Keep going!",
@@ -139,6 +139,7 @@
   "pl_track_exists": "This track is already in the playlist.",
   "pl_track_limit": "Maximum 50 tracks per playlist.",
   "pl_pick": "Choose a playlist:",
+  "pl_empty": "This playlist is empty.",
   "pl_empty_create_first": "No playlists yet. Create one via /playlist",
   "pl_play_all": "▸ Play all",
   "pl_shuffle": "⇄ Shuffle",
@@ -242,6 +243,7 @@
   "share_track_expired": "⚠️ Link is invalid or expired",
   "share_track_open_header": "📥 <b>A track was shared with you</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
   "share_track_download_btn": "⬇️ Download",
+  "shared_track_caption": "🎵 Shared via BLACK ROOM",
   "share_track_no_file": "⚠️ File is not in cache. Find this track via /search",
 
   "mix_header": "✦ <b>Daily Mix</b>\n\nYour pick for today: <b>{count}</b> tracks",

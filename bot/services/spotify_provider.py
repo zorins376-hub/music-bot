@@ -63,8 +63,11 @@ def _get_client():
 
 
 def _is_auth_or_forbidden_error(exc: Exception) -> bool:
+    http_status = getattr(exc, "http_status", None)
+    if http_status in (401, 403):
+        return True
     msg = str(exc).lower()
-    return " 401 " in msg or " 403 " in msg or "forbidden" in msg or "valid user authentication required" in msg
+    return "401" in msg or "403" in msg or "forbidden" in msg or "valid user authentication required" in msg
 
 
 def _disable_temporarily(reason: Exception) -> None:

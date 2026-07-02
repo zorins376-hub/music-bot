@@ -49,7 +49,7 @@ echo "=== [3/6] Installing tools ==="
 apt-get install -y -qq git curl htop
 
 echo "=== [4/6] Cloning repository ==="
-REPO_DIR="/opt/music-bot"
+REPO_DIR="/root/music-bot"
 if [ -d "$REPO_DIR/.git" ]; then
     echo "Repo exists, pulling latest..."
     cd "$REPO_DIR"
@@ -61,6 +61,7 @@ else
 fi
 
 echo "=== [5/6] Creating .env skeleton ==="
+if [ ! -f "$REPO_DIR/.env" ]; then
 cat > "$REPO_DIR/.env" << 'ENVEOF'
 # Fill BOT_TOKEN and POSTGRES_PASSWORD before going live
 BOT_TOKEN=
@@ -83,9 +84,11 @@ MAX_DURATION=600
 
 SUPABASE_AI_ENABLED=false
 ENVEOF
-
 echo ".env created ($(wc -l < $REPO_DIR/.env) lines)"
 echo ">>> Edit $REPO_DIR/.env and set BOT_TOKEN + POSTGRES_PASSWORD"
+else
+echo ".env already exists — preserving it (skeleton not written)"
+fi
 
 echo "=== [6/6] Building and starting containers ==="
 cd "$REPO_DIR"

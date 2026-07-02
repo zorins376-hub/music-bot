@@ -79,7 +79,7 @@
   "micro_flac_desc": "Скачай один трек в FLAC качестве",
   "micro_flac_success": "✧ FLAC-кредит добавлен! Используй при следующем скачивании.",
 
-  "referral_info": "🤝 <b>Реферальная программа</b>\n\nТвоя ссылка: <code>{link}</code>\n\n👥 Приглашено: {count}\n🎵 Бонус треков/день: +{bonus}\n\n• +5 треков/день за каждого друга (до +50)\n• 3 друга → 7 дней Premium\n• 10 друзей → 3 дня Premium\n• 50 друзей → 30 дней Premium",
+  "referral_info": "🤝 <b>Реферальная программа</b>\n\nТвоя ссылка: <code>{link}</code>\n\n👥 Приглашено: {count}\n🎵 Бонус треков/день: +{bonus}\n\n• +5 треков/день за каждого друга (до +50)\n• 3 друга → 3 дня Premium\n• 10 друзей → 7 дней Premium\n• 50 друзей → 30 дней Premium",
   "referral_welcome": "👋 Тебя пригласил друг! Добро пожаловать в BLACK ROOM.",
   "referral_new": "🎉 По твоей ссылке пришёл новый друг! Всего приглашено: <b>{count}</b>.\nБонус треков/день: +{bonus}",
   "referral_reward_3": "🎁 <b>3 друга приглашено!</b>\nТебе начислен <b>Premium на {days} дней</b>. Так держать!",
@@ -139,6 +139,7 @@
   "pl_track_exists": "Этот трек уже в плейлисте.",
   "pl_track_limit": "Максимум 50 треков в плейлисте.",
   "pl_pick": "Выбери плейлист:",
+  "pl_empty": "Плейлист пуст.",
   "pl_empty_create_first": "У тебя пока нет плейлистов. Создай через /playlist",
   "pl_play_all": "▸ Играть всё",
   "pl_shuffle": "⇄ Вразброс",
@@ -242,6 +243,7 @@
   "share_track_expired": "⚠️ Ссылка недействительна или истекла",
   "share_track_open_header": "📥 <b>Поделились треком</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
   "share_track_download_btn": "⬇️ Скачать",
+  "shared_track_caption": "🎵 Поделились через BLACK ROOM",
   "share_track_no_file": "⚠️ Файл недоступен в кэше. Найди трек через /search",
 
   "mix_header": "✦ <b>Daily Mix</b>\n\nПодборка на сегодня: <b>{count}</b> треков",

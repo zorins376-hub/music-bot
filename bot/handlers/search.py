@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json as _json
 import logging
 import secrets
@@ -246,7 +247,7 @@ def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool =
     year = track_info.get("upload_year")
     year_str = f" · {year}" if year else ""
     artist, title = _audio_tags(track_info)
-    header = f"♪ <b>{artist}</b> — {title}"
+    header = f"♪ <b>{html.escape(artist)}</b> — {html.escape(title)}"
     base = t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
     body = f"{header}\n{base}"
     extra = track_extra_caption_lines(lang, track_info)
@@ -451,7 +452,7 @@ def _build_results_keyboard(
     buttons = []
     for i, track in enumerate(results):
         check = "✅ " if picked and i in picked else ""
-        label = f"{check}♪ {track['uploader']} — {track['title'][:40]} ({track['duration_fmt']})"
+        label = f"{check}♪ {track.get('uploader', '')} — {track.get('title', '')[:40]} ({track.get('duration_fmt', '')})"
         buttons.append(
             [InlineKeyboardButton(
                 text=label,
@@ -637,7 +638,7 @@ async def _do_search(message: Message, query: str) -> None:
             await status.edit_text(
                 f"{_SEARCH_LOGO}\n\n"
                 f"▸ Spotify\n"
-                f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
+                f"♪ <b>{html.escape(track_info['uploader'])} — {html.escape(track_info['title'])}</b> ({track_info['duration_fmt']})",
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )
@@ -696,7 +697,7 @@ async def _do_search(message: Message, query: str) -> None:
             await status.edit_text(
                 f"{_SEARCH_LOGO}\n\n"
                 f"▸ Яндекс.Музыка\n"
-                f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
+                f"♪ <b>{html.escape(track_info['uploader'])} — {html.escape(track_info['title'])}</b> ({track_info['duration_fmt']})",
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )
@@ -724,7 +725,7 @@ async def _do_search(message: Message, query: str) -> None:
             await status.edit_text(
                 f"{_SEARCH_LOGO}\n\n"
                 f"▸ YouTube\n"
-                f"♪ <b>{track_info['uploader']} — {track_info['title']}</b> ({track_info['duration_fmt']})",
+                f"♪ <b>{html.escape(track_info['uploader'])} — {html.escape(track_info['title'])}</b> ({track_info['duration_fmt']})",
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )
@@ -764,7 +765,7 @@ async def _do_search(message: Message, query: str) -> None:
         try:
             cached = await cache.get_query_cache(provider_query, source)
             if cached is not None:
-                record_provider_event(source, "search", time.monotonic() - t0, True)
+                # Cache hit — do NOT record a provider success event (no real call made)
                 return cached
             res = await asyncio.wait_for(search_fn(provider_query, limit=limit), timeout=12)
             elapsed = time.monotonic() - t0
@@ -1192,7 +1193,7 @@ async def _do_search(message: Message, query: str) -> None:
     source_line = " · ".join(sources_used) if sources_used else "YouTube"
     await status.edit_text(
         f"{_SEARCH_LOGO}\n\n"
-        f"<b>{t(lang, 'search_results')}:</b> {query}\n"
+        f"<b>{t(lang, 'search_results')}:</b> {html.escape(query)}\n"
         f"▸ {source_line} · {len(results)} треков",
         reply_markup=keyboard,
         parse_mode="HTML",
@@ -1355,6 +1356,8 @@ async def _group_auto_play(
                 file_size = mp3_path.stat().st_size
             except Exception:
                 mp3_path = None
+                if raise_on_error:
+                    raise RuntimeError("too large")
                 try:
                     await status.edit_text(t(lang, "error_too_large_final"))
                 except Exception:
@@ -1363,6 +1366,8 @@ async def _group_auto_play(
             if file_size > settings.MAX_FILE_SIZE:
                 cleanup_file(mp3_path)
                 mp3_path = None
+                if raise_on_error:
+                    raise RuntimeError("too large")
                 try:
                     await status.edit_text(t(lang, "error_too_large_final"))
                 except Exception:
@@ -1750,7 +1755,12 @@ async def _parse_group_search_text(message: Message) -> tuple[str, bool]:
 
 @router.message(Command("search"))
 async def cmd_search(message: Message) -> None:
-    query = message.text.removeprefix("/search").strip()[:500]
+    query = message.text.removeprefix("/search").strip()
+    # In groups the command may be "/search@BotName query" — strip the bot mention.
+    if query.startswith("@"):
+        parts = query.split(maxsplit=1)
+        query = parts[1].strip() if len(parts) > 1 else ""
+    query = query[:500]
     if not query:
         user = await get_or_create_user(message.from_user)
         await message.answer(t(user.language, "search_prompt"))
@@ -2407,7 +2417,8 @@ async def _send_track_card(callback: CallbackQuery, track_id: int, *, story: boo
 
     cover_bytes = await _fetch_cover_bytes(track.cover_url)
 
-    card_bytes = generate_track_card(
+    card_bytes = await asyncio.to_thread(
+        generate_track_card,
         artist=track.artist or "Unknown",
         title=track.title or "Unknown",
         track_id=track.id,

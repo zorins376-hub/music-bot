@@ -75,7 +75,13 @@ async def _show_queue(message_or_cb, user_id: int, lang: str) -> None:
     if not items:
         text = t(lang, "queue_empty")
         if isinstance(message_or_cb, CallbackQuery):
-            await message_or_cb.answer(text, show_alert=True)
+            # Do NOT call callback.answer() here — the caller (clr/next/shuf)
+            # already answered the callback; a second answer raises. Render the
+            # empty state by editing the message instead.
+            try:
+                await message_or_cb.message.edit_text(text)
+            except Exception:
+                await message_or_cb.message.answer(text)
         else:
             await message_or_cb.answer(text)
         return

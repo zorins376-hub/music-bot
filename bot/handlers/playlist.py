@@ -1,3 +1,5 @@
+import asyncio
+import html
 import io
 import json as _json
 import logging
@@ -6,6 +8,7 @@ import secrets
 import uuid
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -224,7 +227,7 @@ async def create_playlist_name(message: Message, state: FSMContext) -> None:
     except Exception:
         logger.debug("add_xp failed user=%s", user.id, exc_info=True)
     await message.answer(
-        t(user.language, "pl_created", name=name),
+        t(user.language, "pl_created", name=html.escape(name)),
         parse_mode="HTML",
     )
     await _show_playlists(message, user.id, user.language, edit=False)
@@ -250,7 +253,7 @@ async def cb_view(callback: CallbackQuery, callback_data: PlCb) -> None:
         )
         tracks = list(result.all())
 
-    text = t(user.language, "pl_view", name=pl.name, count=len(tracks), max=MAX_TRACKS_PER_PLAYLIST)
+    text = t(user.language, "pl_view", name=html.escape(pl.name), count=len(tracks), max=MAX_TRACKS_PER_PLAYLIST)
     kb = _playlist_view_kb(pl.id, tracks, user.language, page=callback_data.p)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
@@ -470,8 +473,19 @@ async def _send_playlist_tracks(callback: CallbackQuery, pl_id: int, shuffle: bo
             ok = await _send_playlist_track_audio(callback.message, user, tr)
             if ok:
                 sent_count += 1
+        except TelegramRetryAfter as e:
+            # Flood control — wait the requested time, then retry this track once.
+            await asyncio.sleep(e.retry_after)
+            try:
+                ok = await _send_playlist_track_audio(callback.message, user, tr)
+                if ok:
+                    sent_count += 1
+            except Exception:
+                logger.warning("Failed to send track %s from playlist %s after retry", tr.id, pl_id)
         except Exception:
             logger.warning("Failed to send track %s from playlist %s", tr.id, pl_id)
+        # Throttle bulk sends so Telegram doesn't drop/flood-limit tracks.
+        await asyncio.sleep(0.3)
 
     if sent_count == 0:
         await callback.message.answer(t(user.language, "pl_no_playable"))
@@ -690,7 +704,7 @@ async def cb_share_playlist(callback: CallbackQuery, callback_data: PlCb) -> Non
     bot_me = await callback.bot.me()
     link = f"https://t.me/{bot_me.username}?start=pl_{share_id}"
     await callback.message.answer(
-        f"🔗 <b>Ссылка на плейлист «{pl.name}»</b>\n\n"
+        f"🔗 <b>Ссылка на плейлист «{html.escape(pl.name)}»</b>\n\n"
         f"<code>{link}</code>\n\n"
         f"Отправь эту ссылку друзьям — они смогут посмотреть и скопировать плейлист!",
         parse_mode="HTML",

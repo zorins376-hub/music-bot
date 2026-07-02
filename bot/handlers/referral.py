@@ -28,8 +28,8 @@ router = Router()
 
 _BONUS_PER_REF = 5
 _MAX_BONUS = 50
-_PREMIUM_3_DAYS = 7
-_PREMIUM_10_DAYS = 3
+_PREMIUM_3_DAYS = 3
+_PREMIUM_10_DAYS = 7
 _PREMIUM_50_DAYS = 30
 _MIN_DOWNLOADS_TO_COUNT = 3
 
@@ -50,14 +50,22 @@ async def _notify_referrer(referrer_id: int, lang: str, key: str, **kwargs) -> N
     if not settings.BOT_TOKEN:
         return
     text = t(lang, key, **kwargs)
-    url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+    api_base = (getattr(settings, "TELEGRAM_API_URL", None) or "").strip()
+    if api_base:
+        url = f"{api_base.rstrip('/')}/bot{settings.BOT_TOKEN}/sendMessage"
+    else:
+        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
     try:
         timeout = aiohttp.ClientTimeout(total=5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            await session.post(
+            async with session.post(
                 url,
                 json={"chat_id": referrer_id, "text": text, "parse_mode": "HTML"},
-            )
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(
+                        "notify referrer %s failed: HTTP %s", referrer_id, resp.status
+                    )
     except Exception:
         logger.debug("notify referrer %s failed", referrer_id, exc_info=True)
 

@@ -27,11 +27,8 @@ _AUTH_ERROR_PATTERNS = (
     "confirm you're not a bot",
     "confirm you are not a bot",
     "cookies are no longer valid",
-    "http error 403",
-    "unable to extract",
     "login required",
     "use --cookies-from-browser",
-    "this content isn't available",
     "bot detection",
     "sign in to confirm your age",
 )
@@ -336,7 +333,11 @@ async def _send_admin_telegram_alert(text: str) -> None:
     if not settings.BOT_TOKEN or not settings.ADMIN_IDS:
         return
 
-    url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+    api_base = (getattr(settings, "TELEGRAM_API_URL", None) or "").strip()
+    if api_base:
+        url = f"{api_base.rstrip('/')}/bot{settings.BOT_TOKEN}/sendMessage"
+    else:
+        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
     msg = f"⚠️ YouTube cookies alert\n\n{text}"
 
     try:
@@ -344,10 +345,16 @@ async def _send_admin_telegram_alert(text: str) -> None:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for admin_id in settings.ADMIN_IDS:
                 try:
-                    await session.post(
+                    async with session.post(
                         url,
                         json={"chat_id": int(admin_id), "text": msg},
-                    )
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.warning(
+                                "yt cookies telegram alert failed for admin %s: HTTP %s",
+                                admin_id,
+                                resp.status,
+                            )
                 except Exception:
                     continue
     except Exception:

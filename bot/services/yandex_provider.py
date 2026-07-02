@@ -291,8 +291,8 @@ async def search_yandex(query: str, limit: int = 5) -> list[dict]:
         for tr in result.tracks.results:
             d = _track_to_dict(tr)
             if d:
-                # Attach the token used for this search so download can reuse it
-                d["_ym_token"] = token
+                # Do NOT attach the raw OAuth token: these dicts get cached in
+                # Redis. Download falls back to _next_token() when none is given.
                 tracks.append(d)
             if len(tracks) >= limit:
                 break
@@ -412,8 +412,8 @@ async def resolve_yandex_url(url: str) -> dict | None:
         if not tracks:
             return None
         d = _track_to_dict(tracks[0], source_id=f"ym_{track_id}")
-        if d:
-            d["_ym_token"] = token
+        # Do NOT attach the raw OAuth token: this dict may be cached in Redis.
+        # Download falls back to _next_token() when none is given.
         return d
     except Exception as e:
         logger.error("resolve_yandex_url error for track %s: %s", track_id, e)

@@ -152,7 +152,7 @@ services:
     command: >
       redis-server
       --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --appendonly yes
       --appendfsync everysec
       --tcp-keepalive 300

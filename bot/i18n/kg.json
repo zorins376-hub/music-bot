@@ -79,7 +79,7 @@
   "micro_flac_desc": "Бир ырды FLAC сапатында жүктөп алыңыз",
   "micro_flac_success": "✧ FLAC-кредит кошулду!",
 
-  "referral_info": "🤝 <b>Реферал программасы</b>\n\nСенин шилтемең: <code>{link}</code>\n\n👥 Чакырылгандар: {count}\n🎵 Бонус ырлар/күн: +{bonus}\n\n• Ар дос үчүн +5 ыр/күн (50гө чейин)\n• 3 дос → 7 күн Premium\n• 10 дос → 3 күн Premium\n• 50 дос → 30 күн Premium",
+  "referral_info": "🤝 <b>Реферал программасы</b>\n\nСенин шилтемең: <code>{link}</code>\n\n👥 Чакырылгандар: {count}\n🎵 Бонус ырлар/күн: +{bonus}\n\n• Ар дос үчүн +5 ыр/күн (50гө чейин)\n• 3 дос → 3 күн Premium\n• 10 дос → 7 күн Premium\n• 50 дос → 30 күн Premium",
   "referral_welcome": "👋 Сени дос чакырды! BLACK ROOM'го кош келиңиз.",
   "referral_new": "🎉 Шилтемең аркылуу жаңы дос кошулду! Бардыгы: <b>{count}</b>.\nБонус ырлар/күн: +{bonus}",
   "referral_reward_3": "🎁 <b>3 дос чакырылды!</b>\nСага <b>{days} күн Premium</b> берилди. Улант!",
@@ -139,6 +139,7 @@
   "pl_track_exists": "Бул ыр плейлистте бар.",
   "pl_track_limit": "Максимум 50 ыр.",
   "pl_pick": "Плейлистти тандаңыз:",
+  "pl_empty": "Плейлист бош.",
   "pl_empty_create_first": "Плейлист жок. /playlist аркылуу түзүңүз",
   "pl_play_all": "▸ Баарын ойнотуу",
   "pl_shuffle": "⇄ Аралаш",
@@ -242,6 +243,7 @@
   "share_track_expired": "⚠️ Шилтеме жараксыз же мөөнөтү бүттү",
   "share_track_open_header": "📥 <b>Сизге трек бөлүштү</b>\n\n🎵 {artist} — {title}\n◷ {duration}",
   "share_track_download_btn": "⬇️ Жүктөө",
+  "shared_track_caption": "🎵 BLACK ROOM аркылуу бөлүшүлдү",
   "share_track_no_file": "⚠️ Файл кэште жок. Бул тректи /search аркылуу табыңыз",
 
   "mix_header": "✦ <b>Daily Mix</b>\n\nБүгүнкү тандоо: <b>{count}</b> трек",

@@ -90,7 +90,7 @@ def _is_permanently_failed(video_id: str) -> bool:
     if exp is None:
         return False
     if time.monotonic() > exp:
-        del _PERMANENT_FAILURES[video_id]
+        _PERMANENT_FAILURES.pop(video_id, None)
         return False
     return True
 

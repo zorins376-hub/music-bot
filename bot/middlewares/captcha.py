@@ -45,6 +45,10 @@ def _block_count_key(user_id: int) -> str:
     return f"captcha:blockcnt:{user_id}"
 
 
+def _pending_start_key(user_id: int) -> str:
+    return f"captcha:pending_start:{user_id}"
+
+
 class CaptchaMiddleware(BaseMiddleware):
     """Blocks messages from unverified users until they solve a captcha."""
 
@@ -74,6 +78,16 @@ class CaptchaMiddleware(BaseMiddleware):
 
         # /start и successful_payment всегда пропускаем
         if event.text and event.text.strip().startswith("/start"):
+            # Preserve any deep-link payload (ref_/tr_/pl_/mx_/fam_/s_) so it is
+            # not lost while the user solves the captcha — re-dispatched on success.
+            start_parts = event.text.strip().split(maxsplit=1)
+            if len(start_parts) > 1 and start_parts[1].strip():
+                try:
+                    await cache.redis.setex(
+                        _pending_start_key(tg_user.id), _CHALLENGE_TTL, start_parts[1].strip()
+                    )
+                except Exception:
+                    logger.debug("captcha pending_start store failed user=%s", tg_user.id, exc_info=True)
             try:
                 if not await cache.redis.exists(_challenge_key(tg_user.id)):
                     await _send_challenge(event, tg_user.id, db_user.language)
@@ -130,6 +144,17 @@ class CaptchaMiddleware(BaseMiddleware):
             await event.answer(t(db_user.language, "captcha_ok"), parse_mode="HTML")
             # Send welcome message to new users
             await event.answer(WELCOME_MESSAGE, parse_mode="HTML")
+            # Re-dispatch the original /start deep-link payload (referral / shared
+            # track / playlist / mix / family) that was captured before the captcha.
+            try:
+                pending = await cache.redis.get(_pending_start_key(tg_user.id))
+                if pending:
+                    await cache.redis.delete(_pending_start_key(tg_user.id))
+                    payload = pending if isinstance(pending, str) else pending.decode()
+                    from bot.handlers.start import process_start_payload
+                    await process_start_payload(event, payload)
+            except Exception:
+                logger.debug("captcha pending_start replay failed user=%s", tg_user.id, exc_info=True)
             return
         else:
             # Track failed attempts

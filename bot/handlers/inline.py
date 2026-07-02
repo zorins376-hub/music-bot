@@ -97,9 +97,15 @@ async def handle_inline_query(inline_query: InlineQuery) -> None:
                 )
             )
         else:
-            # D-02: deep-link button → opens bot DM and auto-searches
+            # D-02: deep-link button → opens bot DM and auto-searches.
+            # Telegram caps the ?start= param at 64 chars; with the "s_" prefix
+            # that leaves 62 for the base64. Truncate the source text (UTF-8 safe)
+            # so the payload still fits and triggers a search.
             dl_query = f"{track['uploader']} {track['title']}"
             b64 = base64.urlsafe_b64encode(dl_query.encode()).decode().rstrip("=")
+            while len(b64) > 62 and dl_query:
+                dl_query = dl_query[:-1]
+                b64 = base64.urlsafe_b64encode(dl_query.encode()).decode().rstrip("=")
             deep_link = f"https://t.me/{bot_username}?start=s_{b64}"
             # D-03: WebApp link → opens mini app with track pre-loaded
             webapp_link = f"https://t.me/{bot_username}/app?startapp=play_{video_id}"

@@ -128,7 +128,7 @@ def format_track_display(artist: str, title: str) -> tuple[str, str]:
             title = title[len(prefix):].strip()
             break
         if tl.startswith(al + sep.strip().lower()):
-            title = title[len(artist) + len(sep):].strip()
+            title = title[len(artist) + len(sep.strip()):].strip()
             break
 
     if not artist:

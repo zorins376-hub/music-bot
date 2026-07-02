@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ssh_common import connect_ssh
 
-PROJECT_DIR = os.environ.get("DEPLOY_PROJECT_DIR", "/opt/music-bot").strip()
+PROJECT_DIR = os.environ.get("DEPLOY_PROJECT_DIR", "/root/music-bot").strip()
 
 
 def run(ssh, cmd, timeout=120):
@@ -38,6 +38,27 @@ def main():
     print(f">>> uploaded {local_sync} -> {remote_sync}")
 
     run(ssh, f"cd {PROJECT_DIR} && docker compose stop bot")
+
+    # Safety dump BEFORE any DELETE, so a failed/empty sync is always recoverable.
+    # Run inside bash with pipefail so a pg_dump failure propagates through the gzip pipe.
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    dump_code, _, _ = run(
+        ssh,
+        "bash -c 'set -o pipefail; mkdir -p /root/db-backups && "
+        f"cd {PROJECT_DIR} && docker compose exec -T postgres "
+        "pg_dump -U musicbot -d musicbot | gzip > "
+        f"/root/db-backups/pre_sync_{ts}.sql.gz && "
+        f"test -s /root/db-backups/pre_sync_{ts}.sql.gz'",
+        timeout=1800,
+    )
+    if dump_code != 0:
+        print(
+            "Pre-sync safety dump failed; aborting before touching the DB.",
+            file=sys.stderr,
+        )
+        ssh.close()
+        sys.exit(dump_code or 1)
+    print(f">>> safety dump written to /root/db-backups/pre_sync_{ts}.sql.gz")
 
     run(
         ssh,

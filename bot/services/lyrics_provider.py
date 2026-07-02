@@ -35,12 +35,16 @@ def _lyrics_proxy() -> str | None:
     ):
         proxy = (candidate or "").strip()
         if proxy:
-            return proxy
+            if proxy.startswith("http://") or proxy.startswith("https://"):
+                return proxy
+            return None
     pool = (settings.PROXY_POOL or "").strip()
     if pool:
         first = pool.split(",")[0].strip()
         if first:
-            return first
+            if first.startswith("http://") or first.startswith("https://"):
+                return first
+            return None
     return None
 
 
@@ -503,7 +507,7 @@ async def gather_lyric_verify_pool(
     for word in extract_distinctive_lyric_words(query)[:2]:
         extra_queries.append(word)
 
-    for q in dict.fromkeys(extra_queries)[:6]:
+    for q in list(dict.fromkeys(extra_queries))[:6]:
         try:
             yandex, vk = await asyncio.gather(
                 asyncio.wait_for(search_yandex_fn(q, limit=4), timeout=8),
@@ -669,7 +673,7 @@ async def translate_lyrics(lines: list[str], target_lang: str = "ru") -> list[st
         return None
 
     # MyMemory auto-detects source language
-    params = {"q": text[:4500], "langpair": f"auto|{target_lang}"}
+    params = {"q": text[:500], "langpair": f"auto|{target_lang}"}
 
     try:
         session = get_session()
@@ -682,6 +686,8 @@ async def translate_lyrics(lines: list[str], target_lang: str = "ru") -> list[st
                 return None
             data = await resp.json()
 
+        if data.get("responseStatus") not in (200, "200"):
+            return None
         translated = data.get("responseData", {}).get("translatedText", "")
         if not translated or "MYMEMORY" in translated.upper():
             return None

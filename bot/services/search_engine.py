@@ -1252,7 +1252,7 @@ def deduplicate_results(results: list[dict], threshold: float = 0.7, lang_hint: 
                 + (min(0.30, 0.05 + t.get("_downloads", 0) / 200) if t.get("file_id") else 0.0)
                 # Downloadability bonus: YouTube is fragile (bot detection, LOGIN_REQUIRED),
                 # so any other source with a reasonable match should win the top slot.
-                + (0.0 if t.get("source", "") == "youtube" else 0.35),
+                + (0.0 if t.get("source", "") == "youtube" else 0.35)
                 + (0.28 * max(0, artist_counts.get(normalize_query(t.get("uploader", "")), 0) - 1)),
                 rank.get(t.get("source", ""), 0),
             ),

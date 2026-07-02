@@ -46,8 +46,11 @@ def _radar_quick_keyboard(lang: str, enabled: bool) -> InlineKeyboardMarkup:
 
 
 @router.message(Command("radar"))
-async def cmd_radar(message: Message) -> None:
-    user = await get_or_create_user(message.from_user)
+async def cmd_radar(message: Message, user=None) -> None:
+    # `user` — optional Telegram user to act as (e.g. the tapping user when called
+    # from an inline button whose `message.from_user` is the bot). Defaults to
+    # `message.from_user` for the /radar command entrypoint.
+    user = await get_or_create_user(user or message.from_user)
     lang = user.language
     status = t(lang, "radar_status_on") if user.release_radar_enabled else t(lang, "radar_status_off")
     await message.answer(

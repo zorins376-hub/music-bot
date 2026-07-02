@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import html
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -149,6 +151,56 @@ _LANG_KEYBOARD = InlineKeyboardMarkup(
 )
 
 
+async def process_start_payload(message: Message, payload: str) -> bool:
+    """Dispatch a /start deep-link payload (s_/pl_/tr_/mx_/ref_/fam_).
+
+    Returns True when the payload was fully handled and the caller should stop
+    (i.e. not fall through to the main menu). ref_ returns False so onboarding
+    continues. Reused by cmd_start and by the captcha middleware after a new
+    user solves the challenge (so referrals/shared links survive the captcha).
+    """
+    if payload.startswith("s_"):
+        b64 = payload[2:]
+        # Add back padding
+        b64 += "=" * (-len(b64) % 4)
+        try:
+            query = base64.urlsafe_b64decode(b64).decode()
+        except Exception:
+            logger.debug("Invalid deep-link payload: %s", payload)
+        else:
+            from bot.handlers.search import _do_search
+            await _do_search(message, query)
+            return True
+    # C-04: Handle shared playlist deep-link: /start pl_<share_id>
+    elif payload.startswith("pl_"):
+        share_id = payload[3:]
+        from bot.handlers.playlist import show_shared_playlist
+        await show_shared_playlist(message, share_id)
+        return True
+    # Share track deep-link: /start tr_<share_id>
+    elif payload.startswith("tr_"):
+        share_id = payload[3:]
+        from bot.handlers.search import show_shared_track
+        await show_shared_track(message, share_id)
+        return True
+    # Share mix deep-link: /start mx_<share_id>
+    elif payload.startswith("mx_"):
+        share_id = payload[3:]
+        from bot.handlers.mix import show_shared_mix
+        await show_shared_mix(message, share_id)
+        return True
+    # E-01: Handle referral deep-link: /start ref_<user_id>
+    elif payload.startswith("ref_"):
+        from bot.handlers.referral import process_referral
+        await process_referral(message, payload[4:])
+    # Family plan deep-link: /start fam_<invite_code>
+    elif payload.startswith("fam_"):
+        from bot.handlers.family import handle_family_deeplink
+        if await handle_family_deeplink(message, payload):
+            return True
+    return False
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
@@ -166,45 +218,8 @@ async def cmd_start(message: Message) -> None:
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         payload = args[1]
-        if payload.startswith("s_"):
-            b64 = payload[2:]
-            # Add back padding
-            b64 += "=" * (-len(b64) % 4)
-            try:
-                query = base64.urlsafe_b64decode(b64).decode()
-            except Exception:
-                logger.debug("Invalid deep-link payload: %s", payload)
-            else:
-                from bot.handlers.search import _do_search
-                await _do_search(message, query)
-                return
-        # C-04: Handle shared playlist deep-link: /start pl_<share_id>
-        elif payload.startswith("pl_"):
-            share_id = payload[3:]
-            from bot.handlers.playlist import show_shared_playlist
-            await show_shared_playlist(message, share_id)
+        if await process_start_payload(message, payload):
             return
-        # Share track deep-link: /start tr_<share_id>
-        elif payload.startswith("tr_"):
-            share_id = payload[3:]
-            from bot.handlers.search import show_shared_track
-            await show_shared_track(message, share_id)
-            return
-        # Share mix deep-link: /start mx_<share_id>
-        elif payload.startswith("mx_"):
-            share_id = payload[3:]
-            from bot.handlers.mix import show_shared_mix
-            await show_shared_mix(message, share_id)
-            return
-        # E-01: Handle referral deep-link: /start ref_<user_id>
-        elif payload.startswith("ref_"):
-            from bot.handlers.referral import process_referral
-            await process_referral(message, payload[4:])
-        # Family plan deep-link: /start fam_<invite_code>
-        elif payload.startswith("fam_"):
-            from bot.handlers.family import handle_family_deeplink
-            if await handle_family_deeplink(message, payload):
-                return
 
     # Check for new features to show
     new_features = get_new_features(user.language, user.last_seen_version)
@@ -226,7 +241,7 @@ async def cmd_start(message: Message) -> None:
 
     bot_me = await message.bot.me()
     await message.answer(
-        t(user.language, "start_message", name=message.from_user.first_name or ""),
+        t(user.language, "start_message", name=html.escape(message.from_user.first_name or "")),
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
@@ -357,13 +372,13 @@ async def handle_menu_button(callback: CallbackQuery) -> None:
     _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
-            t(user.language, "start_message", name=callback.from_user.first_name or ""),
+            t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
-            t(user.language, "start_message", name=callback.from_user.first_name or ""),
+            t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
@@ -452,7 +467,7 @@ async def _show_profile(message: Message, tg_user) -> None:
         fav_vibe = _VIBE_NAMES.get(top_vibe_row[0], fav_vibe or "black")
 
     lines = [t(lang, "profile_header")]
-    lines.append(t(lang, "profile_name", name=tg_user.first_name or tg_user.username or str(tg_user.id)))
+    lines.append(t(lang, "profile_name", name=html.escape(tg_user.first_name or tg_user.username or str(tg_user.id))))
     lines.append(f"▸ Ранг: <b>{rank_name}</b>")
     lines.append(f"▸ Прогресс: <code>{progress}</code>" + (f" до следующего: <b>{next_left}</b>" if next_left else " максимум"))
 
@@ -593,7 +608,8 @@ async def _show_wrapped(message: Message, tg_user) -> None:
 
     from bot.services.story_cards import generate_recap_card
 
-    card_bytes = generate_recap_card(
+    card_bytes = await asyncio.to_thread(
+        generate_recap_card,
         user_name=tg_user.first_name or tg_user.username or str(tg_user.id),
         play_count=play_count,
         top_artists=[artist for artist, _ in top_artists],
@@ -615,7 +631,7 @@ async def _show_wrapped(message: Message, tg_user) -> None:
 async def handle_family_button(callback: CallbackQuery) -> None:
     await callback.answer()
     from bot.handlers.family import cmd_family
-    await cmd_family(callback.message)
+    await cmd_family(callback.message, user=callback.from_user)
 
 
 # ── Taste Profile ────────────────────────────────────────────────────────
@@ -759,4 +775,4 @@ async def _show_taste_profile(message: Message, tg_user) -> None:
 async def handle_radar_button(callback: CallbackQuery) -> None:
     from bot.handlers.release_radar import cmd_radar
     await callback.answer()
-    await cmd_radar(callback.message)
+    await cmd_radar(callback.message, user=callback.from_user)

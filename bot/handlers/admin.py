@@ -4,6 +4,7 @@ import json
 import logging
 
 from aiogram import Bot, F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import BaseFilter, Command
 from aiogram.filters.callback_data import CallbackData
@@ -738,7 +739,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 
     # /admin load @channel tequila|fullmoon — загрузить треки из TG-канала
     elif subcmd == "load":
-        if len(args) < 4:
+        load_parts = message.text.split(maxsplit=3)
+        if len(load_parts) < 4:
             await message.answer(
                 "Использование:\n"
                 "<code>/admin load @channel_name tequila</code>\n"
@@ -746,8 +748,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
                 parse_mode="HTML",
             )
             return
-        channel_ref = args[2]
-        label = args[3].lower()
+        channel_ref = load_parts[2]
+        label = load_parts[3].lower()
         if label not in ("tequila", "fullmoon"):
             await message.answer("Метка канала: tequila или fullmoon")
             return
@@ -892,14 +894,14 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 
     # /admin promo create <code> <type> <uses> | /admin promo list
     elif subcmd == "promo":
-        promo_args = text.split(maxsplit=3) if len(args) >= 3 else []
+        promo_args = message.text.split(maxsplit=3) if len(args) >= 3 else []
         if len(promo_args) >= 2 and promo_args[0] == "promo":
             promo_sub = promo_args[1] if len(promo_args) > 1 else ""
         else:
             promo_sub = args[2] if len(args) > 2 else ""
         if promo_sub == "create":
             # /admin promo create CODE type uses [expires_days]
-            rest = text.split("create", 1)[-1].strip().split()
+            rest = message.text.split("create", 1)[-1].strip().split()
             if len(rest) < 3:
                 await message.answer(
                     "Использование: /admin promo create &lt;код&gt; &lt;тип: premium_7d|premium_30d|flac_5&gt; "
@@ -971,16 +973,12 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 
     # /admin flag <name> on|off — toggle a feature flag
     elif subcmd == "flag":
-        if len(args) < 4:
+        parts = message.text.split(maxsplit=3)
+        if len(parts) < 4:
             await message.answer("Использование: /admin flag &lt;name&gt; on|off", parse_mode="HTML")
             return
-        flag_name = args[2]
-        flag_value = args[3] if len(args) > 3 else ""
-        # Parse flag_name and value from args[2] which may be "name on/off"
-        parts = message.text.split(maxsplit=3)
-        if len(parts) >= 4:
-            flag_name = parts[2]
-            flag_value = parts[3].lower()
+        flag_name = parts[2]
+        flag_value = parts[3].lower()
         if flag_value not in ("on", "off"):
             await message.answer("Значение: on или off")
             return
@@ -1020,10 +1018,10 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
 
     # /admin appeal <id> approve|reject — review DMCA appeal
     elif subcmd == "appeal":
-        if len(args) < 4:
+        parts = message.text.split(maxsplit=3)
+        if len(parts) < 4:
             await message.answer("Использование: /admin appeal &lt;id&gt; approve|reject", parse_mode="HTML")
             return
-        parts = message.text.split(maxsplit=3)
         try:
             appeal_id = int(parts[2])
         except (ValueError, IndexError):
@@ -1546,7 +1544,7 @@ async def handle_adm_set(callback: CallbackQuery) -> None:
         logger.debug("edit settings text failed", exc_info=True)
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("adm:"))
+@router.callback_query(lambda c: c.data and c.data.startswith("adm:") and not c.data.startswith("adm:fwd:"))
 async def handle_adm_prompt(callback: CallbackQuery) -> None:
     """Handle admin buttons that need text input — show instructions."""
     if not _is_admin(callback.from_user.id):
@@ -1916,14 +1914,14 @@ async def _broadcast(bot: Bot, admin_msg: Message, text: str) -> None:
 @router.message(F.document)
 async def admin_upload_yt_cookies(message: Message, bot: Bot) -> None:
     """Accept cookies.txt from admin (after /admin ytcookies upload or cookie* filename)."""
-    if not _is_admin(message.from_user.id):
-        return
     doc = message.document
-    if not doc:
-        return
-    fname = (doc.file_name or "").lower()
+    fname = (doc.file_name or "").lower() if doc else ""
     awaiting = message.from_user.id in _yt_cookies_awaiting
-    if not awaiting and "cookie" not in fname:
+    # Only handle admin cookie uploads here; let everything else (e.g. playlist
+    # JSON import) propagate to the next matching handler.
+    if not _is_admin(message.from_user.id) or (not awaiting and "cookie" not in fname):
+        raise SkipHandler
+    if not doc:
         return
 
     from bot.services.youtube_cookies import format_status_message, run_health_probe, save_cookies_content

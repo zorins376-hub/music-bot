@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import random as _random
+import time
 from pathlib import Path
 
 from aiogram import F, Router
@@ -33,7 +34,7 @@ _DEFAULT_GENRES = [
 ]
 
 
-class MixCb(CallbackData, prefix="mix"):
+class MixCb(CallbackData, prefix="amix"):
     act: str       # genre / go
     genre: str = ""
 
@@ -93,7 +94,7 @@ async def _send_live_menu(message, lang: str, channel: str) -> None:
                 callback_data=LiveCb(act="shuf", ch=channel).pack(),
             ),
         ])
-    rows.append([InlineKeyboardButton(text="◁", callback_data="action:start")])
+    rows.append([InlineKeyboardButton(text="◁", callback_data="action:menu")])
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
 
 
@@ -229,7 +230,7 @@ async def handle_automix(callback: CallbackQuery) -> None:
         text=t(lang, "automix_all_genres"),
         callback_data=MixCb(act="go", genre="all").pack(),
     )])
-    rows.append([InlineKeyboardButton(text="◁", callback_data="action:start")])
+    rows.append([InlineKeyboardButton(text="◁", callback_data="action:menu")])
 
     await callback.message.answer(
         t(lang, "automix_pick_genre"),
@@ -265,6 +266,7 @@ async def handle_automix_go(callback: CallbackQuery, callback_data: MixCb) -> No
 
     # Download all tracks
     downloaded_paths: list[Path] = []
+    mix_path: Path | None = None
     try:
         for tr in tracks:
             try:
@@ -277,10 +279,10 @@ async def handle_automix_go(callback: CallbackQuery, callback_data: MixCb) -> No
             await status.edit_text(t(lang, "automix_no_tracks"))
             return
 
-        # Create mix
+        # Create mix — per-request unique filename to avoid collisions across users
         from mixer.automix import create_mix
 
-        mix_path = settings.DOWNLOAD_DIR / "automix_latest.mp3"
+        mix_path = settings.DOWNLOAD_DIR / f"automix_{user.id}_{int(time.monotonic() * 1000)}.mp3"
         crossfade = 7
         await create_mix(downloaded_paths, mix_path, crossfade_ms=crossfade * 1000)
 
@@ -307,9 +309,9 @@ async def handle_automix_go(callback: CallbackQuery, callback_data: MixCb) -> No
         from bot.services.downloader import cleanup_file
         for p in downloaded_paths:
             cleanup_file(p)
-        mix_out = settings.DOWNLOAD_DIR / "automix_latest.mp3"
-        if mix_out.exists():
-            mix_out.unlink(missing_ok=True)
+        # Unlink the per-request mix output (unique per user+call)
+        if mix_path and mix_path.exists():
+            mix_path.unlink(missing_ok=True)
 
 
 # Триггер "что играет" / "что за трек"

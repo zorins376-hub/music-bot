@@ -1,11 +1,18 @@
 """Smoke-test all 10 Supabase Edge Functions with correct API formats."""
 import json
+import os
+import sys
 import urllib.request
 import ssl
 from urllib.parse import urlencode
 
-BASE = "https://vexyurbyobnpzyatiikw.supabase.co/functions/v1"
-KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZleHl1cmJ5b2JucHp5YXRpaWt3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzE3OTkzOCwiZXhwIjoyMDg4NzU1OTM4fQ.qa9t7XPT2XkYYz21yHg8vS_ZQLGWxNStJWRjuNWnU9U"
+BASE = os.environ.get(
+    "SUPABASE_AI_FUNCTIONS_URL",
+    "https://vexyurbyobnpzyatiikw.supabase.co/functions/v1",
+)
+KEY = os.environ.get("SUPABASE_AI_DB_KEY")
+if not KEY:
+    sys.exit("SUPABASE_AI_DB_KEY is not set — export the service-role key before running")
 CTX = ssl.create_default_context()
 
 USER_ID = 8280273907

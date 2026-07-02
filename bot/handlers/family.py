@@ -72,9 +72,14 @@ async def _get_family_members_count(plan_id: int) -> int:
 
 
 @router.message(Command("family"))
-async def cmd_family(message: Message) -> None:
-    """Show family plan status or offer to create one."""
-    user = await get_or_create_user(message.from_user)
+async def cmd_family(message: Message, user=None) -> None:
+    """Show family plan status or offer to create one.
+
+    `user` — optional Telegram user to act as (e.g. the tapping user when called
+    from an inline button whose `message.from_user` is the bot). Defaults to
+    `message.from_user` for the /family command entrypoint.
+    """
+    user = await get_or_create_user(user or message.from_user)
     lang = user.language
     
     plan, member = await _get_user_family(user.id)
@@ -510,7 +515,7 @@ async def handle_family_pre_checkout(query: PreCheckoutQuery) -> None:
     await query.answer(ok=True)
 
 
-@router.message(F.successful_payment)
+@router.message(F.successful_payment, F.successful_payment.invoice_payload.startswith("family_"))
 async def handle_family_payment(message: Message) -> None:
     """Process successful family premium payment."""
     payload = message.successful_payment.invoice_payload

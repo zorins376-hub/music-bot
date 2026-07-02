@@ -41,7 +41,7 @@ async def _premium_loop(bot) -> None:
             await _remind_expiring_soon(bot)
             await _expire_overdue(bot)
         except Exception:
-            logger.debug("premium scheduler cycle failed", exc_info=True)
+            logger.warning("premium scheduler cycle failed", exc_info=True)
         await asyncio.sleep(_CHECK_INTERVAL_SEC)
 
 

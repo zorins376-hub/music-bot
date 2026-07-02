@@ -177,8 +177,8 @@ class Settings(BaseSettings):
     HTTP_READ_TIMEOUT: int = 60  # read timeout for downloads
 
     # ── Database tuning (VPS-optimized for high load) ──────────────────
-    DB_POOL_SIZE: int = 50  # SQLAlchemy pool size (local PG only)
-    DB_MAX_OVERFLOW: int = 50  # additional connections above pool_size
+    DB_POOL_SIZE: int = 20  # SQLAlchemy pool size (local PG only)
+    DB_MAX_OVERFLOW: int = 10  # additional connections above pool_size
     DB_POOL_TIMEOUT: int = 30  # wait for connection
     DB_COMMAND_TIMEOUT: int = 30  # query timeout
     DB_CONNECT_TIMEOUT: int = 60  # connection timeout
@@ -244,8 +244,15 @@ def sync_cookies_from_env() -> bool:
     if not raw or not raw.strip():
         return False
     import base64 as _b64
-    _COOKIES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _COOKIES_PATH.write_bytes(_b64.b64decode(raw.strip()))
+    import binascii
+    import logging
+    try:
+        decoded = _b64.b64decode(raw.strip())
+        _COOKIES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _COOKIES_PATH.write_bytes(decoded)
+    except (binascii.Error, Exception) as e:
+        logging.getLogger(__name__).warning("sync_cookies_from_env failed (malformed YT_COOKIES?): %s", e)
+        return False
     return True
 
 

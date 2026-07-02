@@ -75,6 +75,7 @@ async def get_or_create_user_raw(
     """Shared user upsert — used by both bot middleware and webapp API."""
     from sqlalchemy.exc import IntegrityError
 
+    admin_by_id = user_id in settings.ADMIN_IDS
     admin = is_admin(user_id, username)
     now = datetime.now(timezone.utc)
     touch_interval = timedelta(seconds=60)
@@ -167,10 +168,13 @@ async def get_or_create_user_raw(
                     except Exception:
                         logger.debug("mirror_user failed for updated user %s", user_id, exc_info=True)
 
-                # Keep in-memory list in sync for fast checks elsewhere
+                # Keep in-memory list in sync for fast checks elsewhere.
+                # Only PERSIST env-id admins to Redis — username-derived admins
+                # must be re-evaluated each session so losing the username revokes access.
                 if user.is_admin and user_id not in settings.ADMIN_IDS:
                     settings.ADMIN_IDS.append(user_id)
-                    await persist_admin_id(user_id)
+                    if admin_by_id:
+                        await persist_admin_id(user_id)
 
                 return user
         except IntegrityError:
@@ -289,7 +293,7 @@ async def record_listening_event(
                 play_count = await _get_user_play_count(user_id)
                 if play_count > 0 and play_count % 10 == 0:
                     from recommender.profile_updater import trigger_profile_update
-                    trigger_profile_update(user_id)
+                    asyncio.create_task(trigger_profile_update(user_id))
             except Exception:
                 logger.debug("profile update trigger failed for user %s", user_id, exc_info=True)
     except Exception as e:
@@ -367,6 +371,8 @@ async def upsert_track(
     popularity: int | None = None,
     language: str | None = None,
 ) -> Track:
+    from sqlalchemy.exc import IntegrityError
+
     async with async_session() as session:
         result = await session.execute(
             select(Track).where(Track.source_id == source_id)
@@ -425,7 +431,18 @@ async def upsert_track(
                 .where(Track.source_id == source_id)
                 .values(**update_vals)
             )
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Concurrent insert won the race on the unique source_id — re-fetch it.
+            await session.rollback()
+            track = (
+                await session.execute(
+                    select(Track).where(Track.source_id == source_id)
+                )
+            ).scalar_one_or_none()
+            if track is None:
+                raise
         await session.refresh(track)
         # Mirror track to Supabase
         try:

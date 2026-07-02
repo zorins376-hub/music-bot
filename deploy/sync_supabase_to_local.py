@@ -30,20 +30,18 @@ SUPA_URL = os.environ.get(
     "SUPABASE_DB_URL",
     "https://uhvbdwjchxcnoiodfnvw.supabase.co",
 )
-SUPA_KEY = os.environ.get(
-    "SUPABASE_DB_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVodmJkd2pjaHhjbm9pb2RmbnZ3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTg1MDAwOSwiZXhwIjoyMDg3NDI2MDA5fQ.tLm2O84rRZHgcoPQgbgb8zVC3zRCBzy54xS0qCF_6Gw",
-)
+# Service-role keys are secrets — provide them via env, never hardcode.
+SUPA_KEY = os.environ.get("SUPABASE_DB_KEY")
+if not SUPA_KEY:
+    log.error("SUPABASE_DB_KEY is not set — refusing to run without a service-role key")
+    sys.exit(1)
 
 # Optional extra source (music-bot-ai project = AI/ML). We import only users from it.
 SUPA_AI_URL = os.environ.get(
     "SUPABASE_AI_DB_URL",
     "https://vexyurbyobnpzyatiikw.supabase.co",
 )
-SUPA_AI_KEY = os.environ.get(
-    "SUPABASE_AI_DB_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZleHl1cmJ5b2JucHp5YXRpaWt3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzE3OTkzOCwiZXhwIjoyMDg4NzU1OTM4fQ.qa9t7XPT2XkYYz21yHg8vS_ZQLGWxNStJWRjuNWnU9U",
-)
+SUPA_AI_KEY = os.environ.get("SUPABASE_AI_DB_KEY")
 
 HEADERS = {
     "Authorization": f"Bearer {SUPA_KEY}",
@@ -65,6 +63,10 @@ TABLES = [
 PAGE_SIZE = 500  # Supabase REST max is 1000
 
 
+class FetchError(Exception):
+    """Raised when a Supabase REST fetch fails so the sync aborts instead of wiping data."""
+
+
 async def fetch_all(session: aiohttp.ClientSession, table: str, select: str, order: str):
     """Paginate through Supabase REST and return all rows."""
     rows = []
@@ -81,7 +83,7 @@ async def fetch_all(session: aiohttp.ClientSession, table: str, select: str, ord
             if resp.status != 200:
                 text_body = await resp.text()
                 log.error("Fetch %s offset=%d failed %d: %s", table, offset, resp.status, text_body)
-                break
+                raise FetchError(f"{table} fetch failed with HTTP {resp.status}")
             batch = await resp.json()
             if not batch:
                 break
@@ -114,7 +116,7 @@ async def fetch_all_from(
             if resp.status != 200:
                 text_body = await resp.text()
                 log.error("Fetch %s from %s offset=%d failed %d: %s", table, base_url, offset, resp.status, text_body)
-                break
+                raise FetchError(f"{table} fetch from {base_url} failed with HTTP {resp.status}")
             batch = await resp.json()
             if not batch:
                 break
@@ -275,9 +277,19 @@ async def main():
     async with aiohttp.ClientSession() as http:
         async with async_session() as db:
             total = 0
+            core_total = 0
             for table, select, order in TABLES:
                 n = await sync_table(http, db, table, select, order)
                 total += n
+                core_total += n
+
+            # Guard: the core tables must yield rows. A zero-row core sync means
+            # Supabase returned nothing (empty/failed fetch) — abort so run_sync.py
+            # never restarts the bot on a wiped DB.
+            if core_total == 0:
+                raise FetchError(
+                    "Core tables returned 0 rows — refusing to finish; DB may have been wiped"
+                )
 
             total += await sync_ai_users(http, db)
 
@@ -287,4 +299,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except FetchError as e:
+        log.error("Sync aborted: %s", e)
+        sys.exit(1)

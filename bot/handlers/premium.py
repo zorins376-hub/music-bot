@@ -187,7 +187,7 @@ async def handle_pre_checkout(pre_checkout_query: PreCheckoutQuery) -> None:
     await pre_checkout_query.answer(ok=True)
 
 
-@router.message(F.successful_payment)
+@router.message(F.successful_payment, ~F.successful_payment.invoice_payload.startswith("family_"))
 async def handle_successful_payment(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
@@ -204,7 +204,8 @@ async def handle_successful_payment(message: Message) -> None:
         ))
 
         if payload == _PAYLOAD_PREMIUM_30D:
-            premium_until = now + timedelta(days=settings.PREMIUM_DAYS)
+            base = user.premium_until if user.premium_until and user.premium_until > now else now
+            premium_until = base + timedelta(days=settings.PREMIUM_DAYS)
             await session.execute(
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
@@ -215,7 +216,8 @@ async def handle_successful_payment(message: Message) -> None:
             await message.answer(t(lang, "premium_pay_success"), parse_mode="HTML")
 
         elif payload == _PAYLOAD_TRIAL_7D:
-            premium_until = now + timedelta(days=7)
+            base = user.premium_until if user.premium_until and user.premium_until > now else now
+            premium_until = base + timedelta(days=7)
             await session.execute(
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
@@ -254,7 +256,8 @@ async def handle_successful_payment(message: Message) -> None:
             await message.answer(t(lang, "flac_10_success"), parse_mode="HTML")
 
         elif payload == _PAYLOAD_PREMIUM_90D:
-            premium_until = now + timedelta(days=90)
+            base = user.premium_until if user.premium_until and user.premium_until > now else now
+            premium_until = base + timedelta(days=90)
             await session.execute(
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
@@ -265,7 +268,8 @@ async def handle_successful_payment(message: Message) -> None:
             await message.answer(t(lang, "premium_90d_success"), parse_mode="HTML")
 
         elif payload == _PAYLOAD_PREMIUM_365D:
-            premium_until = now + timedelta(days=365)
+            base = user.premium_until if user.premium_until and user.premium_until > now else now
+            premium_until = base + timedelta(days=365)
             await session.execute(
                 update(User).where(User.id == user.id)
                 .values(is_premium=True, premium_until=premium_until)
@@ -377,7 +381,11 @@ async def cmd_gift(message: Message, state: FSMContext) -> None:
 async def handle_gift_target(message: Message, state: FSMContext) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
-    target_text = message.text.strip().lstrip("@")
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer(t(lang, "gift_prompt"), parse_mode="HTML")
+        return
+    target_text = raw.lstrip("@")
     await state.clear()
 
     # Resolve target user

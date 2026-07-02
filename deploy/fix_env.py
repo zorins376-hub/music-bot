@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ssh_common import connect_ssh
 
-PROJECT_DIR = __import__("os").environ.get("DEPLOY_PROJECT_DIR", "/opt/music-bot").strip()
+PROJECT_DIR = __import__("os").environ.get("DEPLOY_PROJECT_DIR", "/root/music-bot").strip()
 
 
 def main():

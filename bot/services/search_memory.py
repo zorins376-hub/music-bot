@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIX = "search:learn:"
 _TTL_SECONDS = 90 * 24 * 3600  # 90 days
 # Minimum confirmations before a learned mapping is trusted for auto-pick.
-_MIN_CONFIRMATIONS = 1
+_MIN_CONFIRMATIONS = 3
 # Fields we persist for a learned track (enough to play it later).
 _TRACK_FIELDS = (
     "video_id", "source", "title", "uploader",
