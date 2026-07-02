@@ -827,6 +827,37 @@ async def _do_search(message: Message, query: str) -> None:
             "_downloads": tr.downloads or 0,
         })
 
+    # ── Tier 0: instant answers that bypass the whole provider engine ──
+    # A repeat query (cached ranked results), a curated/learned pin, or a local-DB
+    # top hit that already covers the FULL query and has a ready file_id — deliver
+    # these with no external provider call. Escalates to the full engine when not
+    # confident, so match quality is never reduced.
+    _norm_q = normalize_query(provider_query)
+    _tier0: list[dict] | None = None
+    try:
+        _rc = await cache.get_result_cache(_norm_q)
+        if _rc:
+            _tier0 = _rc
+        else:
+            from bot.services.search_curated import curated_track_for_query
+            from bot.services.search_memory import get_learned_track as _get_learned
+            _pin0 = curated_track_for_query(query) or curated_track_for_query(provider_query)
+            if not _pin0:
+                _pin0 = await _get_learned(provider_query)
+            if _pin0 and _pin0.get("video_id"):
+                _tier0 = [_pin0]
+            elif local_results and local_results[0].get("file_id"):
+                _qtok = set(_norm_q.split())
+                _lt0 = local_results[0]
+                _ltok = set(normalize_query(f"{_lt0.get('uploader','')} {_lt0.get('title','')}").split())
+                if _qtok and all(w in _ltok for w in _qtok):
+                    _tier0 = local_results
+    except Exception:
+        logger.debug("tier0 check failed", exc_info=True)
+    _skip_engine = _tier0 is not None
+    if _skip_engine:
+        logger.info("search: tier0 hit q=%r n=%d", provider_query[:60], len(_tier0 or []))
+
     # STEP 2: Parallel external search — Yandex + Spotify + SoundCloud + VK + YouTube
     async def _search_source(source: str, search_fn, limit: int) -> list[dict]:
         """Search a single source with cache and 12s timeout."""
@@ -857,7 +888,7 @@ async def _do_search(message: Message, query: str) -> None:
 
     lyric_like = is_lyric_like_query(provider_query, parsed_query)
     lyrics_task = None
-    if lyric_like or len(provider_query.split()) >= 3:
+    if not _skip_engine and (lyric_like or len(provider_query.split()) >= 3):
         async def _lyrics_lookup() -> list[dict]:
             try:
                 from bot.services.lyrics_provider import search_by_lyrics
@@ -873,22 +904,25 @@ async def _do_search(message: Message, query: str) -> None:
 
     from bot.services.search_engine import detect_script, transliterate_cyr_to_lat, transliterate_lat_to_cyr, get_query_search_aliases
 
-    tasks = [
-        _search_source("yandex", search_yandex, max_results),
-        _search_source("spotify", search_spotify, max_results),
-        _search_source("vk", search_vk, max_results),
-    ]
-    if not is_group:
-        tasks.extend([
-            _search_source("soundcloud", _search_sc, max_results),
-            _search_source("youtube", _search_yt, max_results),
-        ])
-    source_results = await asyncio.gather(*tasks)
     all_results: list[dict] = []
-    for batch in source_results:
-        all_results.extend(batch)
+    if _skip_engine:
+        all_results = list(_tier0 or [])
+    else:
+        tasks = [
+            _search_source("yandex", search_yandex, max_results),
+            _search_source("spotify", search_spotify, max_results),
+            _search_source("vk", search_vk, max_results),
+        ]
+        if not is_group:
+            tasks.extend([
+                _search_source("soundcloud", _search_sc, max_results),
+                _search_source("youtube", _search_yt, max_results),
+            ])
+        source_results = await asyncio.gather(*tasks)
+        for batch in source_results:
+            all_results.extend(batch)
 
-    for alias_q in get_query_search_aliases(provider_query):
+    for alias_q in ([] if _skip_engine else get_query_search_aliases(provider_query)):
         alias_batch = await _search_source(
             "yandex",
             lambda q, limit, aq=alias_q: search_yandex(aq, limit=limit),
@@ -903,11 +937,12 @@ async def _do_search(message: Message, query: str) -> None:
     # No cross-source agreement -> canon is None -> search is left untouched (so this
     # can only help, never regress). Cheap: cached resolve + one fast Yandex call.
     canonical_query: str | None = None
-    try:
-        from bot.services.canonical_resolver import resolve_canonical
-        canonical_query = await resolve_canonical(provider_query)
-    except Exception:
-        canonical_query = None
+    if not _skip_engine:
+        try:
+            from bot.services.canonical_resolver import resolve_canonical
+            canonical_query = await resolve_canonical(provider_query)
+        except Exception:
+            canonical_query = None
     if canonical_query and normalize_query(canonical_query) != normalize_query(provider_query):
         try:
             canon_batch = await asyncio.wait_for(search_yandex(canonical_query, limit=max_results), timeout=8)
@@ -920,7 +955,7 @@ async def _do_search(message: Message, query: str) -> None:
     # can't match a lyric line to a title). Only for lyric-like queries with a
     # Genius token; the resolved title is boosted after dedup. Fails soft.
     lyric_song: tuple[str, str] | None = None
-    if len(provider_query.split()) >= 4 and settings.GENIUS_ACCESS_TOKEN:
+    if not _skip_engine and len(provider_query.split()) >= 4 and settings.GENIUS_ACCESS_TOKEN:
         try:
             from bot.services.canonical_resolver import resolve_lyric_song
             lyric_song = await resolve_lyric_song(provider_query)
@@ -936,7 +971,7 @@ async def _do_search(message: Message, query: str) -> None:
                     logger.debug("lyric-resolved yandex search failed", exc_info=True)
 
     # A-05: If few results and query is mono-language, try transliterated search
-    if len(all_results) < 3:
+    if len(all_results) < 3 and not _skip_engine:
         script = detect_script(provider_query)
         alt_query = None
         if script == "cyrillic":
@@ -958,7 +993,7 @@ async def _do_search(message: Message, query: str) -> None:
 
     # Spell-correction fallback: typos in the query → poor provider hits.
     # Only triggered when results are weak, to keep latency low.
-    if len(all_results) < 3:
+    if len(all_results) < 3 and not _skip_engine:
         try:
             from bot.services.speller import correct_query
             corrected = await correct_query(provider_query)
@@ -1006,7 +1041,7 @@ async def _do_search(message: Message, query: str) -> None:
             )
             if top_track else 0.0
         )
-        if is_group or title_cov < 0.85:
+        if (is_group or title_cov < 0.85) and not _skip_engine:
             extra_tracks.extend(
                 await _fetch_parsed_hint_tracks(
                     parsed_query,
@@ -1021,9 +1056,9 @@ async def _do_search(message: Message, query: str) -> None:
     _has_artist_title = bool(
         parsed_query.get("artist_hint") and parsed_query.get("title_hint")
     )
-    _run_lyrics_boost = needs_lyrics_search_boost(
+    _run_lyrics_boost = (not _skip_engine) and (needs_lyrics_search_boost(
         provider_query, top_track, parsed=parsed_query
-    ) or (is_group and lyric_like and not _has_artist_title)
+    ) or (is_group and lyric_like and not _has_artist_title))
 
     # An artist-named query (e.g. "Клава Кока душный") is NOT a lyric fragment: if
     # any top result's full multi-word artist appears in the query, skip the lyric
@@ -1244,6 +1279,17 @@ async def _do_search(message: Message, query: str) -> None:
     except Exception:
         logger.debug("learned pin failed", exc_info=True)
 
+    # Cache the final ranked results so a repeat of this query bypasses the whole
+    # engine next time (Tier 0). file_id is stripped — delivery re-resolves it via
+    # Redis/Postgres, so a stale Telegram id can never be served from this cache.
+    # Skipped when we already served from cache (_skip_engine) to avoid churn.
+    if results and not _skip_engine:
+        try:
+            _slim = [{k: v for k, v in r.items() if k != "file_id"} for r in results]
+            await cache.set_result_cache(_norm_q, _slim)
+        except Exception:
+            logger.debug("set_result_cache failed", exc_info=True)
+
     # Groups: auto-play first track — prefer cached tracks for instant delivery
     if is_group:
         import re as _re_grp
@@ -1438,8 +1484,14 @@ async def _group_auto_play(
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
         return
 
-    # Redis cache
+    # Redis cache, then Postgres (durable file_id) before falling back to download.
     file_id = await cache.get_file_id(video_id, bitrate)
+    if not file_id:
+        try:
+            from bot.services.telegram_cache import get_file_id as _tg_get_fid
+            file_id = await _tg_get_fid(video_id)  # Redis -> Postgres Track.file_id -> warm Redis
+        except Exception:
+            file_id = None
     if file_id:
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
@@ -1745,6 +1797,8 @@ async def cb_wrong_track_pick(callback: CallbackQuery, callback_data: WrongTrack
             if _learn_q:
                 from bot.services.search_memory import remember_correction
                 await remember_correction(_learn_q, sent_track)
+                # The answer for this query just changed — drop its cached results.
+                await cache.bust_result_cache(normalize_query(_learn_q))
         except Exception:
             logger.debug("search_memory remember (wrong-pick) failed", exc_info=True)
         for mid in [status.message_id, orig_msg_id]:

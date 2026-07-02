@@ -218,12 +218,39 @@ class Cache:
         }
 
     async def set_query_cache(self, query: str, results: list[dict], source: str = "youtube") -> None:
-        """Cache search results for a query (120s TTL)."""
+        """Cache search results for a query (settings.QCACHE_TTL)."""
         try:
             key = f"qcache:{source}:{query.lower().strip()}"
-            await self.redis.setex(key, 120, json.dumps(results, ensure_ascii=False))
+            await self.redis.setex(key, settings.QCACHE_TTL, json.dumps(results, ensure_ascii=False))
         except Exception:
             logger.debug("set_query_cache failed query=%s", query, exc_info=True)
+
+    # ── Final ranked-result cache (whole-pipeline bypass on repeats) ─────
+
+    async def get_result_cache(self, norm_query: str) -> list[dict] | None:
+        """Return the cached final ranked results for a normalized query, or None."""
+        try:
+            data = await self.redis.get(f"rcache:{norm_query}")
+            return json.loads(data) if data else None
+        except Exception:
+            return None
+
+    async def set_result_cache(self, norm_query: str, results: list[dict]) -> None:
+        """Cache the final ranked results for a normalized query (RCACHE_TTL)."""
+        try:
+            await self.redis.setex(
+                f"rcache:{norm_query}", settings.RCACHE_TTL,
+                json.dumps(results, ensure_ascii=False),
+            )
+        except Exception:
+            logger.debug("set_result_cache failed query=%s", norm_query, exc_info=True)
+
+    async def bust_result_cache(self, norm_query: str) -> None:
+        """Invalidate the ranked-result cache for a query (e.g. on a 'wrong track' fix)."""
+        try:
+            await self.redis.delete(f"rcache:{norm_query}")
+        except Exception:
+            pass
 
     # ── Rate limiting ────────────────────────────────────────────────────────
 

@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     # ── Cache TTL ─────────────────────────────────────────────────────────
     CACHE_FILE_ID_TTL: int = 30 * 24 * 3600   # 30 дней
     SEARCH_SESSION_TTL: int = 300              # 5 минут
+    QCACHE_TTL: int = 24 * 3600               # provider-search result cache (was 120s)
+    RCACHE_TTL: int = 12 * 3600               # final ranked-result cache per query
 
     # ── Paths ─────────────────────────────────────────────────────────────
     DOWNLOAD_DIR: Path = _BASE / "downloads"
