@@ -84,6 +84,21 @@ async def cmd_settings_v2(message: Message) -> None:
 cmd_settings = cmd_settings_v2
 
 
+@router.callback_query(lambda c: c.data == "action:settings")
+async def handle_settings_button(callback: CallbackQuery) -> None:
+    """Open the settings menu from an inline button (menu:more)."""
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    await callback.answer()
+    tts_on = (user.fav_vibe or "") != "tts_off"  # reuse field as TTS pref
+    kb = _settings_keyboard(user.is_premium, user.quality, tts_on, bool(user.release_radar_enabled), lang)
+    await callback.message.answer(
+        t(lang, "settings_quality", current=user.quality),
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
 def _settings_keyboard(
     is_premium: bool, current: str, tts_on: bool, releases_on: bool, lang: str
 ) -> InlineKeyboardMarkup:

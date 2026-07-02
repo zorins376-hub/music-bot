@@ -4,12 +4,13 @@ import html
 import logging
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from sqlalchemy import select, update
 from sqlalchemy.sql import func
 
+from bot.config import settings
 from bot.db import get_or_create_user, is_admin
 from bot.i18n import t
 from bot.models.base import async_session
@@ -23,11 +24,11 @@ router = Router()
 
 
 _RANKS = [
-    (0, "Listener"),
-    (10, "Night Rider"),
-    (50, "Black Soul"),
-    (150, "Black Premium"),
-    (500, "Black Room Elite"),
+    (0, "Слушатель"),
+    (10, "Ночной странник"),
+    (50, "Тёмная душа"),
+    (150, "Тёмный premium"),
+    (500, "Элита Black Room"),
 ]
 
 _VIBE_NAMES = {
@@ -41,9 +42,9 @@ _VIBE_NAMES = {
 
 def _rank_for(play_count: int, *, premium: bool = False, admin: bool = False) -> tuple[str, int, int]:
     if admin:
-        return "Founder", play_count, max(play_count, 1)
+        return "Основатель", play_count, max(play_count, 1)
     if premium and play_count >= 50:
-        return "Black Premium", 50, 150
+        return "Тёмный premium", 50, 150
     current = _RANKS[0]
     next_threshold = _RANKS[-1][0]
     for idx, rank in enumerate(_RANKS):
@@ -70,42 +71,34 @@ def _is_night_mode() -> bool:
 
 
 def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> InlineKeyboardMarkup:
-    rows = [
-        # -- Music --
-        [
-            InlineKeyboardButton(text="\U0001f50e Поиск", callback_data="action:search", style="primary"),
-            InlineKeyboardButton(text="✦ Mix", callback_data="action:mix"),
-            InlineKeyboardButton(text="☆ Чарты", callback_data="action:charts"),
-        ],
-        [
-            InlineKeyboardButton(text="▸ TEQUILA", callback_data="radio:tequila"),
-            InlineKeyboardButton(text="◑ FULLMOON", callback_data="radio:fullmoon"),
-            InlineKeyboardButton(text="○ AUTO", callback_data="radio:automix"),
-        ],
-        # -- Discover --
-        [
-            InlineKeyboardButton(text="✨ AI DJ", callback_data="action:dj", style="primary"),
-            InlineKeyboardButton(text="⭐ Radar", callback_data="action:radar"),
-            InlineKeyboardButton(text="◆ Top", callback_data="action:top"),
-        ],
-        # -- My stuff --
-        [
-            InlineKeyboardButton(text="◉ Профиль", callback_data="action:profile"),
-            InlineKeyboardButton(text="❤️ Любимое", callback_data="action:favorites"),
-            InlineKeyboardButton(text="▸ Плейлисты", callback_data="action:playlist"),
-        ],
-        # -- Share & More --
-        [
+    # Row3 right slot: Mini App player (only when TMA_URL is configured)
+    charts_btn = InlineKeyboardButton(text=t(lang, "menu_charts"), callback_data="action:charts")
+    if settings.TMA_URL:
+        row3 = [
+            charts_btn,
             InlineKeyboardButton(
-                text="\U0001f517 Поделиться",
-                copy_text=CopyTextButton(text=f"https://t.me/{bot_username}" if bot_username else "BLACK ROOM music bot"),
+                text=t(lang, "menu_player"),
+                web_app=WebAppInfo(url=settings.TMA_URL),
             ),
-            InlineKeyboardButton(text="‥ Ещё", callback_data="menu:more"),
+        ]
+    else:
+        row3 = [charts_btn]
+    rows = [
+        [InlineKeyboardButton(text=t(lang, "menu_search"), callback_data="action:search")],
+        [
+            InlineKeyboardButton(text=t(lang, "menu_wave"), callback_data="hub:wave"),
+            InlineKeyboardButton(text=t(lang, "menu_radio"), callback_data="hub:radio"),
         ],
+        row3,
+        [
+            InlineKeyboardButton(text=t(lang, "menu_library"), callback_data="hub:library"),
+            InlineKeyboardButton(text=t(lang, "menu_premium"), callback_data="action:premium"),
+        ],
+        [InlineKeyboardButton(text=t(lang, "menu_more"), callback_data="menu:more")],
     ]
     if admin:
         rows.append([
-            InlineKeyboardButton(text="◆ Админ", callback_data="action:admin"),
+            InlineKeyboardButton(text=t(lang, "menu_admin"), callback_data="action:admin"),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -114,27 +107,19 @@ def _more_menu(lang: str) -> InlineKeyboardMarkup:
     """Expanded 'More' sub-menu."""
     rows = [
         [
-            InlineKeyboardButton(text="\U0001f3a6 Видео", callback_data="action:video"),
-            InlineKeyboardButton(text="\U0001f916 AI Плейлист", callback_data="action:ai_playlist"),
+            InlineKeyboardButton(text=t(lang, "btn_video"), callback_data="action:video"),
+            InlineKeyboardButton(text=t(lang, "btn_import"), callback_data="action:import_playlist"),
         ],
         [
-            InlineKeyboardButton(text="\U0001f3a4 Вкус", callback_data="action:taste"),
-            InlineKeyboardButton(text="\U0001f3c5 Бейджи", callback_data="action:badges"),
+            InlineKeyboardButton(text=t(lang, "btn_family"), callback_data="action:family"),
+            InlineKeyboardButton(text=t(lang, "btn_referral"), callback_data="action:referral"),
         ],
         [
-            InlineKeyboardButton(text="\U0001f3c6 Топ игроков", callback_data="action:leaderboard"),
-            InlineKeyboardButton(text="\U0001f4e5 Импорт", callback_data="action:import_playlist"),
+            InlineKeyboardButton(text=t(lang, "btn_settings"), callback_data="action:settings"),
+            InlineKeyboardButton(text=t(lang, "btn_faq"), callback_data="action:faq"),
         ],
         [
-            InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
-            InlineKeyboardButton(text="\U0001f46a Семья", callback_data="action:family"),
-        ],
-        [
-            InlineKeyboardButton(text="≡ Настройки", callback_data="action:settings"),
-            InlineKeyboardButton(text="❓ FAQ", callback_data="action:faq"),
-        ],
-        [
-            InlineKeyboardButton(text="◀ Назад", callback_data="menu:main"),
+            InlineKeyboardButton(text=t(lang, "menu_back"), callback_data="menu:main"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -221,18 +206,8 @@ async def cmd_start(message: Message) -> None:
         if await process_start_payload(message, payload):
             return
 
-    # Check for new features to show
-    new_features = get_new_features(user.language, user.last_seen_version)
-    if new_features:
-        await message.answer(new_features, parse_mode="HTML")
-        # Update last_seen_version
-        async with async_session() as session:
-            await session.execute(
-                update(User).where(User.id == user.id).values(last_seen_version=VERSION)
-            )
-            await session.commit()
-    elif not user.last_seen_version:
-        # First time user — silently update version
+    # Keep last_seen_version current without spamming a changelog on /start.
+    if user.last_seen_version != VERSION:
         async with async_session() as session:
             await session.execute(
                 update(User).where(User.id == user.id).values(last_seen_version=VERSION)
@@ -256,22 +231,12 @@ async def cmd_start(message: Message) -> None:
             await message.answer(
                 t(user.language, "premium_trial_welcome", days=days),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="◇ Premium", callback_data="action:premium"),
+                    InlineKeyboardButton(text=t(user.language, "menu_premium"), callback_data="action:premium"),
                 ]]),
                 parse_mode="HTML",
             )
     except Exception:
         logger.debug("trial welcome failed for %s", user.id, exc_info=True)
-
-    # Smart Onboarding v2: nudge new un-onboarded users
-    if not user.onboarded:
-        await message.answer(
-            t(user.language, "onboard_nudge"),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎵 " + t(user.language, "onboard_nudge_btn"), callback_data="action:recommend")]
-            ]),
-            parse_mode="HTML",
-        )
 
 
 @router.message(Command("version"))
@@ -389,11 +354,13 @@ async def handle_more_menu(callback: CallbackQuery) -> None:
     user = await get_or_create_user(callback.from_user)
     await callback.answer()
     try:
-        await callback.message.edit_reply_markup(
+        await callback.message.edit_text(
+            t(user.language, "more_title"),
             reply_markup=_more_menu(user.language),
+            parse_mode="HTML",
         )
     except Exception:
-        pass
+        logger.debug("menu:more edit failed for %s", callback.from_user.id, exc_info=True)
 
 
 @router.callback_query(lambda c: c.data == "menu:main")
@@ -402,12 +369,82 @@ async def handle_back_to_main(callback: CallbackQuery) -> None:
     admin = is_admin(callback.from_user.id, callback.from_user.username)
     await callback.answer()
     bot_me = await callback.bot.me()
+    _username = bot_me.username or ""
     try:
-        await callback.message.edit_reply_markup(
-            reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
+        await callback.message.edit_text(
+            t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
+            reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
+            parse_mode="HTML",
         )
     except Exception:
-        pass
+        logger.debug("menu:main edit failed for %s", callback.from_user.id, exc_info=True)
+
+
+def _hub_menu(lang: str, rows: list) -> InlineKeyboardMarkup:
+    rows = list(rows)
+    rows.append([InlineKeyboardButton(text=t(lang, "menu_back"), callback_data="action:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _show_hub(callback: CallbackQuery, title_key: str, rows: list) -> None:
+    user = await get_or_create_user(callback.from_user)
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            t(user.language, title_key),
+            reply_markup=_hub_menu(user.language, rows),
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.debug("%s edit failed for %s", title_key, callback.from_user.id, exc_info=True)
+
+
+@router.callback_query(F.data == "hub:wave")
+async def handle_hub_wave(callback: CallbackQuery) -> None:
+    lang = (await get_or_create_user(callback.from_user)).language
+    rows = [
+        [
+            InlineKeyboardButton(text=t(lang, "btn_mix"), callback_data="action:mix"),
+            InlineKeyboardButton(text=t(lang, "btn_dj"), callback_data="action:dj"),
+        ],
+        [
+            InlineKeyboardButton(text=t(lang, "btn_radar"), callback_data="action:radar"),
+            InlineKeyboardButton(text=t(lang, "btn_ai_playlist"), callback_data="action:ai_playlist"),
+        ],
+    ]
+    await _show_hub(callback, "hub_wave_title", rows)
+
+
+@router.callback_query(F.data == "hub:radio")
+async def handle_hub_radio(callback: CallbackQuery) -> None:
+    lang = (await get_or_create_user(callback.from_user)).language
+    rows = [
+        [
+            InlineKeyboardButton(text=t(lang, "btn_tequila"), callback_data="radio:tequila"),
+            InlineKeyboardButton(text=t(lang, "btn_fullmoon"), callback_data="radio:fullmoon"),
+        ],
+    ]
+    await _show_hub(callback, "hub_radio_title", rows)
+
+
+@router.callback_query(F.data == "hub:library")
+async def handle_hub_library(callback: CallbackQuery) -> None:
+    lang = (await get_or_create_user(callback.from_user)).language
+    rows = [
+        [
+            InlineKeyboardButton(text=t(lang, "btn_profile"), callback_data="action:profile"),
+            InlineKeyboardButton(text=t(lang, "btn_favorites"), callback_data="action:favorites"),
+        ],
+        [
+            InlineKeyboardButton(text=t(lang, "btn_playlists"), callback_data="action:playlist"),
+            InlineKeyboardButton(text=t(lang, "btn_taste"), callback_data="action:taste"),
+        ],
+        [
+            InlineKeyboardButton(text=t(lang, "btn_badges"), callback_data="action:badges"),
+            InlineKeyboardButton(text=t(lang, "btn_wrapped"), callback_data="action:wrapped"),
+        ],
+    ]
+    await _show_hub(callback, "hub_library_title", rows)
 
 
 @router.callback_query(lambda c: c.data == "action:top")

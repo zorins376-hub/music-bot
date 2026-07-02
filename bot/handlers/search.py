@@ -240,22 +240,28 @@ def _audio_tags(track_info: dict) -> tuple[str, str]:
 
 
 def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool = False) -> str:
-    """Build caption line: ◷ 3:42 · 192 kbps · 2019 · ◉ BLACK ROOM"""
+    """Premium track card caption.
+
+    line1  ♪ <b>Artist — Title</b>
+    line2  <code>3:42 · 192 kbps · 2019</code>
+    line3  ◇ BLACK ROOM   (only for non ad-free users)
+    """
     from bot.services.track_flair import track_extra_caption_lines
 
     dur = track_info.get("duration_fmt") or "?:??"
     year = track_info.get("upload_year")
     year_str = f" · {year}" if year else ""
     artist, title = _audio_tags(track_info)
-    header = f"♪ <b>{html.escape(artist)}</b> — {html.escape(title)}"
+    header = f"♪ <b>{html.escape(artist)} — {html.escape(title)}</b>"
     base = t(lang, "track_caption", duration=dur, bitrate=bitrate, year=year_str)
     body = f"{header}\n{base}"
+    # Rare per-track dedication flair (already carries the BLACK ROOM mark).
     extra = track_extra_caption_lines(lang, track_info)
     if extra:
-        body = f"{body}\n{extra}"
+        return f"{body}\n{extra}"
     if ad_free:
         return body
-    return f"{body}\n◉ BLACK ROOM"
+    return f"{body}\n{t(lang, 'track_brand_line')}"
 
 
 def _is_ad_free(user) -> bool:
@@ -444,6 +450,33 @@ def _filter_lyric_hints_for_artist(lyric_hints: list[dict], artist_hint: str) ->
 _SEARCH_LOGO = "\u25c9 <b>BLACK ROOM</b>"
 
 
+_SOURCE_BADGE = {
+    "yandex": "YM",
+    "vk": "VK",
+    "soundcloud": "SC",
+    "youtube": "YT",
+    "spotify": "SP",
+}
+
+
+def _result_row_label(track: dict, *, checked: bool = False) -> str:
+    """Compact result row: '✓ ▸ [YM] Artist — Title · 3:42' with safe access."""
+    check = "✓ " if checked else ""
+    badge = _SOURCE_BADGE.get(track.get("source", ""))
+    badge_str = f"[{badge}] " if badge else ""
+    artist = (track.get("uploader") or "").strip()
+    title = (track.get("title") or "").strip()
+    if artist and title:
+        name = f"{artist} — {title}"
+    else:
+        name = artist or title or "?"
+    if len(name) > 44:
+        name = name[:43].rstrip() + "…"
+    dur = (track.get("duration_fmt") or "").strip()
+    tail = f" · {dur}" if dur else ""
+    return f"{check}▸ {badge_str}{name}{tail}"
+
+
 def _build_results_keyboard(
     results: list[dict],
     session_id: str,
@@ -451,11 +484,9 @@ def _build_results_keyboard(
 ) -> InlineKeyboardMarkup:
     buttons = []
     for i, track in enumerate(results):
-        check = "✅ " if picked and i in picked else ""
-        label = f"{check}♪ {track.get('uploader', '')} — {track.get('title', '')[:40]} ({track.get('duration_fmt', '')})"
         buttons.append(
             [InlineKeyboardButton(
-                text=label,
+                text=_result_row_label(track, checked=bool(picked and i in picked)),
                 callback_data=TrackCallback(sid=session_id, i=i).pack(),
             )]
         )
@@ -2131,31 +2162,39 @@ async def _post_download(user_id: int, track_info: dict, file_id: str, bitrate: 
 
 
 def _feedback_keyboard(
+    lang: str,
     track_id: int,
     share_query: str = "",
     share_url: str = "",
     *,
     expanded: bool = False,
 ) -> InlineKeyboardMarkup:
+    """Vibe reactions attached to the track bubble; '‹ Ещё' reveals add-actions.
+
+    Collapsed  →  one vibe row + '‹ Ещё'.
+    Expanded   →  vibe row + like/dislike + favorite/playlist/queue
+                  + similar/lyrics/share + card/story/'‹ Свернуть'.
+    All callback_data is reused so existing handlers keep working.
+    """
     vibe_row = [
         InlineKeyboardButton(
-            text="🔥",
+            text=t(lang, "tb_vibe_fire"),
             callback_data=FeedbackCallback(tid=track_id, act="vibe_fire").pack(),
         ),
         InlineKeyboardButton(
-            text="💔",
+            text=t(lang, "tb_vibe_sad"),
             callback_data=FeedbackCallback(tid=track_id, act="vibe_sad").pack(),
         ),
         InlineKeyboardButton(
-            text="🌙",
+            text=t(lang, "tb_vibe_night"),
             callback_data=FeedbackCallback(tid=track_id, act="vibe_night").pack(),
         ),
         InlineKeyboardButton(
-            text="🚗",
+            text=t(lang, "tb_vibe_drive"),
             callback_data=FeedbackCallback(tid=track_id, act="vibe_drive").pack(),
         ),
         InlineKeyboardButton(
-            text="🖤",
+            text=t(lang, "tb_vibe_love"),
             callback_data=FeedbackCallback(tid=track_id, act="vibe_love").pack(),
         ),
     ]
@@ -2164,7 +2203,7 @@ def _feedback_keyboard(
             vibe_row,
             [
                 InlineKeyboardButton(
-                    text="⋯ Ещё",
+                    text=t(lang, "tb_more"),
                     callback_data=TrackMenuCb(tid=track_id, act="more").pack(),
                 )
             ],
@@ -2174,68 +2213,71 @@ def _feedback_keyboard(
         vibe_row,
         [
             InlineKeyboardButton(
-                text="\u2764\ufe0f",
+                text=t(lang, "tb_like"),
                 callback_data=FeedbackCallback(tid=track_id, act="like").pack(),
             ),
             InlineKeyboardButton(
-                text="\ud83d\udc4e",
+                text=t(lang, "tb_dislike"),
                 callback_data=FeedbackCallback(tid=track_id, act="dislike").pack(),
             ),
+        ],
+        [
             InlineKeyboardButton(
-                text="+ \u25b8",
+                text=t(lang, "tb_favorite"),
+                callback_data=FavoriteCb(tid=track_id, act="add").pack(),
+            ),
+            InlineKeyboardButton(
+                text=t(lang, "tb_playlist"),
                 callback_data=AddToPlCb(tid=track_id).pack(),
             ),
             InlineKeyboardButton(
-                text="+ \u25b6",
+                text=t(lang, "tb_queue"),
                 callback_data=AddToQueueCb(tid=track_id).pack(),
             ),
         ],
         [
             InlineKeyboardButton(
-                text="❤️ +",
-                callback_data=FavoriteCb(tid=track_id, act="add").pack(),
+                text=t(lang, "tb_similar"),
+                callback_data=SimilarCb(tid=track_id).pack(),
             ),
             InlineKeyboardButton(
-                text="\ud83d\udcdd \u0422\u0435\u043a\u0441\u0442",
+                text=t(lang, "tb_lyrics"),
                 callback_data=LyricsCb(tid=track_id).pack(),
             ),
             InlineKeyboardButton(
-                text="📤",
+                text=t(lang, "tb_share"),
                 callback_data=ShareTrackCb(tid=track_id, act="mk").pack(),
             ),
         ],
         [
             InlineKeyboardButton(
-                text="🔁 Похожее",
-                callback_data=SimilarCb(tid=track_id).pack(),
-            ),
-            InlineKeyboardButton(
-                text="◩ Карточка",
+                text=t(lang, "tb_card"),
                 callback_data=TrackCardCb(tid=track_id).pack(),
             ),
             InlineKeyboardButton(
-                text="📸 Story",
+                text=t(lang, "tb_story"),
                 callback_data=StoryCb(tid=track_id).pack(),
             ),
             InlineKeyboardButton(
-                text="Скрыть",
+                text=t(lang, "tb_less"),
                 callback_data=TrackMenuCb(tid=track_id, act="hide").pack(),
             ),
         ],
     ]
     # Copy-to-clipboard: share link
     if share_url:
+        rows[4].insert(
+            0,
+            InlineKeyboardButton(
+                text=t(lang, "tb_copy_link"),
+                copy_text=CopyTextButton(text=share_url),
+            ),
+        )
+    # E-03: inline share (switch_inline_query)
+    if share_query:
         rows[3].append(
             InlineKeyboardButton(
-                text="\U0001f4cb \u0421\u0441\u044b\u043b\u043a\u0430",
-                copy_text=CopyTextButton(text=share_url),
-            )
-        )
-    # E-03: Share button
-    if share_query:
-        rows[2].append(
-            InlineKeyboardButton(
-                text="\U0001f4e8",
+                text=t(lang, "tb_share"),
                 switch_inline_query=share_query[:64],
             )
         )
@@ -2244,8 +2286,13 @@ def _feedback_keyboard(
 
 @router.callback_query(TrackMenuCb.filter())
 async def handle_track_menu(callback: CallbackQuery, callback_data: TrackMenuCb) -> None:
-    """Expand/collapse the post-track action keyboard."""
+    """Expand/collapse the post-track action keyboard on the track bubble."""
     await callback.answer()
+    try:
+        user = await get_or_create_user(callback.from_user)
+        lang = user.language
+    except Exception:
+        lang = "ru"
     share_url = ""
     if callback_data.act == "more":
         try:
@@ -2256,6 +2303,7 @@ async def handle_track_menu(callback: CallbackQuery, callback_data: TrackMenuCb)
     try:
         await callback.message.edit_reply_markup(
             reply_markup=_feedback_keyboard(
+                lang,
                 callback_data.tid,
                 share_url=share_url,
                 expanded=callback_data.act == "more",
@@ -2304,11 +2352,16 @@ async def handle_feedback(
             logger.debug("vibe fav update failed user=%s", user.id, exc_info=True)
         await callback.answer(f"Запомнил вайб: {vibe_labels.get(callback_data.act, 'black')}")
         return
-    emoji = "❤️" if callback_data.act == "like" else "👎"
+    emoji = "✓" if callback_data.act == "like" else "✗"
     await callback.answer(t(user.language, "feedback_recorded", emoji=emoji))
-    await callback.message.edit_text(
-        t(user.language, "feedback_saved", emoji=emoji), reply_markup=None
-    )
+    # Keyboard now lives on the audio bubble (a media caption, not text) — collapse
+    # it back to the default vibe row instead of editing text, which media rejects.
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=_feedback_keyboard(user.language, callback_data.tid)
+        )
+    except Exception:
+        logger.debug("feedback collapse edit failed", exc_info=True)
 
 
 @router.callback_query(ShareTrackCb.filter())

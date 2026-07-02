@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import update
 
 from bot.db import get_or_create_user
@@ -79,6 +79,25 @@ async def cmd_referral(message: Message) -> None:
     link = f"https://t.me/{bot_me.username}?start=ref_{user.id}"
 
     await message.answer(
+        t(lang, "referral_info",
+          link=link,
+          count=user.referral_count,
+          bonus=user.referral_bonus_tracks),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(lambda c: c.data == "action:referral")
+async def handle_referral_button(callback: CallbackQuery) -> None:
+    """Open the referral screen from an inline button (menu:more)."""
+    user = await get_or_create_user(callback.from_user)
+    lang = user.language
+    await callback.answer()
+
+    bot_me = await callback.bot.me()
+    link = f"https://t.me/{bot_me.username}?start=ref_{user.id}"
+
+    await callback.message.answer(
         t(lang, "referral_info",
           link=link,
           count=user.referral_count,
