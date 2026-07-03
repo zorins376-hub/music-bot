@@ -1726,11 +1726,14 @@ def _group_track_keyboard(
     alts: list[dict] | None = None,
     expanded: bool = False,
 ) -> InlineKeyboardMarkup | None:
-    """Group track buttons: «Не тот трек?» dropdown + a lyrics button.
+    """Group track buttons: just the «Не тот трек?» dropdown.
 
     Collapsed (default): one «🔁 Не тот трек?» button — tapping it expands the
     named alternatives in place (no permanent #1 #2 #3 clutter under the track).
     Expanded: one row per alternative (artist — title) + «‹ Скрыть».
+    No lyrics button in GROUP chats (keeps chats clean, per owner request); the
+    lyrics action stays in the private-chat feedback keyboard. `tid` is retained
+    only to keep expand/collapse callbacks stable.
     """
     rows: list[list[InlineKeyboardButton]] = []
     if alt_sid and num_alts > 0:
@@ -1756,13 +1759,6 @@ def _group_track_keyboard(
                     callback_data=WtExpandCb(sid=alt_sid, tid=tid or 0).pack(),
                 )
             ])
-    if tid:
-        rows.append([
-            InlineKeyboardButton(
-                text=t(lang, "tb_lyrics"),
-                callback_data=LyricsCb(tid=tid).pack(),
-            )
-        ])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 

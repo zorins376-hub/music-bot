@@ -210,6 +210,26 @@ _PHONETIC_RU_EN: dict[str, str] = {
 }
 
 
+# Kazakh/Kyrgyz-specific Cyrillic letters → their nearest Russian letters. A big
+# share of this bot's users type in KZ/KG (audit: "Akimmich неге онай",
+# "Мен Саган Баур бастым"), but many tracks are indexed with Russified spelling,
+# so those queries miss. An ADDITIVE normalized variant (searched alongside the
+# original) bridges both spellings without hurting native-script matches.
+_KZ_KG_FOLD = str.maketrans({
+    "ә": "а", "ғ": "г", "қ": "к", "ң": "н", "ө": "о",
+    "ұ": "у", "ү": "у", "һ": "х", "і": "и", "ї": "и", "ё": "е",
+})
+
+
+def kz_fold_variant(query: str) -> str | None:
+    """Russified spelling of a Kazakh/Kyrgyz-script query, or None if unchanged."""
+    from bot.services.search_engine import normalize_query
+
+    norm = normalize_query(query)
+    folded = norm.translate(_KZ_KG_FOLD)
+    return folded if folded != norm else None
+
+
 def phonetic_en_variant(query: str) -> str | None:
     """English variant of a phonetically-typed RU query, or None.
 
@@ -266,6 +286,10 @@ def query_search_aliases(query: str) -> list[str]:
     _ph = phonetic_en_variant(query)
     if _ph and _ph not in out:
         out.append(_ph)
+    # Kazakh/Kyrgyz → Russified spelling variant (additive).
+    _kz = kz_fold_variant(query)
+    if _kz and _kz not in out:
+        out.append(_kz)
     return out
 
 
