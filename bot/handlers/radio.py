@@ -176,6 +176,12 @@ def _channel_label(chat_id: int) -> str | None:
 @router.channel_post()
 async def handle_channel_post(message: Message) -> None:
     """Auto-capture audio posted to TEQUILA/FULLMOON channels."""
+    # Always log the channel id — used to discover ids of private channels the
+    # bot is in (CACHE_CHANNEL_ID / radio): bots can't resolve invite links.
+    logger.info(
+        "CHANNEL POST: id=%s title=%r audio=%s",
+        message.chat.id, message.chat.title, bool(message.audio),
+    )
     if not message.audio:
         return
     label = _channel_label(message.chat.id)

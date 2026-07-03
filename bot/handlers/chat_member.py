@@ -20,6 +20,15 @@ _LEFT_STATUSES = {"left", "kicked"}
 async def on_my_chat_member(event: ChatMemberUpdated) -> None:
     """Bot was added to or removed from a chat."""
     chat = event.chat
+    if chat.type == "channel":
+        # Loudly log the channel id — this is how CACHE_CHANNEL_ID / radio
+        # channels are discovered (private channels have no @username, and a
+        # bot cannot resolve an invite link; re-adding the bot fires this).
+        logger.info(
+            "CHANNEL EVENT: bot %s in channel id=%s title=%r",
+            event.new_chat_member.status, chat.id, chat.title,
+        )
+        return
     if chat.type not in ("group", "supergroup"):
         return
 

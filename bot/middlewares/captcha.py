@@ -12,7 +12,7 @@ import random
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import update
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,14 @@ class CaptchaMiddleware(BaseMiddleware):
             await _send_challenge(event, tg_user.id, db_user.language)
             return
 
-        # Check the user's answer (answer stored as SHA-256 hash)
+        # Button challenge pending: any text just gets a gentle reminder — no
+        # fail counting, no escalating blocks (the old math flow blocked 5
+        # wrong answers; only 41/1131 users ever passed it).
+        if answer == "btn":
+            await _send_challenge(event, tg_user.id, db_user.language)
+            return
+
+        # Legacy math challenge in flight (answer stored as SHA-256 hash)
         text = (event.text or "").strip()
         hashed_text = hashlib.sha256(text.encode()).hexdigest()
         if hashed_text == answer:
@@ -183,16 +190,18 @@ class CaptchaMiddleware(BaseMiddleware):
 
 
 async def _send_challenge(event: Message, user_id: int, lang: str) -> None:
-    a = random.randint(1, 9)
-    b = random.randint(1, 9)
-    c = random.randint(1, 9)
-    answer = str(a * b + c)
-    hashed_answer = hashlib.sha256(answer.encode()).hexdigest()
+    """One-tap human check. The old math challenge ('a×b+c=?') was a funnel
+    killer — 41 of 1131 users ever passed it; a single button keeps the
+    anti-spam property (requires a callback) without the arithmetic wall.
+    The pass handler lives in bot/handlers/start.py (callback 'captcha:ok')."""
     try:
-        await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, hashed_answer)
+        await cache.redis.setex(_challenge_key(user_id), _CHALLENGE_TTL, "btn")
         await cache.redis.delete(_fails_key(user_id))
     except Exception:
         logger.debug("captcha challenge redis set failed user=%s", user_id, exc_info=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=t(lang, "captcha_btn"), callback_data="captcha:ok"),
+    ]])
     await event.answer(
-        t(lang, "captcha_prompt", a=a, b=b, c=c), parse_mode="HTML"
+        t(lang, "captcha_btn_prompt"), reply_markup=kb, parse_mode="HTML"
     )

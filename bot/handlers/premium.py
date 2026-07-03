@@ -94,18 +94,11 @@ async def handle_premium(callback: CallbackQuery) -> None:
                     text=t(lang, "micro_trial_btn", price=_PRICE_TRIAL_7D),
                     callback_data="premium:buy:trial7d",
                 )],
-                [InlineKeyboardButton(
-                    text=t(lang, "micro_noads_btn", price=_PRICE_NO_ADS_24H),
-                    callback_data="premium:buy:noads24h",
-                )],
-                [InlineKeyboardButton(
-                    text=t(lang, "micro_flac_btn", price=_PRICE_FLAC_1),
-                    callback_data="premium:buy:flac1",
-                )],
-                [InlineKeyboardButton(
-                    text=t(lang, "flac_10_btn", price=_PRICE_FLAC_10),
-                    callback_data="premium:buy:flac10",
-                )],
+                # FLAC and "no ads 24h" SKUs are HIDDEN until they can actually
+                # be delivered: no download path consumes flac_credits, and no
+                # ads exist to remove — selling either is a refund/trust
+                # incident waiting to happen (2026-07 audit). Handlers kept;
+                # re-add the buttons when a lossless pipeline / real ads exist.
                 [InlineKeyboardButton(
                     text=t(lang, "gift_premium_btn"),
                     callback_data="premium:gift",

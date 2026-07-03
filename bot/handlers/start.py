@@ -239,6 +239,85 @@ async def cmd_start(message: Message) -> None:
         logger.debug("trial welcome failed for %s", user.id, exc_info=True)
 
 
+@router.callback_query(F.data == "captcha:ok")
+async def cb_captcha_ok(callback: CallbackQuery) -> None:
+    """One-tap captcha pass → straight into the main menu.
+
+    Replaces the math challenge (see bot/middlewares/captcha.py). Also replays
+    a pending /start deep-link payload via a native t.me deep-link button —
+    safe re-dispatch with the correct from_user.
+    """
+    uid = callback.from_user.id
+    try:
+        async with async_session() as session:
+            await session.execute(
+                update(User).where(User.id == uid).values(captcha_passed=True, welcome_sent=True)
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("captcha btn pass DB update failed user=%s", uid, exc_info=True)
+
+    from bot.services.cache import cache
+    pending = None
+    try:
+        pending = await cache.redis.get(f"captcha:pending_start:{uid}")
+        for k in (f"captcha:q:{uid}", f"captcha:fails:{uid}", f"captcha:pending_start:{uid}"):
+            await cache.redis.delete(k)
+    except Exception:
+        pass
+
+    await callback.answer("✓")
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    user = await get_or_create_user(callback.from_user)
+    admin = is_admin(uid, callback.from_user.username)
+    bot_me = await callback.bot.me()
+    chat_id = callback.message.chat.id if callback.message else uid
+    await callback.bot.send_message(
+        chat_id,
+        t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
+        reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
+        parse_mode="HTML",
+    )
+    # Free Premium trial welcome — same flag as cmd_start, no longer lost when
+    # the user doesn't retype /start within the flag's 1h TTL.
+    try:
+        trial_days = await cache.redis.get(f"premium:trial_granted:{uid}")
+        if trial_days:
+            await cache.redis.delete(f"premium:trial_granted:{uid}")
+            days = trial_days if isinstance(trial_days, str) else trial_days.decode()
+            await callback.bot.send_message(
+                chat_id,
+                t(user.language, "premium_trial_welcome", days=days),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text=t(user.language, "menu_premium"), callback_data="action:premium"),
+                ]]),
+                parse_mode="HTML",
+            )
+    except Exception:
+        logger.debug("trial welcome after captcha failed", exc_info=True)
+    # Deep-link payload (shared track/playlist/referral) → one-tap continue.
+    if pending:
+        payload = pending if isinstance(pending, str) else pending.decode()
+        try:
+            await callback.bot.send_message(
+                chat_id,
+                t(user.language, "captcha_continue"),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="▸",
+                        url=f"https://t.me/{bot_me.username}?start={payload}",
+                    ),
+                ]]),
+                parse_mode="HTML",
+            )
+        except Exception:
+            logger.debug("captcha continue link failed user=%s", uid, exc_info=True)
+
+
 @router.message(Command("version"))
 async def cmd_version(message: Message) -> None:
     """Show current bot version."""

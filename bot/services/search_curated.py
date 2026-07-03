@@ -185,6 +185,56 @@ CURATED_QUERY_PINS: dict[str, int] = {
 }
 
 
+# RU-phonetic spellings of common English words: users type English songs "по
+# звучанию" ("Джени фром Зе блок" = Jenny from the Block) and letter-translit
+# produces garbage ("dzheni"). When ≥2 words of a query map here, an extra
+# English variant is searched alongside (additive only — never replaces the
+# original query, so Russian tracks that share a word, e.g. «Дэнс», are safe).
+_PHONETIC_RU_EN: dict[str, str] = {
+    "зе": "the", "фром": "from", "донт": "don't", "кэнт": "can't",
+    "стап": "stop", "стайл": "style", "бэби": "baby", "беби": "baby",
+    "лав": "love", "лов": "love", "ю": "you", "май": "my", "ми": "me",
+    "ит": "it", "гёрл": "girl", "герл": "girl", "бой": "boy",
+    "найт": "night", "тайм": "time", "уан": "one", "фри": "free",
+    "лайф": "life", "лайк": "like", "хот": "hot", "шайн": "shine",
+    "дрим": "dream", "дримс": "dreams", "харт": "heart", "хартс": "hearts",
+    "брейк": "break", "шейк": "shake", "дэнс": "dance", "синг": "sing",
+    "сонг": "song", "мьюзик": "music", "мюзик": "music",
+    "джени": "jenny", "дженни": "jenny", "блок": "block",
+    "гангам": "gangnam", "гам": "gangnam", "опа": "oppa",
+    "вонт": "want", "вона": "wanna", "гонна": "gonna", "колл": "call",
+    "мани": "money", "хани": "honey", "саммер": "summer",
+    "виз": "with", "вит": "with", "фор": "for", "форевер": "forever",
+    "невер": "never", "гуд": "good", "бэд": "bad", "бэк": "back",
+    "нью": "new", "биг": "big", "литл": "little", "литтл": "little",
+}
+
+
+def phonetic_en_variant(query: str) -> str | None:
+    """English variant of a phonetically-typed RU query, or None.
+
+    Fires only when ≥2 words map (a single hit is too ambiguous); unmapped
+    Cyrillic words are letter-transliterated to complete the Latin query.
+    """
+    from bot.services.search_engine import normalize_query, transliterate_cyr_to_lat
+
+    norm = normalize_query(query)
+    words = norm.split()
+    mapped = [_PHONETIC_RU_EN.get(w) for w in words]
+    if sum(1 for m in mapped if m) < 2:
+        return None
+    out = []
+    for w, m in zip(words, mapped):
+        if m:
+            out.append(m)
+        elif re.search(r"[а-яё]", w):
+            out.append(transliterate_cyr_to_lat(w))
+        else:
+            out.append(w)
+    variant = " ".join(out)
+    return variant if variant != norm else None
+
+
 def _normalize_query_key(query: str) -> str:
     from bot.services.search_engine import normalize_query
 
@@ -212,6 +262,10 @@ def query_search_aliases(query: str) -> list[str]:
         for alias in QUERY_SEARCH_ALIASES.get(norm, []):
             if alias not in out:
                 out.append(alias)
+    # Phonetic-English variant rides the same alias search wave (additive).
+    _ph = phonetic_en_variant(query)
+    if _ph and _ph not in out:
+        out.append(_ph)
     return out
 
 
