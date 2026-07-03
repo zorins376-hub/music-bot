@@ -116,10 +116,59 @@ async def upload_to_cache(
                 except Exception:
                     logger.debug("Redis cache set failed for %s", source_id, exc_info=True)
                 logger.info("Cached %s to Telegram CDN (file_id=%s...)", source_id, file_id[:20])
+                try:
+                    from bot.services.cache import cache
+                    await cache.redis.sadd("cdn:posted", source_id)
+                except Exception:
+                    pass
             return file_id
         except Exception as e:
             logger.debug("Cache upload failed for %s: %s", source_id, e)
             return None
+
+
+async def mirror_to_channel(
+    source_id: str,
+    file_id: str,
+    title: str | None = None,
+    artist: str | None = None,
+    duration: int | None = None,
+) -> None:
+    """Copy a freshly-downloaded track into the CDN cache channel BY FILE_ID.
+
+    No re-upload: Telegram clones the file server-side, so this is instant and
+    free. Called fire-and-forget after user deliveries — every requested track
+    lands in the channel library exactly once (dedup via the cdn:posted set;
+    tracks that already came FROM the channel take the file_id delivery branch
+    and never reach this call).
+    """
+    if not settings.CACHE_CHANNEL_ID or not file_id:
+        return
+    bot = _get_bot()
+    if not bot:
+        return
+    from bot.services.cache import cache
+    try:
+        added = await cache.redis.sadd("cdn:posted", source_id)
+        if not added:  # 0 → already mirrored/uploaded before
+            return
+    except Exception:
+        pass
+    try:
+        await bot.send_audio(
+            chat_id=settings.CACHE_CHANNEL_ID,
+            audio=file_id,
+            title=title or None,
+            performer=artist or None,
+            duration=duration or None,
+        )
+        logger.info("Mirrored %s to cache channel", source_id)
+    except Exception:
+        try:  # roll the marker back so a later delivery can retry
+            await cache.redis.srem("cdn:posted", source_id)
+        except Exception:
+            pass
+        logger.debug("mirror_to_channel failed for %s", source_id, exc_info=True)
 
 
 async def download_from_cache(file_id: str, dest_path: Path) -> Path | None:

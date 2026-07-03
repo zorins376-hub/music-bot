@@ -184,6 +184,31 @@ async def handle_channel_post(message: Message) -> None:
     )
     if not message.audio:
         return
+    # CDN cache channel (BRmuz): any audio posted there becomes an instantly
+    # deliverable, searchable library track — its file_id already lives on the
+    # Telegram CDN, so delivery costs nothing.
+    if settings.CACHE_CHANNEL_ID and message.chat.id == settings.CACHE_CHANNEL_ID:
+        audio = message.audio
+        source_id = f"tg_{message.chat.id}_{message.message_id}"
+        try:
+            await upsert_track(
+                source_id=source_id,
+                title=audio.title or audio.file_name or "Unknown",
+                artist=audio.performer or "",
+                duration=audio.duration,
+                file_id=audio.file_id,
+                source="channel",
+                channel="cache",
+            )
+            await cache.set_file_id(source_id, audio.file_id)
+            await cache.redis.sadd("cdn:posted", source_id)
+            logger.info(
+                "Cache channel captured: %s — %s",
+                audio.performer or "?", audio.title or audio.file_name or "?",
+            )
+        except Exception:
+            logger.debug("cache channel capture failed", exc_info=True)
+        return
     label = _channel_label(message.chat.id)
     if not label:
         return

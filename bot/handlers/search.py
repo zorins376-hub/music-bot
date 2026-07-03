@@ -278,6 +278,28 @@ def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool =
     return body
 
 
+def _mirror_cdn(video_id: str, file_id: str, track_info: dict) -> None:
+    """Fire-and-forget: copy a freshly-downloaded track into the CDN cache
+    channel by file_id (instant, no re-upload; dedup inside). Never delays the
+    user's delivery."""
+    async def _run() -> None:
+        try:
+            from bot.services.telegram_cache import mirror_to_channel
+            _tags = _audio_tag_kwargs(track_info)
+            await mirror_to_channel(
+                video_id, file_id,
+                title=_tags.get("title"), artist=_tags.get("performer"),
+                duration=int(track_info["duration"]) if track_info.get("duration") else None,
+            )
+        except Exception:
+            logger.debug("cdn mirror failed for %s", video_id, exc_info=True)
+
+    try:
+        asyncio.create_task(_run())
+    except Exception:
+        pass
+
+
 async def _ensure_caption_duration(track_info: dict) -> None:
     """Fill a missing duration from the Track row in Postgres before captioning.
 
@@ -1839,6 +1861,7 @@ async def _send_album_track(message: Message, user, track_info: dict) -> bool:
             **_audio_tag_kwargs(track_info),
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+        _mirror_cdn(video_id, sent.audio.file_id, track_info)
         await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
         return True
     except Exception:
@@ -2025,6 +2048,7 @@ async def _group_auto_play(
             **_audio_tag_kwargs(track_info),
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+        _mirror_cdn(video_id, sent.audio.file_id, track_info)
         tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
         if tid:  # add the lyrics button once the track DB id is known
             try:
@@ -2240,6 +2264,7 @@ async def cb_wrong_track_pick(callback: CallbackQuery, callback_data: WrongTrack
             **_audio_tag_kwargs(sent_track),
         )
         await cache.set_file_id(sent_track.get("video_id", ""), sent.audio.file_id, bitrate)
+        _mirror_cdn(sent_track.get("video_id", ""), sent.audio.file_id, sent_track)
         await _post_download(user.id, sent_track, sent.audio.file_id, bitrate)
         # Learn: this corrected pick is the right track for the original query.
         try:
@@ -2640,6 +2665,7 @@ async def handle_track_select(
             )
 
             await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+            _mirror_cdn(video_id, sent.audio.file_id, track_info)
             record_provider_event(_dl_src, "download", time.monotonic() - _dl_t0, True)
             tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
             await status.delete()
@@ -2678,6 +2704,7 @@ async def handle_track_select(
                                 **_audio_tag_kwargs(track_info),
                             )
                             await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+                            _mirror_cdn(video_id, sent.audio.file_id, track_info)
                             tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
                             await status.delete()
                             if not is_group:

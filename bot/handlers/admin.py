@@ -1688,6 +1688,53 @@ async def handle_forwarded_audio(message: Message) -> None:
     logger.info("Admin %s forwarded audio %s → %s (count=%d)", uid, source_id, label, state["count"])
 
 
+class _CacheChannelFwdFilter(BaseFilter):
+    """Audio forwarded by an admin FROM the CDN cache channel (BRmuz).
+
+    Bots cannot read channel history, so old channel tracks are indexed by
+    bulk-forwarding them to the bot (select up to 100 posts → Forward). Only
+    fires for forwards whose origin IS the cache channel — regular audio sent
+    to the bot (Shazam recognition) is untouched.
+    """
+    async def __call__(self, message: Message) -> bool:
+        return (
+            message.audio is not None
+            and message.chat.type == "private"
+            and message.forward_from_chat is not None
+            and bool(settings.CACHE_CHANNEL_ID)
+            and message.forward_from_chat.id == settings.CACHE_CHANNEL_ID
+            and _is_admin(message.from_user.id)
+            and message.from_user.id not in _admin_fwd_state  # LIVE mode wins
+        )
+
+
+@router.message(_CacheChannelFwdFilter())
+async def handle_cache_channel_forward(message: Message) -> None:
+    """Index an old cache-channel track for instant search/delivery."""
+    audio = message.audio
+    fwd_mid = message.forward_from_message_id or message.message_id
+    source_id = f"tg_{message.forward_from_chat.id}_{fwd_mid}"
+    await upsert_track(
+        source_id=source_id,
+        title=audio.title or audio.file_name or "Unknown",
+        artist=audio.performer or "",
+        duration=audio.duration,
+        file_id=audio.file_id,
+        source="channel",
+        channel="cache",
+    )
+    try:
+        await cache.set_file_id(source_id, audio.file_id)
+        await cache.redis.sadd("cdn:posted", source_id)
+    except Exception:
+        logger.debug("cache fwd redis save failed", exc_info=True)
+    await message.reply(
+        f"✓ В быстрый доступ: <b>{audio.performer or ''} — {audio.title or audio.file_name or 'Unknown'}</b>",
+        parse_mode="HTML",
+    )
+    logger.info("Cache channel history indexed: %s", source_id)
+
+
 # ── Track management (list + delete) ────────────────────────────────────
 
 async def _build_tracks_list(channel: str, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
