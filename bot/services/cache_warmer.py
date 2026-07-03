@@ -62,7 +62,28 @@ async def _candidates() -> list[str]:
     except Exception:
         logger.debug("warmer: audit scan failed", exc_info=True)
 
-    # 2) Popular tracks from our own DB -> "Artist Title"
+    # 2) Current TOP-CHART tracks -> "Artist Title": these are the queries users
+    # are MOST likely to type next, so they belong in the fast-access cache
+    # before they are ever searched. Charts refresh over time; new entries are
+    # not in warm:done yet, so they are picked up automatically.
+    try:
+        from bot.handlers.charts import _CHART_FETCHERS, _get_chart
+        for source in _CHART_FETCHERS:
+            try:
+                tracks = await _get_chart(source)
+            except Exception:
+                continue
+            for tr in (tracks or [])[:100]:
+                artist = (tr.get("uploader") or tr.get("artist") or "").strip()
+                title = (tr.get("title") or "").strip()
+                q = f"{artist} {title}".strip()
+                if len(q) > 4 and q.lower() not in seen:
+                    seen.add(q.lower())
+                    out.append(q)
+    except Exception:
+        logger.debug("warmer: chart scan failed", exc_info=True)
+
+    # 3) Popular tracks from our own DB -> "Artist Title"
     try:
         from sqlalchemy import select
         from bot.models.base import async_session
