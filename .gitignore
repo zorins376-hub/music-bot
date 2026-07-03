@@ -26,3 +26,5 @@ webapp/frontend/node_modules/
 .env.bak*
 *.tmp
 docker-compose.yml.bak*
+.zencoder/
+.zenflow/
