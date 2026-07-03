@@ -41,6 +41,16 @@ async def check_and_reward_streak(user_id: int) -> dict | None:
 
         # Check if this streak hits a milestone
         if streak in STREAK_MILESTONES:
+            # Award once per user per milestone-day: without this guard every
+            # play on a milestone day re-awards the XP (called from the
+            # per-play path in bot/db.py).
+            try:
+                from bot.services.cache import cache
+                _guard = f"streakrw:{user_id}:{streak}"
+                if not await cache.redis.set(_guard, "1", ex=48 * 3600, nx=True):
+                    return None
+            except Exception:
+                pass  # Redis down — award anyway rather than never
             xp_reward = STREAK_MILESTONES[streak]
             try:
                 from bot.services.leaderboard import add_xp

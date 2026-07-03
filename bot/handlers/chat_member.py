@@ -24,11 +24,13 @@ async def on_my_chat_member(event: ChatMemberUpdated) -> None:
         return
 
     new_status = event.new_chat_member.status
+    old_status = event.old_chat_member.status if event.old_chat_member else ""
 
     async with async_session() as session:
         existing = await session.get(BotChat, chat.id)
 
         if new_status in _MEMBER_STATUSES:
+            was_active = bool(existing and existing.is_active)
             if existing:
                 existing.is_active = True
                 existing.title = chat.title
@@ -40,6 +42,22 @@ async def on_my_chat_member(event: ChatMemberUpdated) -> None:
                     is_active=True,
                 ))
             logger.info("Bot added to chat %s (%s)", chat.id, chat.title)
+
+            # One short onboarding message on a FRESH add (not on admin-promote
+            # or rejoin of an active chat): without it the trigger syntax is
+            # undiscoverable and plain song requests are silently ignored.
+            if not was_active and old_status not in _MEMBER_STATUSES:
+                try:
+                    await event.bot.send_message(
+                        chat.id,
+                        "◇ <b>BLACK ROOM</b> в чате.\n\n"
+                        "Напиши <b>включи «название трека»</b> или ответь на моё "
+                        "сообщение названием — пришлю музыку прямо сюда.\n"
+                        "Например: <i>включи кино группа крови</i>",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    logger.debug("group welcome message failed for %s", chat.id, exc_info=True)
 
         elif new_status in _LEFT_STATUSES:
             if existing:

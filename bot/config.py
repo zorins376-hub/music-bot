@@ -91,7 +91,10 @@ class Settings(BaseSettings):
 
     # ── Cache TTL ─────────────────────────────────────────────────────────
     CACHE_FILE_ID_TTL: int = 30 * 24 * 3600   # 30 дней
-    SEARCH_SESSION_TTL: int = 300              # 5 минут
+    # 24h: result buttons stay visible on old messages forever — a 5-minute TTL
+    # made any tap older than that die with "Сессия истекла" (top UX complaint
+    # class in the 2026-07 audit). Payload is a few KB; volatile-lru caps memory.
+    SEARCH_SESSION_TTL: int = 24 * 3600
     # Search caches are long-lived; Redis maxmemory + volatile-lru is the real
     # governor (evicts least-recently-used cache keys when the size cap is hit),
     # so these TTLs are just a freshness ceiling, not the primary eviction driver.
@@ -103,9 +106,12 @@ class Settings(BaseSettings):
     DATA_DIR: Path = _BASE / "data"
 
     # ── Rate limiting ─────────────────────────────────────────────────────
-    RATE_LIMIT_REGULAR: int = 10
+    # 30/hour + 2s: the old 10/hour + 5s cap was hit by 9% of users (audit
+    # 2026-07) — competing music bots are effectively unlimited, and the limit
+    # counts searches (incl. misses/cached repeats), not deliveries.
+    RATE_LIMIT_REGULAR: int = 30
     RATE_LIMIT_PREMIUM: int = 999999
-    COOLDOWN_REGULAR: int = 5
+    COOLDOWN_REGULAR: int = 2
     COOLDOWN_PREMIUM: int = 1
 
     # ── Thread pool (VPS-optimized: increase for dedicated servers) ─────

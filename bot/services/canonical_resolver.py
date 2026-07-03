@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 _GENIUS_UA = "CompuServe Classic/1.22"
 _GENIUS_CACHE_PREFIX = "lyricsong:"
 
+# Genius ranks rap battles / interviews / non-song meta pages highly for RU lyric
+# fragments (e.g. "убили негра" -> a Hip-Hop.Ru battle at #0, ahead of the real
+# "Запрещённые барабанщики — Убили негра" at #1). Skip these and take the first
+# real song hit. Markers seen in the wild: Versus/#SLOVOSPB/Hip-Hop.Ru battles,
+# вДудь interviews, "DD/MM/YY: X vs. Y" and "Round N" battle titles, Pushkin/meta.
+_GENIUS_JUNK_RE = re.compile(
+    r"versus|slovospb|hip-hop\.ru|stream battle|официальн\w* баттл|\bбатт?л\w*|"
+    r"\bvs\.?\b|\bround\b|\bвдудь\b|\bvdud\b|евгений онегин|\bглава\b|"
+    r"\d{2}[./]\d{2}[./]\d{2}|romaniz",
+    re.IGNORECASE,
+)
+
 _CACHE_TTL = 7 * 24 * 3600  # 7 days
 _CACHE_PREFIX = "canon:"
 _TIMEOUT = 4
@@ -177,14 +189,22 @@ async def resolve_lyric_song(query: str) -> tuple[str, str] | None:
                 hits = data.get("response", {}).get("hits", [])
                 for h in hits:
                     r = h.get("result", {})
-                    artist = (r.get("primary_artist") or {}).get("name")
-                    title = r.get("title")
-                    if artist and title:
-                        # Genius appends "(English translation)" to non-English
-                        # titles — strip it so it doesn't pollute the search query.
-                        title = re.sub(r"\s*[\(\[].*$", "", title).strip() or title
-                        result = (artist, title)
-                        break
+                    artist = (r.get("primary_artist") or {}).get("name") or ""
+                    title = r.get("title") or ""
+                    if not (artist and title):
+                        continue
+                    # Skip rap-battle / interview / meta junk that Genius ranks high
+                    # for RU lyric fragments — it used to pollute the resolve.
+                    if _GENIUS_JUNK_RE.search(f"{artist} {title}"):
+                        continue
+                    # Genius appends a parenthetical transliteration/translation to
+                    # BOTH fields — "Любэ (Lubeh)", "Конь (Horse)". Strip it so the
+                    # artist+title matches the provider catalog (unstripped names
+                    # break canonical_match_index / the direct fetch).
+                    artist = re.sub(r"\s*[\(\[].*$", "", artist).strip() or artist
+                    title = re.sub(r"\s*[\(\[].*$", "", title).strip() or title
+                    result = (artist, title)
+                    break
             else:
                 logger.debug("genius search status %s", resp.status)
     except Exception:

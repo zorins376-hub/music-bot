@@ -288,6 +288,13 @@ async def record_listening_event(
                 await _update_streak_and_xp(user_id, XP_PLAY)
             except Exception:
                 logger.debug("XP update failed for user %s", user_id, exc_info=True)
+            # Streak milestone XP (3/7/14/30 days) — the Mini App advertises these
+            # rewards but nothing ever called the awarder (2026-07 audit).
+            try:
+                from bot.services.streak_rewards import check_and_reward_streak
+                await check_and_reward_streak(user_id)
+            except Exception:
+                logger.debug("streak reward check failed for user %s", user_id, exc_info=True)
             # Auto-update profile every 10 plays
             try:
                 play_count = await _get_user_play_count(user_id)

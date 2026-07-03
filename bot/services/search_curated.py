@@ -58,14 +58,19 @@ QUERY_SEARCH_ALIASES: dict[str, list[str]] = {
     "кайфуем каспийский груз": ["Sh4dowVlad Каспийский груз"],
 }
 
-def _track(vid: int, title: str, uploader: str) -> dict:
-    return {
+def _track(vid: int, title: str, uploader: str, duration: int = 0) -> dict:
+    out = {
         "video_id": f"ym_{vid}",
         "ym_track_id": vid,
         "title": title,
         "uploader": uploader,
         "source": "yandex",
     }
+    # Without a duration the caption shows "?:??" on cached (file_id) deliveries,
+    # where nothing else can supply it before the caption is built.
+    if duration:
+        out["duration"] = duration
+    return out
 
 
 CURATED_YM_TRACKS: dict[int, dict] = {
@@ -83,7 +88,7 @@ CURATED_YM_TRACKS: dict[int, dict] = {
     89970732: _track(89970732, "Мимо ветра", "MATRANG, Musia Totibadze"),
     66869588: _track(66869588, "Краш", "Клава Кока, NILETTO"),
     148853444: _track(148853444, "Almaty", "LUCAVEROS"),
-    72521790: _track(72521790, "Любит небо", "Loc-Dog, KOALA"),
+    72521790: _track(72521790, "Любит небо", "Loc-Dog, KOALA", duration=361),
     94826569: _track(94826569, "Кружки наливай", "The Пауки"),
     94531291: _track(94531291, "Гонк-Конг", "UNIK"),
     78598888: _track(78598888, "Ветром стать", "Burito, NAiTA"),
@@ -100,6 +105,17 @@ CURATED_YM_TRACKS: dict[int, dict] = {
     147769932: _track(147769932, "Nubxs", "Vairo"),
     132167879: _track(132167879, "Каспийский груз", "Sh4dowVlad"),
     46371870: _track(46371870, "Scarab", "Vairo"),
+    # ── Iconic songs pinned by a lyric line (deterministic; also instant via Tier
+    # 0). The lyric->song resolver (Genius/LRCLib) is unreliable for these — junk
+    # hits or covers literally titled with the lyric line outrank the original.
+    2215069: _track(2215069, "Конь", "Любэ", duration=217),
+    64358696: _track(64358696, "Экспонат", "Ленинград", duration=230),
+    17563784: _track(17563784, "Районы-кварталы", "Звери", duration=204),
+    146654200: _track(146654200, "Убили негра", "Запрещённые Барабанщики", duration=287),
+    69125202: _track(69125202, "Розовое вино", "Элджей, FEDUK", duration=246),
+    50684233: _track(50684233, "Лесник", "Король и Шут", duration=191),
+    28397938: _track(28397938, "Восьмиклассница", "КИНО", duration=165),
+    595258: _track(595258, "Я свободен", "Кипелов", duration=433),
 }
 
 CURATED_QUERY_PINS: dict[str, int] = {
@@ -147,6 +163,25 @@ CURATED_QUERY_PINS: dict[str, int] = {
     "кайфуем каспийский груз": 132167879,
     "мерседес": 113353811,
     "ворон": 141752393,
+    # ── Iconic lyric-line pins (full line + common short forms; ё/е variants) ──
+    "выйду ночью в поле с конём": 2215069,
+    "выйду ночью в поле с конем": 2215069,
+    "выйду ночью в поле": 2215069,
+    "на лабутенах и в восхитительных штанах": 64358696,
+    "на лабутенах": 64358696,
+    "и в восхитительных штанах": 64358696,
+    "районы кварталы жилые массивы": 17563784,
+    "районы кварталы": 17563784,
+    "убили негра ни за что ни про что": 146654200,
+    "убили негра": 146654200,
+    "розовое вино мы пьём с тобой": 69125202,
+    "розовое вино мы пьем с тобой": 69125202,
+    "розовое вино": 69125202,
+    "лесник ходит по лесу": 50684233,
+    "восьмиклассница ну кто же виноват": 28397938,
+    "восьмиклассница": 28397938,
+    "я свободен словно птица в небесах": 595258,
+    "я свободен": 595258,
 }
 
 

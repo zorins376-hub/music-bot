@@ -84,7 +84,7 @@ async def get_lyrics(artist: str, title: str) -> dict | None:
         logger.debug("lyrics cache get failed", exc_info=True)
 
     # No Genius token — can't fetch
-    if not settings.GENIUS_TOKEN:
+    if not (settings.GENIUS_TOKEN or settings.GENIUS_ACCESS_TOKEN):
         return None
 
     result = await _search_genius(artist, title)
@@ -104,7 +104,12 @@ async def get_lyrics(artist: str, title: str) -> dict | None:
 async def _search_genius(artist: str, title: str) -> dict | None:
     """Search Genius API and scrape lyrics page."""
     query = f"{artist} {title}"
-    headers = {"Authorization": f"Bearer {settings.GENIUS_TOKEN}"}
+    # Genius's Cloudflare 403s common browser/default UAs from datacenter IPs; an
+    # unusual UA passes (same trick as canonical_resolver).
+    headers = {
+        "Authorization": f"Bearer {(settings.GENIUS_TOKEN or settings.GENIUS_ACCESS_TOKEN)}",
+        "User-Agent": "CompuServe Classic/1.22",
+    }
 
     try:
         session = get_session()
@@ -285,8 +290,11 @@ async def _search_genius_lyrics(query: str, limit: int) -> list[dict]:
         session = get_session()
         proxy = _genius_proxy()
         hits = []
-        if settings.GENIUS_TOKEN:
-            headers = {"Authorization": f"Bearer {settings.GENIUS_TOKEN}"}
+        if (settings.GENIUS_TOKEN or settings.GENIUS_ACCESS_TOKEN):
+            headers = {
+                "Authorization": f"Bearer {(settings.GENIUS_TOKEN or settings.GENIUS_ACCESS_TOKEN)}",
+                "User-Agent": "CompuServe Classic/1.22",
+            }
             async with session.get(
                 _GENIUS_SEARCH_URL,
                 params={"q": query},

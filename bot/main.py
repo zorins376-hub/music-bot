@@ -21,7 +21,7 @@ if app_settings.SENTRY_DSN:
     import sentry_sdk
     sentry_sdk.init(dsn=app_settings.SENTRY_DSN, traces_sample_rate=0.05)
 
-from bot.handlers import admin, charts, faq, history, inline, search, start, video
+from bot.handlers import admin, charts, chat_member, faq, history, inline, search, start, video
 from bot.handlers import radio, premium, recommend, playlist, recognize, queue, referral
 from bot.handlers import favorites
 from bot.handlers import mix
@@ -488,6 +488,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(search.router)
     dp.include_router(inline.router)
     dp.include_router(history.router)
+    dp.include_router(chat_member.router)  # Group add/remove tracking + onboarding
 
     dp.error.register(_global_error_handler)
     dp.startup.register(on_startup)

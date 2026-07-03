@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 _PREFETCH_CONCURRENCY = 3
 
 # Interval between full prefetch runs (1 hour)
-_PREFETCH_INTERVAL = 3600
+_PREFETCH_INTERVAL = 6 * 3600  # was 1h: hourly runs burned ~119 doomed YouTube
+# hits/cycle through the rate-limited WARP proxy, starving ORGANIC user downloads
+# (2026-07 audit). Charts change slowly; 6h warming is plenty.
 
 # Minimum file size to consider track already cached (10KB)
 _MIN_CACHED_SIZE = 10 * 1024
@@ -172,9 +174,20 @@ async def prefetch_chart_tracks(
         logger.info("Prefetch: no tracks to download")
         return stats
     
+    # Skip the YouTube half while the provider is degraded — warming a dead
+    # provider just burns the shared WARP/YouTube quota that organic user
+    # downloads need (the audit found ~119 doomed yt hits per hourly cycle).
+    try:
+        from bot.services.provider_health import is_provider_disabled
+        if yt_video_ids and is_provider_disabled("youtube"):
+            logger.info("Prefetch: youtube disabled by health check — skipping %d yt tracks", len(yt_video_ids))
+            yt_video_ids = set()
+    except Exception:
+        pass
+
     logger.info("Prefetch: starting download of %d unique tracks (%d yt, %d ym)",
                 total, len(yt_video_ids), len(ym_video_ids))
-    
+
     # Download all tracks concurrently (limited by semaphore)
     tasks = [download_one(vid) for vid in yt_video_ids]
     tasks += [download_one_ym(vid) for vid in ym_video_ids]

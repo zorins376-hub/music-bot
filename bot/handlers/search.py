@@ -256,7 +256,14 @@ def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool =
     """
     from bot.services.track_flair import track_extra_caption_lines
 
-    dur = track_info.get("duration_fmt") or "?:??"
+    dur = track_info.get("duration_fmt")
+    if not dur and track_info.get("duration"):
+        # Curated pins carry a raw duration but no pre-formatted string.
+        try:
+            dur = _fmt_duration(int(track_info["duration"]))
+        except Exception:
+            dur = None
+    dur = dur or "?:??"
     year = track_info.get("upload_year")
     year_str = f" · {year}" if year else ""
     brand = t(lang, "track_brand_line")
@@ -269,6 +276,32 @@ def _track_caption(lang: str, track_info: dict, bitrate: int, *, ad_free: bool =
     if extra:
         return f"{body}\n{extra}"
     return body
+
+
+async def _ensure_caption_duration(track_info: dict) -> None:
+    """Fill a missing duration from the Track row in Postgres before captioning.
+
+    file_id deliveries skip the download, so the mutagen duration-read never runs;
+    a curated pin / rcache entry with no duration then showed "?:??" in the caption
+    while the audio bubble (from the file itself) showed the real length. The row
+    is populated on first download, so a cached track almost always has it.
+    """
+    if track_info.get("duration_fmt") or track_info.get("duration"):
+        return
+    try:
+        from sqlalchemy import select
+        from bot.models.base import async_session
+        from bot.models.track import Track
+        async with async_session() as session:
+            res = await session.execute(
+                select(Track.duration).where(Track.source_id == track_info.get("video_id", ""))
+            )
+            dur = res.scalar_one_or_none()
+        if dur:
+            track_info["duration"] = int(dur)
+            track_info["duration_fmt"] = _fmt_duration(int(dur))
+    except Exception:
+        logger.debug("caption duration lookup failed", exc_info=True)
 
 
 def _is_ad_free(user) -> bool:
@@ -500,6 +533,29 @@ def _build_results_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def _direct_hit_present(
+    results: list[dict], provider_query: str, top_k: int = 3, thresh: float = 0.8
+) -> bool:
+    """True when a top result already contains (nearly) all query words in its
+    artist+title — i.e. we have a confident direct match and don't need the
+    lyric-resolution machinery, which would only add noise + ~12s latency.
+
+    E.g. "9 грамм Дэнс" already has "9 грамм — Дэнс" at #1; without this guard a
+    lyric fallback injects "9 грамм свинца" (wrong artist) and it can win ranking.
+    Only short-circuits when the answer is demonstrably already in hand, so it
+    never reduces recall for genuine lyric fragments (whose words are NOT all
+    present in any single result's artist+title before the boost runs).
+    """
+    pq_words = set(normalize_query(provider_query).split())
+    if not pq_words:
+        return False
+    for r in results[:top_k]:
+        at = set(normalize_query(f"{r.get('uploader','')} {r.get('title','')}").split())
+        if len(pq_words & at) / len(pq_words) >= thresh:
+            return True
+    return False
+
+
 def _group_pick_score(
     track: dict,
     *,
@@ -666,6 +722,17 @@ async def _do_search(message: Message, query: str) -> None:
         except Exception:
             pass
 
+    # Strip the bot's own @mention anywhere in the query — private-chat users
+    # tapping the @bot autocomplete produced queries like "@TSmymusicbot_bot
+    # песня" that went to providers verbatim (12 garbage searches in the audit).
+    if _BOT_USERNAME and "@" in query:
+        _q2 = _re.sub(rf"@{_re.escape(_BOT_USERNAME)}\b", " ", query, flags=_re.IGNORECASE)
+        _q2 = _re.sub(r"\s+", " ", _q2).strip()
+        if _q2 != query.strip():
+            query = _q2
+            if not query:
+                return
+
     is_group = message.chat.type in ("group", "supergroup")
     # Groups: only Yandex/Spotify links and text search — no YouTube URLs
     if is_group and is_youtube_url(query):
@@ -804,6 +871,16 @@ async def _do_search(message: Message, query: str) -> None:
         status = await message.answer(t(lang, "searching"))
 
     _search_t0 = time.monotonic()
+    # Global wall-clock budget for the ENRICHMENT phases (aliases, canonical,
+    # genius, translit, speller, parsed hints, lyric boost). Individually each has
+    # an 8-12s timeout, but they run sequentially — with dead providers the waves
+    # stacked to 95-230s (June audit: p90 96s, 18% of searches ≥60s, users left).
+    # The primary provider gather is NOT budgeted — core search always completes;
+    # the budget only stops piling fallback waves on top of it.
+    _search_budget = 12.0
+
+    def _budget_left() -> float:
+        return _search_budget - (time.monotonic() - _search_t0)
     if is_group:
         max_results = _MAX_RESULTS_GROUP
     else:
@@ -835,15 +912,20 @@ async def _do_search(message: Message, query: str) -> None:
     _norm_q = normalize_query(provider_query)
     _tier0: list[dict] | None = None
     try:
-        _rc = await cache.get_result_cache(_norm_q)
-        if _rc:
-            _tier0 = _rc
-        else:
-            from bot.services.search_curated import curated_track_for_query
-            from bot.services.search_memory import get_learned_track as _get_learned
-            _pin0 = curated_track_for_query(query) or curated_track_for_query(provider_query)
-            if not _pin0:
-                _pin0 = await _get_learned(provider_query)
+        # Curated pins are explicit human curation — they outrank a cached result,
+        # so a newly added pin takes effect immediately instead of being shadowed
+        # by a stale rcache entry for up to RCACHE_TTL. Free (in-process dict).
+        from bot.services.search_curated import curated_track_for_query
+        from bot.services.search_memory import get_learned_track as _get_learned
+        _pin0 = curated_track_for_query(query) or curated_track_for_query(provider_query)
+        if _pin0 and _pin0.get("video_id"):
+            _tier0 = [_pin0]
+        if _tier0 is None:
+            _rc = await cache.get_result_cache(_norm_q)
+            if _rc:
+                _tier0 = _rc
+        if _tier0 is None:
+            _pin0 = await _get_learned(provider_query)
             if _pin0 and _pin0.get("video_id"):
                 _tier0 = [_pin0]
             elif local_results and local_results[0].get("file_id"):
@@ -923,6 +1005,8 @@ async def _do_search(message: Message, query: str) -> None:
             all_results.extend(batch)
 
     for alias_q in ([] if _skip_engine else get_query_search_aliases(provider_query)):
+        if _budget_left() <= 0:
+            break
         alias_batch = await _search_source(
             "yandex",
             lambda q, limit, aq=alias_q: search_yandex(aq, limit=limit),
@@ -937,15 +1021,18 @@ async def _do_search(message: Message, query: str) -> None:
     # No cross-source agreement -> canon is None -> search is left untouched (so this
     # can only help, never regress). Cheap: cached resolve + one fast Yandex call.
     canonical_query: str | None = None
-    if not _skip_engine:
+    if not _skip_engine and _budget_left() > 0:
         try:
             from bot.services.canonical_resolver import resolve_canonical
             canonical_query = await resolve_canonical(provider_query)
         except Exception:
             canonical_query = None
-    if canonical_query and normalize_query(canonical_query) != normalize_query(provider_query):
+    if canonical_query and normalize_query(canonical_query) != normalize_query(provider_query) and _budget_left() > 0:
         try:
-            canon_batch = await asyncio.wait_for(search_yandex(canonical_query, limit=max_results), timeout=8)
+            canon_batch = await asyncio.wait_for(
+                search_yandex(canonical_query, limit=max_results),
+                timeout=min(8, max(1, _budget_left())),
+            )
             all_results.extend(canon_batch)
         except Exception:
             logger.debug("canonical yandex search failed for %r", canonical_query, exc_info=True)
@@ -955,7 +1042,10 @@ async def _do_search(message: Message, query: str) -> None:
     # can't match a lyric line to a title). Only for lyric-like queries with a
     # Genius token; the resolved title is boosted after dedup. Fails soft.
     lyric_song: tuple[str, str] | None = None
-    if not _skip_engine and len(provider_query.split()) >= 4 and settings.GENIUS_ACCESS_TOKEN:
+    if (
+        not _skip_engine and len(provider_query.split()) >= 4
+        and settings.GENIUS_ACCESS_TOKEN and _budget_left() > 1
+    ):
         try:
             from bot.services.canonical_resolver import resolve_lyric_song
             lyric_song = await resolve_lyric_song(provider_query)
@@ -964,14 +1054,19 @@ async def _do_search(message: Message, query: str) -> None:
         if lyric_song:
             _lartist, _ltitle = lyric_song
             for _lq in (f"{_lartist} {_ltitle}", _ltitle):
+                if _budget_left() <= 0:
+                    break
                 try:
-                    _lb = await asyncio.wait_for(search_yandex(_lq, limit=max_results), timeout=8)
+                    _lb = await asyncio.wait_for(
+                        search_yandex(_lq, limit=max_results),
+                        timeout=min(8, max(1, _budget_left())),
+                    )
                     all_results.extend(_lb)
                 except Exception:
                     logger.debug("lyric-resolved yandex search failed", exc_info=True)
 
     # A-05: If few results and query is mono-language, try transliterated search
-    if len(all_results) < 3 and not _skip_engine:
+    if len(all_results) < 3 and not _skip_engine and _budget_left() > 0:
         script = detect_script(provider_query)
         alt_query = None
         if script == "cyrillic":
@@ -993,7 +1088,7 @@ async def _do_search(message: Message, query: str) -> None:
 
     # Spell-correction fallback: typos in the query → poor provider hits.
     # Only triggered when results are weak, to keep latency low.
-    if len(all_results) < 3 and not _skip_engine:
+    if len(all_results) < 3 and not _skip_engine and _budget_left() > 0:
         try:
             from bot.services.speller import correct_query
             corrected = await correct_query(provider_query)
@@ -1041,22 +1136,35 @@ async def _do_search(message: Message, query: str) -> None:
             )
             if top_track else 0.0
         )
-        if (is_group or title_cov < 0.85) and not _skip_engine:
-            extra_tracks.extend(
-                await _fetch_parsed_hint_tracks(
-                    parsed_query,
-                    search_yandex_fn=search_yandex,
-                    search_vk_fn=search_vk,
-                    search_spotify_fn=search_spotify,
-                    search_yt_fn=_search_yt,
-                    include_youtube=not is_group,
+        # Skip when the top result already covers the whole query (nothing to fix)
+        # or the budget is spent. Previously unbounded (up to 3 queries × 10s) and
+        # ALWAYS ran for groups — a major part of the 95s+ June latency disaster.
+        if (
+            (is_group or title_cov < 0.85) and not _skip_engine
+            and _budget_left() > 1
+            and not _direct_hit_present(results, provider_query)
+        ):
+            try:
+                extra_tracks.extend(
+                    await asyncio.wait_for(
+                        _fetch_parsed_hint_tracks(
+                            parsed_query,
+                            search_yandex_fn=search_yandex,
+                            search_vk_fn=search_vk,
+                            search_spotify_fn=search_spotify,
+                            search_yt_fn=_search_yt,
+                            include_youtube=not is_group,
+                        ),
+                        timeout=max(2, min(10, _budget_left())),
+                    )
                 )
-            )
+            except Exception:
+                logger.debug("parsed-hint fetch timed out/failed", exc_info=True)
 
     _has_artist_title = bool(
         parsed_query.get("artist_hint") and parsed_query.get("title_hint")
     )
-    _run_lyrics_boost = (not _skip_engine) and (needs_lyrics_search_boost(
+    _run_lyrics_boost = (not _skip_engine) and _budget_left() > 2 and (needs_lyrics_search_boost(
         provider_query, top_track, parsed=parsed_query
     ) or (is_group and lyric_like and not _has_artist_title))
 
@@ -1071,6 +1179,12 @@ async def _do_search(message: Message, query: str) -> None:
             if len(_at) >= 2 and all(t in _pq_tok for t in _at):
                 _run_lyrics_boost = False
                 break
+
+    # Confident direct hit already in the pool → skip the lyric machinery entirely
+    # (it would only add a wrong-track and ~12s latency). See _direct_hit_present.
+    if _run_lyrics_boost and _direct_hit_present(results, provider_query):
+        logger.info("search: skip lyric boost — direct hit for %r", provider_query[:60])
+        _run_lyrics_boost = False
 
     if _run_lyrics_boost:
         # The lyric-verify machinery (verify pool + per-candidate lyric fetches +
@@ -1087,12 +1201,30 @@ async def _do_search(message: Message, query: str) -> None:
                     _hints = []
             _hints = _filter_lyric_hints_for_artist(_hints, parsed_query.get("artist_hint") or "")
 
+            # LRCLib's catalog is a purpose-built lyric->song index and is far
+            # cleaner than the word-overlap verify pool (which matched the fragment
+            # "восьмиклассница ну кто же виноват" to "Кто же виноват" instead of
+            # Кино — "Восьмиклассница"). Try it BEFORE the noisy pool.
+            if not _hints:
+                try:
+                    from bot.services.lyrics_provider import search_lrclib_catalog
+                    _hints = _filter_lyric_hints_for_artist(
+                        await search_lrclib_catalog(provider_query, limit=3) or [],
+                        parsed_query.get("artist_hint") or "",
+                    )
+                    if _hints:
+                        logger.info(
+                            "search: LRCLib catalog q=%r hits=%s", provider_query[:60],
+                            [f"{h.get('artist')} - {h.get('title')}" for h in _hints[:2]],
+                        )
+                except Exception:
+                    logger.debug("LRCLib catalog lookup failed", exc_info=True)
+
             if not _hints and all_results:
                 try:
                     from bot.services.lyrics_provider import (
                         gather_lyric_verify_pool,
                         resolve_lyrics_from_candidates,
-                        search_lrclib_catalog,
                     )
                     verify_pool = await gather_lyric_verify_pool(
                         provider_query, all_results[:25],
@@ -1100,8 +1232,6 @@ async def _do_search(message: Message, query: str) -> None:
                         parsed=parsed_query,
                     )
                     _hints = await resolve_lyrics_from_candidates(provider_query, verify_pool, limit=3)
-                    if not _hints:
-                        _hints = await search_lrclib_catalog(provider_query, limit=3)
                     if _hints:
                         logger.info(
                             "search: LRCLib verified q=%r hits=%s", provider_query[:60],
@@ -1127,7 +1257,9 @@ async def _do_search(message: Message, query: str) -> None:
             )
 
         try:
-            extra_tracks.extend(await asyncio.wait_for(_run_lyric_boost(), timeout=12))
+            extra_tracks.extend(await asyncio.wait_for(
+                _run_lyric_boost(), timeout=max(2, min(12, _budget_left())),
+            ))
         except Exception:
             logger.debug("lyric boost timed out/failed for %r", provider_query[:60], exc_info=True)
 
@@ -1150,8 +1282,11 @@ async def _do_search(message: Message, query: str) -> None:
 
     # Promote the Genius-resolved song (by title) for a lyric-fragment query, so
     # "words from a song" lands on the track. Title-only match (artist may be a
-    # cover). Only fires when a lyric song was resolved.
-    if lyric_song and results:
+    # cover). Only fires when a lyric song was resolved. NOTE: this reorders the
+    # result list but does NOT force the group pick — a Genius resolve alone is too
+    # unreliable to override _group_relevance_rank (force-pinning it regressed
+    # artist+title queries and lyrics where Genius guessed wrong).
+    if lyric_song and results and not _direct_hit_present(results, provider_query):
         try:
             from bot.services.canonical_resolver import canonical_match_index, title_match_index
             _la, _lt = lyric_song
@@ -1180,6 +1315,20 @@ async def _do_search(message: Message, query: str) -> None:
         blocked_count = before_count - len(results)
 
     if not results:
+        # Log the miss BEFORE returning — zero-result searches are exactly what the
+        # audit exists to catch, but the main audit write sits below this return,
+        # so every hard miss used to vanish from the log (June audit blind spot).
+        try:
+            _miss_audit = _json.dumps({
+                "t": "search", "ts": int(time.time()), "uid": user.id,
+                "grp": is_group, "q": query[:300], "pq": provider_query[:300],
+                "n": 0, "top1": "", "top1_sc": 0.0, "src": [],
+                "ms": int((time.monotonic() - _search_t0) * 1000),
+            }, ensure_ascii=False)
+            await cache.redis.lpush("search:audit", _miss_audit)
+            await cache.redis.ltrim("search:audit", 0, 49999)
+        except Exception:
+            logger.debug("miss audit log failed", exc_info=True)
         # TASK-012: "Did you mean?" suggestions
         try:
             corpus = await get_popular_titles(limit=500)
@@ -1308,6 +1457,27 @@ async def _do_search(message: Message, query: str) -> None:
                 source_rank=_grp_rank,
             )
             best = _ranked[0][0]
+            # A result that covers ~all query words (artist+title) is an exact match
+            # and must win over a higher-scored but non-covering track — e.g. the
+            # popular "Jah Khalib — 9 грамм свинца" (covers 2/3 words) was beating the
+            # queried "9 грамм — Дэнс" (covers 3/3) on file_id/downloads bonus, and
+            # "Три дня дождя — Bye-Bye" was beating the queried "…— Прощание".
+            #
+            # Scanned against the UNFILTERED results (not _ranked): the relevance
+            # rank drops "named-artist" collabs — "Три дня дождя, MONA — Прощание" is
+            # dropped for query "Три дня дождя Прощание" because it adds the featured
+            # "MONA", leaving only "…— Bye-Bye". The dedup order of results still
+            # surfaces the exact match. Safe for the "Клава Кока душный" case: no track
+            # there covers all 3 words, so no promote fires and the filter still rules.
+            if not _direct_hit_present([best], provider_query):
+                for _cand in results:
+                    if _direct_hit_present([_cand], provider_query):
+                        logger.info(
+                            "Group: promote exact-cover pick over %s -> %s",
+                            best.get("title"), _cand.get("title"),
+                        )
+                        best = _cand
+                        break
             logger.info(
                 "Group: relevance pick score=%.3f src=%s vid=%s title=%s",
                 _ranked[0][1], best.get("source"), best.get("video_id"), best.get("title"),
@@ -1469,15 +1639,30 @@ async def _group_auto_play(
     )
     video_id = track_info["video_id"]
 
+    # "Не тот трек?" keyboard must be available on ALL delivery paths — a wrong
+    # pick served from cache (file_id) is otherwise uncorrectable while rcache
+    # keeps re-serving it for 7 days (the self-learning bust/pin machinery only
+    # triggers from this button).
+    _wt_kb = None
+    if alt_sid:
+        try:
+            _alt_list = await cache.get_search(alt_sid)
+            if _alt_list:
+                _wt_kb = _wrong_track_keyboard(alt_sid, len(_alt_list))
+        except Exception:
+            pass
+
     # Local file_id (channel tracks)
     _af = _is_ad_free(user)
     local_fid = track_info.get("file_id")
     if local_fid:
+        await _ensure_caption_duration(track_info)
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
             audio=local_fid,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
+            reply_markup=_wt_kb,
             **_audio_tag_kwargs(track_info),
         )
         await _post_download(user.id, track_info, local_fid, bitrate)
@@ -1493,11 +1678,13 @@ async def _group_auto_play(
         except Exception:
             file_id = None
     if file_id:
+        await _ensure_caption_duration(track_info)
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
         await message.answer_audio(
             audio=file_id,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
+            reply_markup=_wt_kb,
             **_audio_tag_kwargs(track_info),
         )
         await _post_download(user.id, track_info, file_id, bitrate)
@@ -2107,7 +2294,7 @@ async def handle_track_select(
                 _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                 await callback.message.answer(
                     t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
+                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
                 )
             return
 
@@ -2131,7 +2318,7 @@ async def handle_track_select(
                 _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                 await callback.message.answer(
                     t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
+                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
                 )
             return
 
@@ -2212,7 +2399,7 @@ async def handle_track_select(
                 _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                 await callback.message.answer(
                     t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
+                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
                 )
 
         except Exception as e:
@@ -2247,7 +2434,7 @@ async def handle_track_select(
                                 _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
                                 await callback.message.answer(
                                     t(lang, "rate_track"),
-                                    reply_markup=_feedback_keyboard(tid, _share_q, share_url=_share_url),
+                                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
                                 )
                             return
                         finally:
