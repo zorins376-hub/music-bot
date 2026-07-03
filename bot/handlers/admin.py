@@ -462,6 +462,10 @@ async def _export_stats_csv(message: Message) -> None:
     await message.answer_document(doc, caption="📊 Экспорт статистики")
 
 
+# Invisible filler → forces the menu bubble to full screen width (see start.py._wide).
+_WIDE = "⠀" * 30
+
+
 def _admin_panel_keyboard() -> InlineKeyboardMarkup:
     # Uniform 2-per-row grid (matches the main menu's button width).
     return InlineKeyboardMarkup(
@@ -1091,13 +1095,13 @@ async def handle_admin_panel(callback: CallbackQuery) -> None:
             raise
     try:
         await callback.message.edit_text(
-            "<b>◆ Админ-панель</b>\n\nВыбери действие:",
+            f"<b>◆ Админ-панель</b>\n\nВыбери действие:\n{_WIDE}",
             reply_markup=_admin_panel_keyboard(),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
-            "<b>◆ Админ-панель</b>\n\nВыбери действие:",
+            f"<b>◆ Админ-панель</b>\n\nВыбери действие:\n{_WIDE}",
             reply_markup=_admin_panel_keyboard(),
             parse_mode="HTML",
         )
@@ -1462,9 +1466,9 @@ async def handle_adm_promo(callback: CallbackQuery) -> None:
             "Отправь его пользователю, он введёт через кнопку <b>Ввести промокод</b> в Premium."
         )
         try:
-            await callback.message.edit_text(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+            await callback.message.edit_text(f"{text}\n{_WIDE}", reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+            await callback.message.answer(f"{text}\n{_WIDE}", reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
         return
 
     if data == "adm:promo:list":
@@ -1481,9 +1485,9 @@ async def handle_adm_promo(callback: CallbackQuery) -> None:
                 )
             text = "\n".join(lines)
         try:
-            await callback.message.edit_text(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+            await callback.message.edit_text(f"{text}\n{_WIDE}", reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
+            await callback.message.answer(f"{text}\n{_WIDE}", reply_markup=_adm_promo_menu_keyboard(), parse_mode="HTML")
         return
 
     promo_key = data.rsplit(":", 1)[-1]
@@ -1558,7 +1562,7 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         "adm:settings": None,  # handled separately above
     }
     if callback.data == "adm:settings":
-        text = await _build_settings_text()
+        text = await _build_settings_text() + "\n" + _WIDE
         kb = _build_settings_keyboard()
         try:
             await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -1573,7 +1577,7 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
             ],
         ])
         await callback.message.answer(
-            "♪ <b>Треки LIVE</b>\n\nВыбери канал для просмотра и управления:",
+            f"♪ <b>Треки LIVE</b>\n\nВыбери канал для просмотра и управления:\n{_WIDE}",
             parse_mode="HTML",
             reply_markup=kb,
         )
@@ -1591,7 +1595,7 @@ async def handle_adm_prompt(callback: CallbackQuery) -> None:
         await callback.message.answer(
             "◈ <b>Загрузка треков для LIVE</b>\n\n"
             "Выбери канал, затем <b>пересылай аудио</b> сюда.\n"
-            "Когда закончишь — нажми <b>✓ Готово</b>.",
+            "Когда закончишь — нажми <b>✓ Готово</b>.\n" + _WIDE,
             parse_mode="HTML",
             reply_markup=kb,
         )

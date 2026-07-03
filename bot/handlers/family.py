@@ -71,6 +71,10 @@ async def _get_family_members_count(plan_id: int) -> int:
         return result.scalar() or 0
 
 
+# Invisible filler → forces the menu bubble to full screen width (see start.py._wide).
+_WIDE = "⠀" * 30
+
+
 @router.message(Command("family"))
 async def cmd_family(message: Message, user=None) -> None:
     """Show family plan status or offer to create one.
@@ -122,7 +126,7 @@ async def cmd_family(message: Message, user=None) -> None:
             )])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        await message.answer(f"{text}\n{_WIDE}", reply_markup=keyboard, parse_mode="HTML")
     else:
         # No family plan
         text = t(lang, "family_info")
@@ -138,7 +142,7 @@ async def cmd_family(message: Message, user=None) -> None:
                 ),
             ],
         ])
-        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        await message.answer(f"{text}\n{_WIDE}", reply_markup=keyboard, parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "family:create")
@@ -191,7 +195,7 @@ async def handle_family_create(callback: CallbackQuery) -> None:
             callback_data="family:buy:365d"
         )],
     ])
-    await callback.message.answer(t(lang, "family_created"), reply_markup=keyboard, parse_mode="HTML")
+    await callback.message.answer(f"{t(lang, 'family_created')}\n{_WIDE}", reply_markup=keyboard, parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "family:invite")

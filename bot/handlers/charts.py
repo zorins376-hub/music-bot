@@ -965,10 +965,14 @@ async def _append_to_chart_playlist(user_id: int, playlist_name: str, imported_t
 
 # ── Handlers ─────────────────────────────────────────────────────────────
 
+# Invisible filler → forces the menu bubble to full screen width (see start.py._wide).
+_WIDE = "⠀" * 30
+
+
 @router.message(Command("charts"))
 async def cmd_charts(message: Message) -> None:
     await message.answer(
-        f"{_LOGO}\n\n<b>🏆 Топ-чарты</b>\n\nВыбери рейтинг:",
+        f"{_LOGO}\n\n<b>🏆 Топ-чарты</b>\n\nВыбери рейтинг:\n{_WIDE}",
         reply_markup=_chart_menu_kb(),
         parse_mode="HTML",
     )
@@ -979,13 +983,13 @@ async def handle_charts_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     try:
         await callback.message.edit_text(
-            f"{_LOGO}\n\n<b>🏆 Топ-чарты</b>\n\nВыбери рейтинг:",
+            f"{_LOGO}\n\n<b>🏆 Топ-чарты</b>\n\nВыбери рейтинг:\n{_WIDE}",
             reply_markup=_chart_menu_kb(),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
-            f"{_LOGO}\n\n<b>🏆 Топ-чарты</b>\n\nВыбери рейтинг:",
+            f"{_LOGO}\n\n<b>🏆 Топ-чарты</b>\n\nВыбери рейтинг:\n{_WIDE}",
             reply_markup=_chart_menu_kb(),
             parse_mode="HTML",
         )

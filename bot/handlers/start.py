@@ -104,6 +104,16 @@ def _rk(d: dict, lang: str) -> str:
     return d.get(lang, d["ru"])
 
 
+# Invisible braille-blank line: forces the message bubble (and its 2-per-row inline
+# keyboard) to full screen width, so short-labeled menus look as wide as the admin
+# panel (whose long labels widen the bubble naturally). Appended below the menu text.
+_WIDE = "⠀" * 30
+
+
+def _wide(text: str) -> str:
+    return f"{text}\n{_WIDE}"
+
+
 def _reply_keyboard(lang: str) -> ReplyKeyboardMarkup:
     # Under the input box: a single ◇ Плеер launcher for the Mini App. Falls back
     # to Charts/Mix when no Mini App is configured.
@@ -254,7 +264,7 @@ async def cmd_start(message: Message) -> None:
         parse_mode="HTML",
     )
     await message.answer(
-        _rk(_MENU_INTRO, user.language),
+        _wide(_rk(_MENU_INTRO, user.language)),
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
@@ -305,7 +315,7 @@ async def rk_menu(message: Message) -> None:
     admin = is_admin(message.from_user.id, message.from_user.username)
     bot_me = await message.bot.me()
     await message.answer(
-        _rk(_MENU_INTRO, user.language),
+        _wide(_rk(_MENU_INTRO, user.language)),
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
@@ -356,7 +366,7 @@ async def cb_captcha_ok(callback: CallbackQuery) -> None:
     )
     await callback.bot.send_message(
         chat_id,
-        _rk(_MENU_INTRO, user.language),
+        _wide(_rk(_MENU_INTRO, user.language)),
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
@@ -494,13 +504,13 @@ async def handle_menu_button(callback: CallbackQuery) -> None:
     _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
-            _rk(_MENU_INTRO, user.language),
+            _wide(_rk(_MENU_INTRO, user.language)),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
-            _rk(_MENU_INTRO, user.language),
+            _wide(_rk(_MENU_INTRO, user.language)),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
@@ -512,7 +522,7 @@ async def handle_more_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     try:
         await callback.message.edit_text(
-            t(user.language, "more_title"),
+            _wide(t(user.language, "more_title")),
             reply_markup=_more_menu(user.language),
             parse_mode="HTML",
         )
@@ -529,7 +539,7 @@ async def handle_back_to_main(callback: CallbackQuery) -> None:
     _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
-            _rk(_MENU_INTRO, user.language),
+            _wide(_rk(_MENU_INTRO, user.language)),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
@@ -554,7 +564,7 @@ async def _show_hub(callback: CallbackQuery, title_key: str, rows: list) -> None
     await callback.answer()
     try:
         await callback.message.edit_text(
-            t(user.language, title_key),
+            _wide(t(user.language, title_key)),
             reply_markup=_hub_menu(user.language, rows),
             parse_mode="HTML",
         )
@@ -702,7 +712,7 @@ async def _show_profile(message: Message, tg_user) -> None:
             InlineKeyboardButton(text="Мой вкус", callback_data="action:taste"),
         ],
     ])
-    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+    await message.answer(_wide("\n".join(lines)), parse_mode="HTML", reply_markup=kb)
 
 
 @router.message(Command("wrapped"))

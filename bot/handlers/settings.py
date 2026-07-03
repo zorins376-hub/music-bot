@@ -14,6 +14,10 @@ from bot.models.user import User
 router = Router()
 
 
+# Invisible filler → forces the menu bubble to full screen width (see start.py._wide).
+_WIDE = "⠀" * 30
+
+
 def _quality_keyboard(is_premium: bool, current: str) -> InlineKeyboardMarkup:
     """Build quality keyboard with checkmark on current selection."""
     def _label(val: str, text: str) -> str:
@@ -75,7 +79,7 @@ async def cmd_settings_v2(message: Message) -> None:
     tts_on = (user.fav_vibe or "") != "tts_off"  # reuse field as TTS pref
     kb = _settings_keyboard(user.is_premium, user.quality, tts_on, bool(user.release_radar_enabled), lang)
     await message.answer(
-        t(lang, "settings_quality", current=user.quality),
+        t(lang, "settings_quality", current=user.quality) + "\n" + _WIDE,
         reply_markup=kb,
         parse_mode="HTML",
     )
@@ -93,7 +97,7 @@ async def handle_settings_button(callback: CallbackQuery) -> None:
     tts_on = (user.fav_vibe or "") != "tts_off"  # reuse field as TTS pref
     kb = _settings_keyboard(user.is_premium, user.quality, tts_on, bool(user.release_radar_enabled), lang)
     await callback.message.answer(
-        t(lang, "settings_quality", current=user.quality),
+        t(lang, "settings_quality", current=user.quality) + "\n" + _WIDE,
         reply_markup=kb,
         parse_mode="HTML",
     )

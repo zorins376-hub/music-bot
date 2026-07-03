@@ -44,12 +44,16 @@ def _back_button(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+# Invisible filler → forces the menu bubble to full screen width (see start.py._wide).
+_WIDE = "⠀" * 30
+
+
 @router.message(Command("faq"))
 async def cmd_faq(message: Message) -> None:
     user = await get_or_create_user(message.from_user)
     lang = user.language
     await message.answer(
-        t(lang, "faq_title") + t(lang, "faq_sections"),
+        t(lang, "faq_title") + t(lang, "faq_sections") + "\n" + _WIDE,
         reply_markup=_faq_keyboard(lang),
         parse_mode="HTML",
     )
@@ -58,7 +62,7 @@ async def cmd_faq(message: Message) -> None:
 async def send_faq(message: Message, lang: str) -> None:
     """Send FAQ menu — used from main-menu callback."""
     await message.answer(
-        t(lang, "faq_title") + t(lang, "faq_sections"),
+        t(lang, "faq_title") + t(lang, "faq_sections") + "\n" + _WIDE,
         reply_markup=_faq_keyboard(lang),
         parse_mode="HTML",
     )
@@ -72,7 +76,7 @@ async def handle_faq(callback: CallbackQuery) -> None:
 
     if section == "back":
         await callback.message.edit_text(
-            t(lang, "faq_title") + t(lang, "faq_sections"),
+            t(lang, "faq_title") + t(lang, "faq_sections") + "\n" + _WIDE,
             reply_markup=_faq_keyboard(lang),
             parse_mode="HTML",
         )

@@ -57,6 +57,10 @@ _PRICE_PREMIUM_90D = 350  # −22%
 _PRICE_PREMIUM_365D = 1000  # −44%
 
 
+# Invisible filler → forces the menu bubble to full screen width (see start.py._wide).
+_WIDE = "⠀" * 30
+
+
 @router.callback_query(lambda c: c.data == "action:premium")
 async def handle_premium(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -114,7 +118,7 @@ async def handle_premium(callback: CallbackQuery) -> None:
             ]
         )
 
-    await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.message.answer(f"{text}\n{_WIDE}", reply_markup=keyboard, parse_mode="HTML")
 
 
 # ── Invoice generators ────────────────────────────────────────────────────
