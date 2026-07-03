@@ -187,6 +187,7 @@ export function App() {
   const [lyricsTrackId, setLyricsTrackId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef(0);
+  const elapsedShownRef = useRef(-1);  // last whole-second committed to state
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadRef = useRef<HTMLAudioElement | null>(null);
   const [theme, setThemeState] = useState<Theme>(() => getThemeById(getSavedThemeId()));
@@ -527,7 +528,14 @@ export function App() {
     const onTimeUpdate = () => {
       const t = audio.currentTime;
       elapsedRef.current = t;
-      setElapsed(t);
+      // Re-render at ~2/sec instead of ~4/sec: timeupdate fires ~4x/sec and each
+      // setElapsed reconciled the whole App + Player tree (main tap-lag source
+      // during playback). A 0.5s commit threshold keeps the progress ring smooth
+      // while halving reconciliations; any jump ≥0.5s (a seek) still commits at once.
+      if (Math.abs(t - elapsedShownRef.current) >= 0.5) {
+        elapsedShownRef.current = t;
+        setElapsed(t);
+      }
       const s = stateRef.current;
 
       // Aggressive pre-fetch: start caching next tracks at 70% playback

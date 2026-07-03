@@ -151,7 +151,7 @@ export const ActivityFeedView = memo(function ActivityFeedView({
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           {item.cover_url
-            ? <img src={item.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ? <img src={item.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             : <IconMusic size={18} color={tc.hintColor} />
           }
         </div>

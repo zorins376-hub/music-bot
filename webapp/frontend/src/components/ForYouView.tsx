@@ -273,7 +273,8 @@ export const ForYouView = memo(function ForYouView({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(false);
 
-  // --- Fetch all data (batched) ---
+  // --- Discovery batch: depends ONLY on the user, NOT the current track ---
+  // (previously the whole 10-call batch re-fired on every song change).
   useEffect(() => {
     let cancelled = false;
     setWaveLoading(true);
@@ -283,20 +284,18 @@ export const ForYouView = memo(function ForYouView({
     setNewRelLoading(true);
     setPersonalMixLoading(true);
     setWeeklyLoading(true);
-    if (currentTrack?.video_id) setSimilarLoading(true);
 
     Promise.allSettled([
       fetchWave(userId, 10),
       fetchTrending(24, 15),
       fetchTrackOfDay(),
       fetchSmartPlaylists(),
-      currentTrack?.video_id ? fetchSimilar(currentTrack.video_id, 8) : Promise.resolve([] as Track[]),
       fetchLastfmChart(15),
       fetchLastfmGeoTop(geoCountry, 15),
       fetchLastfmNewReleases(15),
       fetchLastfmPersonalMix(15),
       fetchLastfmWeeklyDiscovery(15),
-    ]).then(([wave, trending, tod, smart, similar, chart, geo, newRel, personalMix, weekly]) => {
+    ]).then(([wave, trending, tod, smart, chart, geo, newRel, personalMix, weekly]) => {
       if (cancelled) return;
       setWaveTracks(wave.status === "fulfilled" ? wave.value : []);
       setWaveError(wave.status === "rejected");
@@ -306,9 +305,6 @@ export const ForYouView = memo(function ForYouView({
       setTrendingLoading(false);
       if (tod.status === "fulfilled") setTodTrack(tod.value);
       if (smart.status === "fulfilled") setSmartPlaylists(smart.value);
-      setSimilarTracks(similar.status === "fulfilled" ? similar.value : []);
-      setSimilarError(similar.status === "rejected" && !!currentTrack?.video_id);
-      setSimilarLoading(false);
       setChartTracks(chart.status === "fulfilled" ? chart.value : []);
       setChartLoading(false);
       setGeoTracks(geo.status === "fulfilled" ? geo.value : []);
@@ -327,7 +323,30 @@ export const ForYouView = memo(function ForYouView({
       setWeeklyLoading(false);
     });
 
-    // Load artist info + artist mix if current track is playing
+    return () => { cancelled = true; };
+  }, [userId, geoCountry]);
+
+  // --- Track-dependent: similar + artist info/mix (re-fires on song change) ---
+  useEffect(() => {
+    let cancelled = false;
+    if (currentTrack?.video_id) {
+      setSimilarLoading(true);
+      fetchSimilar(currentTrack.video_id, 8).then(s => {
+        if (cancelled) return;
+        setSimilarTracks(s);
+        setSimilarError(false);
+        setSimilarLoading(false);
+      }).catch(() => {
+        if (cancelled) return;
+        setSimilarTracks([]);
+        setSimilarError(true);
+        setSimilarLoading(false);
+      });
+    } else {
+      setSimilarTracks([]);
+      setSimilarLoading(false);
+    }
+
     if (currentTrack?.artist) {
       fetchLastfmArtistInfo(currentTrack.artist).then(info => {
         if (!cancelled && info) setArtistInfo(info);
@@ -340,7 +359,7 @@ export const ForYouView = memo(function ForYouView({
     }
 
     return () => { cancelled = true; };
-  }, [userId, currentTrack?.video_id]);
+  }, [currentTrack?.video_id, currentTrack?.artist]);
 
   // --- AI Playlist ---
   const handleGenerateAi = useCallback(async () => {

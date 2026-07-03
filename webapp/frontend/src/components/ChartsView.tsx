@@ -231,7 +231,7 @@ export const ChartsView = memo(function ChartsView({ userId, onPlayTrack, accent
                 background: tc.coverPlaceholderBg,
                 border: `1px solid ${tc.accentBorderAlpha}`,
                 display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={tc.hintColor} />}
+              {t.cover_url ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={tc.hintColor} />}
             </div>
             <div onClick={() => handlePlayTrack(t)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
               <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: tc.textColor }}>{t.title}</div>

@@ -1056,7 +1056,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
                 marginBottom: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)",
               }}>
                 <div style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={18} color={hintColor} />}
+                  {t.cover_url ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={18} color={hintColor} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{t.title}</div>
@@ -1078,7 +1078,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
               }} onClick={() => { haptic("light"); onPlayTrack(t); }}>
                 <div style={{ width: 28, flexShrink: 0, marginRight: 8, color: hintColor, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{String(idx + 1).padStart(2, "0")}</div>
                 <div style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.06)" : "rgba(124,77,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={18} color={hintColor} />}
+                  {t.cover_url ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={18} color={hintColor} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{t.title}</div>
@@ -1115,7 +1115,7 @@ export const PartyView = memo(function PartyView({ userId, onPlayTrack, onPlayba
                 marginBottom: 4, background: "rgba(255,255,255,0.02)",
               }}>
                 <div style={{ width: 34, height: 34, borderRadius: 8, overflow: "hidden", flexShrink: 0, marginRight: 10, background: warm ? "rgba(255,213,79,0.04)" : "rgba(124,77,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={16} color={hintColor} />}
+                  {t.cover_url ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={16} color={hintColor} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: hintColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>

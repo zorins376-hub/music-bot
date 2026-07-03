@@ -303,7 +303,7 @@ export const PlaylistView = memo(function PlaylistView({ userId, onPlayTrack, on
             border: `1px solid ${tc.accentBorderAlpha}`,
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            {t.cover_url ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={tc.hintColor} />}
+            {t.cover_url ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconMusic size={22} color={tc.hintColor} />}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: tc.textColor }}>{t.title}</div>

@@ -827,7 +827,7 @@ export const LiveRadioView = memo(function LiveRadioView({
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       <div style={{ width: 44, height: 44, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "rgba(255,255,255,0.05)",
                         border: "1px solid rgba(100,100,255,0.2)" }}>
-                        {tracks[currentIdx + 1].cover_url ? <img src={tracks[currentIdx + 1].cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        {tracks[currentIdx + 1].cover_url ? <img src={tracks[currentIdx + 1].cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                           : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
                               <IconMusic size={18} color={tc.hintColor} /></div>}
                       </div>

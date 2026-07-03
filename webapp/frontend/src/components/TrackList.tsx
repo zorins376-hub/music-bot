@@ -350,7 +350,7 @@ export const TrackList = memo(function TrackList({ tracks, currentIndex, onPlay,
             justifyContent: "center",
           }}>
             {t.cover_url ? (
-              <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             ) : (
               <IconMusic size={20} color={isTequila ? "#c8a882" : "rgba(255,255,255,0.55)"} />
             )}

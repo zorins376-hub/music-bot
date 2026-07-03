@@ -867,7 +867,7 @@ export const ProfileView = memo(function ProfileView({
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {t.cover_url
-                    ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     : <IconMusic size={28} color={tc.hintColor} />
                   }
                 </div>
@@ -917,7 +917,7 @@ export const ProfileView = memo(function ProfileView({
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
                 {t.cover_url
-                  ? <img src={t.cover_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ? <img src={t.cover_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   : <IconMusic size={20} color={tc.hintColor} />
                 }
               </div>
