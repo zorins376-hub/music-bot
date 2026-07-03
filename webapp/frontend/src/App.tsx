@@ -29,7 +29,7 @@ import { getStreamUrl as getCachedStreamUrl, prefetchTracks } from "./offlineCac
 import { themes, getThemeById, getSavedThemeId, saveThemeId, applyThemeCSSVars, type Theme } from "./themes";
 import { ToastContainer, showToast } from "./components/Toast";
 
-type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep" | "broadcast";
+type View = "player" | "playlists" | "party" | "charts" | "search" | "lyrics" | "foryou" | "profile" | "leaderboard" | "battle" | "feed" | "wrapped" | "sleep" | "broadcast" | "queue";
 
 const EQ_STORAGE_KEY = "tma:eq-preset";
 const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
@@ -2132,7 +2132,17 @@ export function App() {
   }
 
   return (
-    <div style={{ position: "relative", minHeight: "var(--tg-vh, 100dvh)" }}>
+    <div style={{
+      position: "relative",
+      // Fixed to the Telegram viewport — no body scroll. Scrolling happens in the
+      // contained region below (momentum + overscroll-contain), which feels like a
+      // native app instead of a scrolling web page. The player view fits here and
+      // therefore doesn't scroll; lists scroll inside their own region.
+      height: "var(--tg-vh, 100dvh)",
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+    }}>
       <ToastContainer />
       {isTequila && (
         <>
@@ -2246,6 +2256,16 @@ export function App() {
           : "calc(var(--tg-top-inset, 0px) + 8px)",
         maxWidth: 480,
         margin: "0 auto",
+        width: "100%",
+        // The single contained scroll region: momentum scroll, no rubber-band
+        // bleaking to Telegram (overscroll-contain). The player view fits and
+        // won't scroll unless a heavy panel (Settings) is opened.
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        overflowX: "hidden",
+        WebkitOverflowScrolling: "touch",
+        overscrollBehavior: "contain",
         paddingBottom: view !== "player" && state.current_track ? 72 : 12,
         ...(view === "player" ? {
           background: isTequila
@@ -2541,6 +2561,29 @@ export function App() {
         <>
           <Player state={state} onAction={action} onShowLyrics={showLyrics} accentColor={accentColor} accentColorAlpha={accentColorAlpha} onSleepTimer={handleSleepTimer} sleepTimerRemaining={sleepRemaining} audioDuration={audioDuration} onWave={handleWave} isWaveLoading={isWaveLoading} elapsed={elapsed} buffering={buffering} themeId={theme.id} isPremium={Boolean(userProfile?.is_premium)} isAdmin={Boolean(userProfile?.is_admin)} canUseAudioControls={hasAudioControls} quality={userProfile?.quality || "192"} eqPreset={eqPreset} onQualityChange={updateQuality} onEqPresetChange={setEqPreset} bassBoost={bassBoost} onBassBoost={handleBassBoost} partyMode={partyMode} onPartyMode={handlePartyMode} playbackSpeed={playbackSpeed} onSpeedChange={handleSpeedChange} panValue={panValue} onPanChange={handlePanChange} showSpectrum={showSpectrum} onToggleSpectrum={handleToggleSpectrum} spectrumStyle={spectrumStyle} onSpectrumStyleChange={handleSpectrumStyleChange} moodFilter={moodFilter} onMoodChange={setMoodFilter} bypassProcessing={bypassProcessing} onBypassToggle={handleBypass} tapeWarmth={tapeWarmth} onTapeWarmth={handleTapeWarmth} airBand={airBand} onAirBand={handleAirBand} stereoWiden={stereoWiden} onStereoWiden={handleStereoWiden} softClip={softClip} onSoftClip={handleSoftClip} nightMode={nightMode} onNightMode={handleNightMode} reverbEnabled={reverbEnabled} onReverb={handleReverb} reverbPreset={reverbPreset} onReverbPreset={handleReverbPreset} reverbMix={reverbMix} onReverbMix={handleReverbMix} karaokeMode={karaokeMode} onKaraokeMode={handleKaraokeMode} crossfadeDuration={crossfadeDuration} onCrossfadeDuration={handleCrossfadeDuration} coverMode={coverMode} onCoverMode={handleCoverMode} onAddToPlaylist={handleAddToPlaylist} onAddToQueue={handleAddToQueue} onPlayTrack={handlePlayerPlayTrack} onPlayAll={handlePlayerPlayAll} onBgColorsChange={setPlayerBgColors} />
 
+          {/* Queue button — opens the queue as its own screen so the player view
+              stays a single self-contained screen. Fixed, so it adds no height. */}
+          {state.queue.length > 1 && (
+            <button
+              onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView("queue"); }}
+              style={{
+                position: "fixed", right: 14, zIndex: 60,
+                bottom: "calc(var(--tg-bottom-inset, 0px) + 18px)",
+                display: "inline-flex", alignItems: "center", gap: 7,
+                padding: "10px 15px", borderRadius: 999,
+                border: `1px solid ${accentColorAlpha}`,
+                background: "rgba(15,12,20,0.72)", backdropFilter: "blur(14px)",
+                color: theme.textColor, cursor: "pointer",
+                fontSize: 13, fontWeight: 700,
+                boxShadow: "0 6px 20px rgba(0,0,0,0.35)",
+              }}
+              aria-label="Очередь"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              {state.queue.length}
+            </button>
+          )}
+
           {/* Spectrum Visualizer */}
           {showSpectrum && state.current_track && (
             <div style={{
@@ -2646,7 +2689,32 @@ export function App() {
             </div>
           )}
 
-          {state.queue.length > 0 && (
+        </>
+        </ViewErrorBoundary>
+      )}
+
+      {/* Queue — its own screen (button-opened from the player) so the player
+          view stays a single self-contained screen with no scroll. */}
+      {view === "queue" && (
+        <ViewErrorBoundary viewName="Queue" fallbackColor={theme.hintColor}>
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <button
+              onClick={() => { try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {} setView("player"); }}
+              style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 38, height: 38, borderRadius: 12, flexShrink: 0,
+                border: `1px solid ${accentColorAlpha}`, background: "rgba(255,255,255,0.05)",
+                color: theme.textColor, cursor: "pointer",
+              }}
+              aria-label="Назад к плееру"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <div style={{ fontSize: 19, fontWeight: 800, color: theme.textColor }}>Очередь</div>
+            <div style={{ marginLeft: "auto", fontSize: 13, color: theme.hintColor }}>{state.queue.length} трек(ов)</div>
+          </div>
+          {state.queue.length > 0 ? (
             <TrackList
               tracks={state.queue}
               currentIndex={state.position}
@@ -2658,6 +2726,10 @@ export function App() {
               accentColorAlpha={accentColorAlpha}
               themeId={theme.id}
             />
+          ) : (
+            <div style={{ textAlign: "center", color: theme.hintColor, padding: "40px 0", fontSize: 14 }}>
+              Очередь пуста
+            </div>
           )}
         </>
         </ViewErrorBoundary>
