@@ -2239,6 +2239,11 @@ export function App() {
       )}
       <div style={{
         padding: view === "player" ? "0" : "8px 12px",
+        // Fullscreen Mini App: offset the top so the nav/menu clears Telegram's
+        // close/⋯ controls (0px when not fullscreen — var is unset).
+        paddingTop: view === "player"
+          ? "var(--tg-top-inset, 0px)"
+          : "calc(var(--tg-top-inset, 0px) + 8px)",
         maxWidth: 480,
         margin: "0 auto",
         paddingBottom: view !== "player" && state.current_track ? 72 : 12,

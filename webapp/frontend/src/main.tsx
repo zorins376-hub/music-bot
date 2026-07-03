@@ -26,8 +26,12 @@ declare global {
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
         onEvent?: (event: string, cb: () => void) => void;
+        requestFullscreen?: () => void;
+        isFullscreen?: boolean;
         viewportStableHeight?: number;
         viewportHeight?: number;
+        safeAreaInset?: { top?: number; bottom?: number; left?: number; right?: number };
+        contentSafeAreaInset?: { top?: number; bottom?: number; left?: number; right?: number };
         MainButton: {
           text: string;
           show: () => void;
@@ -50,14 +54,30 @@ _tg?.disableVerticalSwipes?.();
 // no light flash / seam around the webview on open.
 _tg?.setHeaderColor?.("#050406");
 _tg?.setBackgroundColor?.("#050406");
-// Keep a CSS var in sync with Telegram's real viewport so fixed bars (mini
-// player, tab bar) don't jump on expand or hide behind the keyboard.
+// Keep CSS vars in sync with Telegram's real viewport + safe areas so fixed
+// bars don't jump, and (in FULLSCREEN mode) the app's top menu sits BELOW the
+// Telegram close/⋯ controls instead of under them (unclickable).
+const _rootStyle = document.documentElement.style;
 const _syncVh = () => {
   const h = _tg?.viewportStableHeight || _tg?.viewportHeight;
-  if (h) document.documentElement.style.setProperty("--tg-vh", h + "px");
+  if (h) _rootStyle.setProperty("--tg-vh", h + "px");
+};
+const _syncInsets = () => {
+  const sa = _tg?.safeAreaInset || {};
+  const csa = _tg?.contentSafeAreaInset || {};
+  // safeAreaInset = device notch; contentSafeAreaInset = Telegram's own UI band
+  // (header controls in fullscreen). Sum both so content clears everything.
+  const top = (sa.top || 0) + (csa.top || 0);
+  const bottom = (sa.bottom || 0) + (csa.bottom || 0);
+  _rootStyle.setProperty("--tg-top-inset", top + "px");
+  _rootStyle.setProperty("--tg-bottom-inset", bottom + "px");
 };
 _syncVh();
+_syncInsets();
 _tg?.onEvent?.("viewportChanged", _syncVh);
+_tg?.onEvent?.("safeAreaChanged", _syncInsets);
+_tg?.onEvent?.("contentSafeAreaChanged", _syncInsets);
+_tg?.onEvent?.("fullscreenChanged", _syncInsets);
 
 // Boot-loader exit MUST run BEFORE render() —
 // if App crashes during first render, the preloader still dismisses.
