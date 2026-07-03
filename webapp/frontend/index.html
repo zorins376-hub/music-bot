@@ -2,6 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <!-- Warm the TLS/DNS to telegram.org before the render-blocking SDK <script> runs -->
+  <link rel="preconnect" href="https://telegram.org" crossorigin />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#7c4dff" />
   <meta name="apple-mobile-web-app-capable" content="yes" />

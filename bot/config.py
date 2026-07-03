@@ -151,6 +151,12 @@ class Settings(BaseSettings):
     # ── Genius (lyric-fragment search: "words from a song" -> track) ──────
     GENIUS_ACCESS_TOKEN: str = ""
 
+    # ── Last.fm (Mini App "For You" discovery: chart / geo / new releases /
+    # personal mix / weekly / artist info). The key is already in the container
+    # env; this field was missing from Settings, so every /api/lastfm/* route
+    # 500'd on `settings.LASTFM_API_KEY` and ~7 ForYou sections were dead.
+    LASTFM_API_KEY: str = ""
+
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
     YANDEX_TOKENS: Optional[str] = None  # пул токенов через запятую (ротация)

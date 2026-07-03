@@ -401,7 +401,7 @@ export function LuxuryPanel({
             textTransform: "uppercase",
           }}>
             <IconHiRes size={14} color={warm ? "#ffd54f" : "#b388ff"} />
-            HI-RES AUDIO · {quality === "320" ? "320kbps" : "ADAPTIVE"}
+            HIGH QUALITY · {quality === "320" ? "320kbps" : "ADAPTIVE"}
           </span>
         </div>
       )}

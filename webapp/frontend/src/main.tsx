@@ -22,6 +22,12 @@ declare global {
         ready: () => void;
         expand: () => void;
         close: () => void;
+        disableVerticalSwipes?: () => void;
+        setHeaderColor?: (color: string) => void;
+        setBackgroundColor?: (color: string) => void;
+        onEvent?: (event: string, cb: () => void) => void;
+        viewportStableHeight?: number;
+        viewportHeight?: number;
         MainButton: {
           text: string;
           show: () => void;
@@ -34,8 +40,24 @@ declare global {
   }
 }
 
-window.Telegram?.WebApp?.ready();
-window.Telegram?.WebApp?.expand();
+const _tg = window.Telegram?.WebApp;
+_tg?.ready();
+_tg?.expand();
+// Native feel: a downward flick inside a scrollable list must NOT dismiss a
+// full-screen player. Guarded — older Telegram clients lack this method.
+_tg?.disableVerticalSwipes?.();
+// Match the Telegram chrome to the app's near-black boot background so there's
+// no light flash / seam around the webview on open.
+_tg?.setHeaderColor?.("#050406");
+_tg?.setBackgroundColor?.("#050406");
+// Keep a CSS var in sync with Telegram's real viewport so fixed bars (mini
+// player, tab bar) don't jump on expand or hide behind the keyboard.
+const _syncVh = () => {
+  const h = _tg?.viewportStableHeight || _tg?.viewportHeight;
+  if (h) document.documentElement.style.setProperty("--tg-vh", h + "px");
+};
+_syncVh();
+_tg?.onEvent?.("viewportChanged", _syncVh);
 
 // Boot-loader exit MUST run BEFORE render() —
 // if App crashes during first render, the preloader still dismisses.
@@ -110,13 +132,18 @@ function playStartupWhoosh() {
 }
 
 if (bootLoader) {
-  playStartupWhoosh();
+  // Build the WebAudio startup graph off the critical paint path (was ~1.2s of
+  // main-thread work sitting in front of first render).
+  const _idle = window.requestIdleCallback || ((cb: () => void) => window.setTimeout(cb, 200));
+  _idle(() => playStartupWhoosh());
   bootLoader.style.pointerEvents = "none"; // immediately unblock clicks
   bootLoader.classList.add("is-exiting");
+  // 400ms is enough to read as an intentional intro, not a loading tax
+  // (was a fixed 920ms floor on every open, even when JS was warm-cached).
   window.setTimeout(() => {
     bootLoader.classList.add("is-hidden");
     window.setTimeout(() => bootLoader.remove(), 100);
-  }, 920);
+  }, 400);
 }
 
 // Render app AFTER boot-loader exit is scheduled

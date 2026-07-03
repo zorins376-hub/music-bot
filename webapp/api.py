@@ -317,6 +317,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Compress JS/CSS/JSON at the app layer: the host nginx has `proxy_buffering off`
+# on `location /`, which prevents it from gzipping proxied responses — so the
+# 230 KB main bundle was shipping UNCOMPRESSED. GZip here cuts it to ~56 KB
+# (nginx just forwards the already-compressed body). minimum_size skips tiny
+# payloads; audio/mpeg (already compressed) is left untouched by GZipMiddleware.
+from starlette.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 # ── Admin Panel API ─────────────────────────────────────────────────────
 from webapp.admin_api import router as admin_router
 app.include_router(admin_router)
@@ -346,6 +354,15 @@ async def catch_exceptions_middleware(request: Request, call_next):
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
+    # Content-hashed build assets (index-<hash>.js, vendor-<hash>.js, view
+    # chunks, CSS) are immutable — cache them for a year so warm re-opens hit 0
+    # network round-trips instead of a 304 revalidation per chunk. index.html is
+    # left uncached so new deploys are picked up immediately.
+    _p = request.url.path
+    if _p.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif _p.endswith((".webp", ".png", ".svg", ".woff2", ".woff", ".ico", ".webmanifest")):
+        response.headers["Cache-Control"] = "public, max-age=86400"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
