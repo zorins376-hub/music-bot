@@ -463,24 +463,24 @@ async def _export_stats_csv(message: Message) -> None:
 
 
 def _admin_panel_keyboard() -> InlineKeyboardMarkup:
+    # Uniform 2-per-row grid (matches the main menu's button width).
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="◎ Статистика", callback_data="adm:stats"),
-                InlineKeyboardButton(text="◈ Рассылка", callback_data="adm:broadcast"),
+                InlineKeyboardButton(text="🩺 Здоровье провайдеров", callback_data="adm:health"),
             ],
             [
+                InlineKeyboardButton(text="◈ Рассылка", callback_data="adm:broadcast"),
                 InlineKeyboardButton(text="🆕 Рассылка версии", callback_data="adm:release"),
             ],
             [
-                InlineKeyboardButton(text="◇ Дать Premium", callback_data="adm:premium"),
-                InlineKeyboardButton(text="✖ Бан", callback_data="adm:ban"),
-            ],
-            [
-                InlineKeyboardButton(text="🎟 Промокод", callback_data="adm:promo"),
-            ],
-            [
                 InlineKeyboardButton(text="◎ Пользователи", callback_data=AdmUserCb(act="list").pack()),
+                InlineKeyboardButton(text="◇ Дать Premium", callback_data="adm:premium"),
+            ],
+            [
+                InlineKeyboardButton(text="✖ Бан", callback_data="adm:ban"),
+                InlineKeyboardButton(text="🎟 Промокод", callback_data="adm:promo"),
             ],
             [
                 InlineKeyboardButton(text="▸ Очередь эфира", callback_data="adm:queue"),
@@ -493,9 +493,6 @@ def _admin_panel_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="◑ Режим эфира", callback_data="adm:mode"),
                 InlineKeyboardButton(text="≡ Настройки", callback_data="adm:settings"),
-            ],
-            [
-                InlineKeyboardButton(text="🩺 Здоровье провайдеров", callback_data="adm:health"),
             ],
             [
                 InlineKeyboardButton(text="◁ Назад", callback_data="adm:back"),
@@ -535,12 +532,12 @@ async def _build_settings_text() -> str:
 
 
 def _build_settings_keyboard() -> InlineKeyboardMarkup:
-    rows = []
-    for key, meta in _SETTINGS_KEYS.items():
-        rows.append([InlineKeyboardButton(
-            text=f"≡ {meta['label']}",
-            callback_data=f"adm:set:{key}",
-        )])
+    # 2-per-row grid (matches the main menu's button width).
+    flat = [
+        InlineKeyboardButton(text=f"≡ {meta['label']}", callback_data=f"adm:set:{key}")
+        for key, meta in _SETTINGS_KEYS.items()
+    ]
+    rows = [flat[i:i + 2] for i in range(0, len(flat), 2)]
     rows.append([InlineKeyboardButton(text="◁ Админ-панель", callback_data="action:admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1631,8 +1628,10 @@ async def handle_fwd_select(callback: CallbackQuery) -> None:
     _admin_fwd_state[uid] = {"label": choice, "count": 0, "track_ids": []}
     label_name = "TEQUILA" if choice == "tequila" else "FULLMOON"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✓ Готово", callback_data="adm:fwd:done")],
-        [InlineKeyboardButton(text="✖ Отмена", callback_data="adm:fwd:cancel")],
+        [
+            InlineKeyboardButton(text="✓ Готово", callback_data="adm:fwd:done"),
+            InlineKeyboardButton(text="✖ Отмена", callback_data="adm:fwd:cancel"),
+        ],
     ])
     await callback.message.edit_text(
         f"● Режим загрузки: <b>{label_name}</b>\n\n"
