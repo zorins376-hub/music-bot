@@ -197,8 +197,20 @@ async def on_startup(bot: Bot) -> None:
             BotCommand(command="party", description="Party плейлист"),
         ]
         await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
-        # Set Menu button to show command list (instead of web-app)
-        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        # Menu button: open the Mini App player when TMA_URL is configured (a
+        # working app entrance right in the chat), else fall back to the command
+        # list. This is the ONLY menu-button setter — any manual API override was
+        # previously reset here on every restart.
+        if app_settings.TMA_URL:
+            from aiogram.types import MenuButtonWebApp, WebAppInfo
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="▸ Плеер",
+                    web_app=WebAppInfo(url=app_settings.TMA_URL),
+                )
+            )
+        else:
+            await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     except Exception as e:
         logger.warning("Failed to set bot commands (non-fatal): %s", e)
 
