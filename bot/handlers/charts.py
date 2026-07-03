@@ -1038,8 +1038,8 @@ async def handle_chart_page(callback: CallbackQuery, callback_data: ChartCb) -> 
 
 @router.callback_query(ChartDl.filter())
 async def handle_chart_download(callback: CallbackQuery, callback_data: ChartDl) -> None:
-    """User tapped a chart track — search and download it."""
-    await callback.answer("⏳ Ищу трек...")
+    """User tapped a chart track — download the best match and send it directly."""
+    await callback.answer("⏳ Скачиваю...")
 
     user = await get_or_create_user(callback.from_user)
 
@@ -1054,10 +1054,12 @@ async def handle_chart_download(callback: CallbackQuery, callback_data: ChartDl)
     track = tracks[callback_data.i]
     query = track.get("query") or f"{track.get('artist', '')} {track.get('title', '')}"
 
-    # Delegate to search handler's _do_search via a synthetic message approach
-    # Simpler: just trigger search directly
+    # auto_deliver=True → resolve the best match and send the audio directly,
+    # instead of showing a search results list (the user already picked the track).
+    # acting_user=user → callback.message is the bot's chart list, so pass the real
+    # user for correct quality/premium/rate-limit/history.
     from bot.handlers.search import _do_search
-    await _do_search(callback.message, query.strip())
+    await _do_search(callback.message, query.strip(), auto_deliver=True, acting_user=user)
 
 
 @router.callback_query(ChartBulk.filter())

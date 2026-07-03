@@ -697,8 +697,10 @@ async def _show_profile(message: Message, tg_user) -> None:
         lines.append("◑ Night mode: сейчас BLACK ROOM звучит темнее.")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="BLACK ROOM Wrapped", callback_data="action:wrapped")],
-        [InlineKeyboardButton(text="Мой вкус", callback_data="action:taste")],
+        [
+            InlineKeyboardButton(text="BLACK ROOM Wrapped", callback_data="action:wrapped"),
+            InlineKeyboardButton(text="Мой вкус", callback_data="action:taste"),
+        ],
     ])
     await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb)
 

@@ -726,9 +726,15 @@ def _build_group_choice_keyboard(session_id: str, results: list[dict]) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def _do_search(message: Message, query: str) -> None:
+async def _do_search(message: Message, query: str, auto_deliver: bool = False, acting_user=None) -> None:
+    # auto_deliver=True: pick the best match and download+send it directly (like
+    # group chats do) instead of showing a results list — used for chart taps where
+    # the user already chose the track and just wants the file.
+    # acting_user: the real user when `message` isn't theirs (a chart tap → `message`
+    # is the bot's chart list, so message.from_user is the BOT). Keeps quality/premium/
+    # rate-limit/history attributed to the real user instead of the bot.
     try:
-        user = await get_or_create_user(message.from_user)
+        user = acting_user or await get_or_create_user(message.from_user)
     except Exception:
         await message.answer("⚠️ Сервис временно недоступен. Попробуй снова.")
         return
@@ -764,10 +770,11 @@ async def _do_search(message: Message, query: str) -> None:
     if is_junk_search_query(query):
         return
 
-    # Admins bypass rate limits
-    if message.from_user.id not in settings.ADMIN_IDS:
+    # Admins bypass rate limits. Use the real user's id (acting_user) so chart taps
+    # rate-limit per-user, not on the shared bot id.
+    if user.id not in settings.ADMIN_IDS:
         allowed, cooldown = await cache.check_rate_limit(
-            message.from_user.id, is_premium=user.is_premium
+            user.id, is_premium=user.is_premium
         )
         if not allowed:
             if cooldown > 0:
@@ -1535,8 +1542,9 @@ async def _do_search(message: Message, query: str) -> None:
         except Exception:
             logger.debug("set_result_cache failed", exc_info=True)
 
-    # Groups: auto-play first track — prefer cached tracks for instant delivery
-    if is_group:
+    # Groups (and chart taps via auto_deliver): auto-play first track — prefer
+    # cached tracks for instant delivery instead of showing a pick-list.
+    if is_group or auto_deliver:
         import re as _re_grp
         from bot.services.search_engine import _SOURCE_RANK as _SRC_RANK_MIX, _SOURCE_RANK_CYR
         _q_has_cyr = bool(_re_grp.search(r'[а-яёА-ЯЁ]', provider_query))
@@ -1615,6 +1623,7 @@ async def _do_search(message: Message, query: str) -> None:
                     message, status, user, _play_cand,
                     alt_sid=_this_alt_sid,
                     raise_on_error=True,
+                    delete_source=not auto_deliver,
                 )
                 _played = True
                 break
@@ -1872,12 +1881,16 @@ async def _group_auto_play(
     message: Message, status: Message, user, track_info: dict,
     alt_sid: str | None = None,
     raise_on_error: bool = False,
+    delete_source: bool = True,
 ) -> None:
     """In groups: download and send the first track immediately, then clean up.
 
     alt_sid   — session ID for the alternate-candidates list (for "🔁 Не тот трек?" button).
     raise_on_error — re-raise download exceptions instead of showing error message;
                      used by the retry loop in the group dispatch section.
+    delete_source — also delete the triggering `message` (the user's command) on
+                     success. False for chart taps, where `message` is the bot's
+                     chart list that must stay so the user can pick more tracks.
     """
     lang = user.language
     default_br = int(await _get_bot_setting("default_bitrate", "192"))
@@ -1922,7 +1935,7 @@ async def _group_auto_play(
                 )
             except Exception:
                 pass
-        await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
         return
 
     # Redis cache, then Postgres (durable file_id) before falling back to download.
@@ -1951,7 +1964,7 @@ async def _group_auto_play(
                 )
             except Exception:
                 pass
-        await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
         return
 
     # Download (safe edit — status might already show "downloading" from a previous attempt)
@@ -2053,7 +2066,7 @@ async def _group_auto_play(
                 )
             except Exception:
                 pass
-        await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
     except Exception as e:
         err_msg = str(e)
         logger.error("Group auto-play error for %s: %s", video_id, err_msg)
