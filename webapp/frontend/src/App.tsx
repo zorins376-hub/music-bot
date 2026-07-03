@@ -1984,7 +1984,7 @@ export function App() {
 
     return (
       <div style={{
-        minHeight: "100vh",
+        minHeight: "var(--tg-vh, 100dvh)",
         background: theme.bgImage ? undefined : theme.bgColor,
         color: theme.textColor,
         position: "relative",
@@ -2132,7 +2132,7 @@ export function App() {
   }
 
   return (
-    <div style={{ position: "relative", minHeight: "100vh" }}>
+    <div style={{ position: "relative", minHeight: "var(--tg-vh, 100dvh)" }}>
       <ToastContainer />
       {isTequila && (
         <>
@@ -2249,7 +2249,7 @@ export function App() {
           backgroundSize: isTequila ? undefined : "400% 400%",
           animation: isTequila ? undefined : "bgShift 12s ease infinite",
           transition: "background 1.5s ease",
-          minHeight: "100vh",
+          minHeight: "var(--tg-vh, 100dvh)",
         } : {}),
       }}>
       <style>{`@keyframes bgShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }`}</style>

@@ -473,7 +473,12 @@ export const SleepSoundsView = memo(function SleepSoundsView({ accentColor = "va
 
       {/* Sound Grid */}
       {(["nature", "noise", "ambient"] as const).map((cat) => {
-        const catSounds = SOUNDS.filter((s) => s.category === cat);
+        // Only show sounds that actually produce audio: the 3 synthesized noise
+        // colors work; the file-based nature/ambient sounds (FILE_SOUNDS) have no
+        // shipped /sounds/*.mp3 assets and played silence, so they're hidden until
+        // the audio files exist. Empty categories are skipped entirely.
+        const catSounds = SOUNDS.filter((s) => s.category === cat && !FILE_SOUNDS.has(s.id));
+        if (catSounds.length === 0) return null;
         const labels = { nature: "Nature", noise: "Noise Colors", ambient: "Ambient" };
         return (
           <div key={cat} style={{ marginBottom: 20 }}>

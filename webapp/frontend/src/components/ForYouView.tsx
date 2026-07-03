@@ -1064,7 +1064,11 @@ export const ForYouView = memo(function ForYouView({
       </div>
 
       {/* ===== AI Playlist Generator ===== */}
+      {/* Hidden: the /api/ai-playlist backend is disabled (Supabase AI off, no
+          LLM key), so the box was a silent no-op — pressing Создать returned
+          nothing. Re-enable by removing display:none once a generator is wired. */}
       <div style={{
+        display: "none",
         padding: 16, borderRadius: 22,
         background: tc.cardBg, border: tc.cardBorder,
         transform: "translateZ(0)",
