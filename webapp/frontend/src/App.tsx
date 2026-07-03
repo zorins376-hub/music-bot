@@ -2258,8 +2258,9 @@ export function App() {
         margin: "0 auto",
         width: "100%",
         // The single contained scroll region: momentum scroll, no rubber-band
-        // bleaking to Telegram (overscroll-contain). The player view fits and
-        // won't scroll unless a heavy panel (Settings) is opened.
+        // leaking to Telegram (overscroll-contain). The player's cover adapts to
+        // viewport height so the player fits exactly → nothing to scroll (feels
+        // hard-bound), while an opened Settings panel can still scroll here.
         flex: 1,
         minHeight: 0,
         overflowY: "auto",

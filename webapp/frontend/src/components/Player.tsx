@@ -518,7 +518,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
             onTouchEnd={handleTouchEnd}
             style={{
               position: "relative",
-              width: 320, height: 320, margin: "0 auto",
+              width: "min(320px, 64vw, 41vh)", height: "min(320px, 64vw, 41vh)", margin: "0 auto",
               borderRadius: isRound ? "50%" : 24,
               background: track
                 ? `linear-gradient(135deg, rgba(255,167,38,0.15), rgba(255,213,79,0.08))`
@@ -627,7 +627,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           {track && duration > 0 && (
             <svg style={{
               position: "absolute", top: "50%", left: "50%",
-              width: 338, height: 338,
+              width: "min(338px, 68vw, 43vh)", height: "min(338px, 68vw, 43vh)",
               transform: "translate(-50%, -50%)",
               pointerEvents: "none", zIndex: 10,
             }} viewBox="0 0 338 338">
@@ -1183,7 +1183,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         }
       `}</style>
       {/* ── Cover Area ── */}
-      <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: 320, margin: "0 auto 24px", cursor: "pointer", perspective: 800 }}>
+      <div onClick={handleCoverDoubleTap} style={{ position: "relative", width: "min(320px, 66vw, 42vh)", margin: "0 auto min(24px, 2.4vh)", cursor: "pointer", perspective: 800 }}>
         {/* Double-tap indicator */}
         {doubleTapIndicator && (
           <div style={{
@@ -1235,7 +1235,12 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           style={{
-            position: "relative", width: 300, height: 300, margin: "0 auto",
+            // Adaptive cover: caps by both width (62vw) and HEIGHT (40vh) so the
+            // whole player fits any screen without scrolling (was a fixed 300px
+            // that overflowed short phones).
+            position: "relative",
+            width: "min(300px, 62vw, 40vh)", height: "min(300px, 62vw, 40vh)",
+            margin: "0 auto",
             borderRadius: isRound ? "50%" : 20,
             background: track ? "var(--tg-theme-secondary-bg-color, #2a2a3e)" : `linear-gradient(135deg, ${accentColor} 0%, ${accentColorAlpha} 100%)`,
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 64,
@@ -1314,7 +1319,7 @@ export const Player = memo(function Player({ state, onAction, onShowLyrics, acce
         {track && duration > 0 && (
           <svg style={{
             position: "absolute", top: "50%", left: "50%",
-            width: 318, height: 318,
+            width: "min(318px, 66vw, 42vh)", height: "min(318px, 66vw, 42vh)",
             transform: "translate(-50%, -50%)",
             pointerEvents: "none", zIndex: 10,
           }} viewBox="0 0 318 318">
