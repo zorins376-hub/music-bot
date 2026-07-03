@@ -175,3 +175,50 @@ async def search_spotify(query: str, limit: int = 5) -> list[dict]:
 async def resolve_spotify_url(url: str) -> dict | None:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_sp_pool, _resolve_sync, url)
+
+
+async def resolve_spotify_link_public(url: str) -> tuple[str, str] | None:
+    """Resolve a Spotify track link to (artist, title) WITHOUT API credentials.
+
+    Uses the public embed page (contains the artist) with the oEmbed endpoint as
+    a title-only fallback. This keeps Spotify links working while the API app
+    has no active subscription (403 since ~June 2026): the caller then searches
+    our own providers for the resolved artist+title instead of Spotify audio.
+    """
+    m = _SPOTIFY_TRACK_RE.search(url)
+    if not m:
+        return None
+    track_id = m.group(1)
+    from bot.services.http_session import get_session
+    headers = {"User-Agent": "Mozilla/5.0"}
+    artist, title = "", ""
+    try:
+        async with get_session().get(
+            f"https://open.spotify.com/embed/track/{track_id}",
+            headers=headers, timeout=8,
+        ) as resp:
+            if resp.status == 200:
+                html = await resp.text()
+                ma = re.search(r'"artists":\[\{[^}]*?"name":"([^"]+)"', html)
+                mt = re.search(r'"name":"([^"]+)"', html)
+                if ma:
+                    artist = ma.group(1)
+                if mt:
+                    title = mt.group(1)
+    except Exception:
+        logger.debug("spotify embed resolve failed for %s", track_id, exc_info=True)
+    if not title:
+        try:
+            async with get_session().get(
+                "https://open.spotify.com/oembed",
+                params={"url": f"https://open.spotify.com/track/{track_id}"},
+                headers=headers, timeout=8,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    title = (data.get("title") or "").strip()
+        except Exception:
+            logger.debug("spotify oembed resolve failed for %s", track_id, exc_info=True)
+    if not title:
+        return None
+    return (artist, title)

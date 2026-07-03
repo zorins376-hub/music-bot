@@ -754,10 +754,44 @@ async def _do_search(message: Message, query: str) -> None:
                 await message.answer(t(lang, "rate_limit_exceeded"))
             return
 
+    # Unsupported link (Instagram/TikTok/VK video/…) → friendly hint instead of
+    # a garbage text search (the audit found reels/shorts links returning random
+    # tracks after a full 200s search).
+    _q_low = query.strip().lower()
+    if _q_low.startswith(("http://", "https://")) and not (
+        is_spotify_url(query) or is_yandex_music_url(query) or is_youtube_url(query)
+    ):
+        await message.answer(
+            "⚠️ Такие ссылки я пока не понимаю.\n"
+            "Пришли <b>название трека</b> или ссылку на "
+            "Яндекс.Музыку / Spotify / YouTube.",
+            parse_mode="HTML",
+        )
+        return
+
     # Spotify link → resolve via Spotify API, show track directly
     if is_spotify_url(query):
         status = await message.answer(t(lang, "spotify_detected"))
         track_info = await resolve_spotify_url(query)
+        if not track_info:
+            # API credentials down (403 since sub lapsed) → resolve the link via
+            # the PUBLIC embed/oEmbed pages to artist+title, then serve the track
+            # from our own providers (Yandex). Keeps Spotify links working with
+            # zero Spotify credentials — the SpotSeek flow, legally cleaner.
+            try:
+                from bot.services.spotify_provider import resolve_spotify_link_public
+                _at = await resolve_spotify_link_public(query)
+            except Exception:
+                _at = None
+            if _at:
+                _sp_q = f"{_at[0]} {_at[1]}".strip()
+                logger.info("spotify link public-resolved -> %r", _sp_q)
+                try:
+                    _sp_batch = await asyncio.wait_for(search_yandex(_sp_q, limit=3), timeout=8)
+                except Exception:
+                    _sp_batch = []
+                if _sp_batch:
+                    track_info = _sp_batch[0]
         if not track_info:
             await status.edit_text(t(lang, "no_results"))
             return
@@ -1621,6 +1655,28 @@ async def cb_wt_label(callback: CallbackQuery) -> None:
     await callback.answer("Нажми на номер, чтобы скачать другой вариант", show_alert=False)
 
 
+def _group_track_keyboard(
+    alt_sid: str | None, num_alts: int, tid: int | None, lang: str = "ru"
+) -> InlineKeyboardMarkup | None:
+    """Group track buttons: wrong-track alternatives + a lyrics button.
+
+    Lyrics is the #1 feature of the segment leader — surface it on every group
+    delivery, not only in the private-chat feedback keyboard.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    wt = _wrong_track_keyboard(alt_sid, num_alts) if alt_sid else None
+    if wt:
+        rows.extend(wt.inline_keyboard)
+    if tid:
+        rows.append([
+            InlineKeyboardButton(
+                text=t(lang, "tb_lyrics"),
+                callback_data=LyricsCb(tid=tid).pack(),
+            )
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
 async def _group_auto_play(
     message: Message, status: Message, user, track_info: dict,
     alt_sid: str | None = None,
@@ -1644,11 +1700,13 @@ async def _group_auto_play(
     # keeps re-serving it for 7 days (the self-learning bust/pin machinery only
     # triggers from this button).
     _wt_kb = None
+    _alt_n = 0
     if alt_sid:
         try:
             _alt_list = await cache.get_search(alt_sid)
             if _alt_list:
-                _wt_kb = _wrong_track_keyboard(alt_sid, len(_alt_list))
+                _alt_n = len(_alt_list)
+                _wt_kb = _wrong_track_keyboard(alt_sid, _alt_n)
         except Exception:
             pass
 
@@ -1658,14 +1716,21 @@ async def _group_auto_play(
     if local_fid:
         await _ensure_caption_duration(track_info)
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-        await message.answer_audio(
+        sent = await message.answer_audio(
             audio=local_fid,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
             reply_markup=_wt_kb,
             **_audio_tag_kwargs(track_info),
         )
-        await _post_download(user.id, track_info, local_fid, bitrate)
+        tid = await _post_download(user.id, track_info, local_fid, bitrate)
+        if tid:  # add the lyrics button once the track DB id is known
+            try:
+                await sent.edit_reply_markup(
+                    reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang)
+                )
+            except Exception:
+                pass
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
         return
 
@@ -1680,14 +1745,21 @@ async def _group_auto_play(
     if file_id:
         await _ensure_caption_duration(track_info)
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-        await message.answer_audio(
+        sent = await message.answer_audio(
             audio=file_id,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
             reply_markup=_wt_kb,
             **_audio_tag_kwargs(track_info),
         )
-        await _post_download(user.id, track_info, file_id, bitrate)
+        tid = await _post_download(user.id, track_info, file_id, bitrate)
+        if tid:
+            try:
+                await sent.edit_reply_markup(
+                    reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang)
+                )
+            except Exception:
+                pass
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
         return
 
@@ -1781,7 +1853,14 @@ async def _group_auto_play(
             **_audio_tag_kwargs(track_info),
         )
         await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
-        await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+        tid = await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+        if tid:  # add the lyrics button once the track DB id is known
+            try:
+                await sent.edit_reply_markup(
+                    reply_markup=_group_track_keyboard(alt_sid, _num_alts, tid, lang)
+                )
+            except Exception:
+                pass
         await _delete_msgs(message.bot, message.chat.id, [status.message_id, message.message_id])
     except Exception as e:
         err_msg = str(e)

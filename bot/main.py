@@ -143,6 +143,11 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.chart_prefetcher import start_prefetch_scheduler
     await start_prefetch_scheduler()
 
+    # Search-cache warmer — pre-resolves real user queries + popular tracks into
+    # the two-tier result cache so searches answer instantly (Tier 0)
+    from bot.services.cache_warmer import start_cache_warmer
+    await start_cache_warmer()
+
     # Weekly recap scheduler (Monday 10:00 UTC)
     from bot.services.weekly_recap import start_weekly_recap_scheduler
     await start_weekly_recap_scheduler(bot)
