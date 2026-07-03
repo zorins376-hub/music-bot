@@ -345,15 +345,34 @@ export async function reorderQueue(fromIndex: number, toIndex: number): Promise<
   return r.json();
 }
 
-export async function fetchWave(userId: number, limit = 10, mood: string | null = null): Promise<Track[]> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (mood) {
-    params.set("mood", mood);
+// ── Stale-while-revalidate cache for read-only discovery/list GETs ──────────
+// Returns cached data instantly on a repeat call (e.g. returning to the For You
+// / Charts tab), then refreshes in the background — so tab navigation feels
+// instant instead of blank-then-refetch. Short TTL; in-memory per app session.
+const _swr = new Map<string, { data: unknown; ts: number }>();
+function swrCache<T>(key: string, fetcher: () => Promise<T>, ttlMs = 120_000): Promise<T> {
+  const hit = _swr.get(key);
+  if (hit) {
+    if (Date.now() - hit.ts > ttlMs) {
+      fetcher().then((d) => _swr.set(key, { data: d, ts: Date.now() })).catch(() => {});
+    }
+    return Promise.resolve(hit.data as T);
   }
-  const r = await fetch(`${API_BASE}/wave/${userId}?${params}`, { headers: getHeaders() });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return data.tracks;
+  return fetcher().then((d) => {
+    _swr.set(key, { data: d, ts: Date.now() });
+    return d;
+  });
+}
+
+export function fetchWave(userId: number, limit = 10, mood: string | null = null): Promise<Track[]> {
+  return swrCache(`wave:${userId}:${limit}:${mood ?? ""}`, async () => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (mood) params.set("mood", mood);
+    const r = await fetch(`${API_BASE}/wave/${userId}?${params}`, { headers: getHeaders() });
+    if (!r.ok) return [] as Track[];
+    const data = await r.json();
+    return (data.tracks || []) as Track[];
+  });
 }
 
 // ── Charts ──────────────────────────────────────────────────────────────
@@ -369,11 +388,13 @@ export async function fetchChartSources(): Promise<ChartSource[]> {
   return r.json();
 }
 
-export async function fetchChart(source: string, limit = 100): Promise<Track[]> {
-  const r = await fetch(`${API_BASE}/charts/${source}?limit=${limit}`, { headers: getHeaders() });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return data.tracks;
+export function fetchChart(source: string, limit = 100): Promise<Track[]> {
+  return swrCache(`chart:${source}:${limit}`, async () => {
+    const r = await fetch(`${API_BASE}/charts/${source}?limit=${limit}`, { headers: getHeaders() });
+    if (!r.ok) return [] as Track[];
+    const data = await r.json();
+    return (data.tracks || []) as Track[];
+  });
 }
 
 // ── Playlist CRUD ───────────────────────────────────────────────────────
@@ -489,19 +510,23 @@ export async function generateAiPlaylist(prompt: string, limit = 10): Promise<Tr
   return data.tracks;
 }
 
-export async function fetchTrending(hours = 24, limit = 20): Promise<Track[]> {
-  const r = await fetch(`${API_BASE}/trending?hours=${hours}&limit=${limit}`, { headers: getHeaders() });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return data.tracks;
+export function fetchTrending(hours = 24, limit = 20): Promise<Track[]> {
+  return swrCache(`trending:${hours}:${limit}`, async () => {
+    const r = await fetch(`${API_BASE}/trending?hours=${hours}&limit=${limit}`, { headers: getHeaders() });
+    if (!r.ok) return [] as Track[];
+    const data = await r.json();
+    return (data.tracks || []) as Track[];
+  });
 }
 
-export async function fetchTrackOfDay(): Promise<Track | null> {
-  const r = await fetch(`${API_BASE}/track-of-day`, { headers: getHeaders() });
-  if (!r.ok) return null;
-  const data = await r.json();
-  if (!data || !data.video_id) return null;
-  return data as Track;
+export function fetchTrackOfDay(): Promise<Track | null> {
+  return swrCache(`track-of-day`, async () => {
+    const r = await fetch(`${API_BASE}/track-of-day`, { headers: getHeaders() });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!data || !data.video_id) return null;
+    return data as Track;
+  });
 }
 
 // ── User Stats & Profile ─────────────────────────────────────────────────
@@ -750,11 +775,13 @@ export interface SmartPlaylist {
   tracks: Track[];
 }
 
-export async function fetchSmartPlaylists(): Promise<SmartPlaylist[]> {
-  const r = await fetchWithRetry(`${API_BASE}/smart-playlists`, { headers: getHeaders(), retries: 1, timeout: 8000 });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return data.playlists;
+export function fetchSmartPlaylists(): Promise<SmartPlaylist[]> {
+  return swrCache(`smart-playlists`, async () => {
+    const r = await fetchWithRetry(`${API_BASE}/smart-playlists`, { headers: getHeaders(), retries: 1, timeout: 8000 });
+    if (!r.ok) return [] as SmartPlaylist[];
+    const data = await r.json();
+    return (data.playlists || []) as SmartPlaylist[];
+  });
 }
 
 export async function fetchFavoritesList(limit?: number): Promise<Track[]> {
@@ -780,25 +807,31 @@ export async function fetchLastfmTagTop(tag: string, limit = 15): Promise<Track[
   return data.tracks || [];
 }
 
-export async function fetchLastfmGeoTop(country = "russia", limit = 15): Promise<Track[]> {
-  const r = await fetchWithRetry(`${API_BASE}/lastfm/geo-top?country=${encodeURIComponent(country)}&limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return data.tracks || [];
+export function fetchLastfmGeoTop(country = "russia", limit = 15): Promise<Track[]> {
+  return swrCache(`lf-geo:${country}:${limit}`, async () => {
+    const r = await fetchWithRetry(`${API_BASE}/lastfm/geo-top?country=${encodeURIComponent(country)}&limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+    if (!r.ok) return [] as Track[];
+    const data = await r.json();
+    return (data.tracks || []) as Track[];
+  });
 }
 
-export async function fetchLastfmChart(limit = 20): Promise<Track[]> {
-  const r = await fetchWithRetry(`${API_BASE}/lastfm/chart?limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return data.tracks || [];
+export function fetchLastfmChart(limit = 20): Promise<Track[]> {
+  return swrCache(`lf-chart:${limit}`, async () => {
+    const r = await fetchWithRetry(`${API_BASE}/lastfm/chart?limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+    if (!r.ok) return [] as Track[];
+    const data = await r.json();
+    return (data.tracks || []) as Track[];
+  });
 }
 
-export async function fetchLastfmNewReleases(limit = 15): Promise<{ tracks: Track[]; artists: string[] }> {
-  const r = await fetchWithRetry(`${API_BASE}/lastfm/new-releases?limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
-  if (!r.ok) return { tracks: [], artists: [] };
-  const data = await r.json();
-  return { tracks: data.tracks || [], artists: data.artists || [] };
+export function fetchLastfmNewReleases(limit = 15): Promise<{ tracks: Track[]; artists: string[] }> {
+  return swrCache(`lf-newrel:${limit}`, async () => {
+    const r = await fetchWithRetry(`${API_BASE}/lastfm/new-releases?limit=${limit}`, { headers: getHeaders(), retries: 1, timeout: 12000 });
+    if (!r.ok) return { tracks: [] as Track[], artists: [] as string[] };
+    const data = await r.json();
+    return { tracks: (data.tracks || []) as Track[], artists: (data.artists || []) as string[] };
+  });
 }
 
 export async function fetchLastfmArtistMix(artist: string, limit = 15): Promise<Track[]> {
@@ -847,16 +880,20 @@ export interface PartyTrack extends Track {
   position: number;
 }
 
-export async function fetchLastfmPersonalMix(limit = 20): Promise<{ tracks: Track[]; seedArtists: string[] }> {
-  const r = await apiFetch(`/api/lastfm/personal-mix?limit=${limit}`);
-  const j = await r.json();
-  return { tracks: (j.tracks || []).map(mapTrack), seedArtists: j.seed_artists || [] };
+export function fetchLastfmPersonalMix(limit = 20): Promise<{ tracks: Track[]; seedArtists: string[] }> {
+  return swrCache(`lf-personal:${limit}`, async () => {
+    const r = await apiFetch(`/api/lastfm/personal-mix?limit=${limit}`);
+    const j = await r.json();
+    return { tracks: (j.tracks || []).map(mapTrack), seedArtists: j.seed_artists || [] };
+  });
 }
 
-export async function fetchLastfmWeeklyDiscovery(limit = 15): Promise<Track[]> {
-  const r = await apiFetch(`/api/lastfm/weekly-discovery?limit=${limit}`);
-  const j = await r.json();
-  return (j.tracks || []).map(mapTrack);
+export function fetchLastfmWeeklyDiscovery(limit = 15): Promise<Track[]> {
+  return swrCache(`lf-weekly:${limit}`, async () => {
+    const r = await apiFetch(`/api/lastfm/weekly-discovery?limit=${limit}`);
+    const j = await r.json();
+    return (j.tracks || []).map(mapTrack);
+  });
 }
 
 export interface PartyMember {

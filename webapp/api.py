@@ -1749,6 +1749,38 @@ async def get_wave(
             seen_ids.add(vid)
             merged.append(t)
 
+    # Cold start: a brand-new user has no listening history, so db_recs and
+    # dz_recs are both empty and "Волна" would render "Нет данных" on the very
+    # first open. Seed it from the globally most-played tracks (same source the
+    # trending endpoint falls back to) so first-run feels alive.
+    if not merged:
+        try:
+            from bot.models.base import async_session
+            from bot.models.track import ListeningHistory, Track
+            from sqlalchemy import func, select
+            from datetime import datetime, timedelta, timezone
+            since = datetime.now(timezone.utc) - timedelta(hours=168)
+            async with async_session() as session:
+                q = (
+                    select(Track, func.count(ListeningHistory.id))
+                    .join(ListeningHistory, ListeningHistory.track_id == Track.id)
+                    .where(ListeningHistory.action == "play", ListeningHistory.created_at >= since)
+                    .group_by(Track.id)
+                    .order_by(func.count(ListeningHistory.id).desc())
+                    .limit(limit)
+                )
+                for t, _plays in (await session.execute(q)).all():
+                    if not t.source_id or t.source_id in seen_ids:
+                        continue
+                    seen_ids.add(t.source_id)
+                    merged.append({
+                        "video_id": t.source_id, "title": t.title or "Unknown",
+                        "artist": t.artist or "Unknown", "duration": t.duration or 0,
+                        "source": t.source or "yandex", "cover_url": t.cover_url,
+                    })
+        except Exception:
+            logger.debug("wave cold-start fallback failed", exc_info=True)
+
     # Convert to response format
     tracks = [
         TrackSchema(
