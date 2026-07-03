@@ -2052,7 +2052,7 @@ export function App() {
                 Что это значит
               </div>
               <div style={{ fontSize: 12, lineHeight: 1.6, color: theme.hintColor }}>
-                Если этот экран появился после кнопки "Открыть плеер", значит Telegram открыл URL без подписи Mini App. Для админа это почти всегда проверка BotFather и привязки домена через `/setdomain demotivators.net`.
+                Telegram открыл URL без подписи Mini App. Надёжнее всего открывать плеер кнопкой «◇ Плеер» под полем ввода — она передаёт данные всегда. Если запуск был через профиль бота или ссылку, админу нужно в @BotFather проверить, что Web App URL приложения указывает на этот домен ({window.location.hostname}) и домен привязан через /setdomain.
               </div>
             </div>
             <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
@@ -2123,6 +2123,7 @@ export function App() {
                 <div>initData bytes: {telegramDebugInfo.initDataLen}</div>
                 <div>Hash fallback: {telegramDebugInfo.hasHashInitData ? "yes" : "no"}</div>
                 <div>Telegram UA: {telegramDebugInfo.isTelegramUserAgent ? "yes" : "no"}</div>
+                <div>Домен: {window.location.hostname}</div>
               </div>
             </div>
           </div>

@@ -76,34 +76,41 @@ async def handle_premium(callback: CallbackQuery) -> None:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[promo_btn]])
     else:
         text = t(lang, "premium_info")
+        # 2-per-row grid (matches the main menu's button width).
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=t(lang, "premium_pay_button", price=settings.PREMIUM_STAR_PRICE),
-                    callback_data="premium:buy:stars",
-                )],
-                [InlineKeyboardButton(
-                    text=t(lang, "premium_90d_btn", price=_PRICE_PREMIUM_90D),
-                    callback_data="premium:buy:90d",
-                )],
-                [InlineKeyboardButton(
-                    text=t(lang, "premium_365d_btn", price=_PRICE_PREMIUM_365D),
-                    callback_data="premium:buy:365d",
-                )],
-                [InlineKeyboardButton(
-                    text=t(lang, "micro_trial_btn", price=_PRICE_TRIAL_7D),
-                    callback_data="premium:buy:trial7d",
-                )],
+                [
+                    InlineKeyboardButton(
+                        text=t(lang, "premium_pay_button", price=settings.PREMIUM_STAR_PRICE),
+                        callback_data="premium:buy:stars",
+                    ),
+                    InlineKeyboardButton(
+                        text=t(lang, "premium_90d_btn", price=_PRICE_PREMIUM_90D),
+                        callback_data="premium:buy:90d",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=t(lang, "premium_365d_btn", price=_PRICE_PREMIUM_365D),
+                        callback_data="premium:buy:365d",
+                    ),
+                    InlineKeyboardButton(
+                        text=t(lang, "micro_trial_btn", price=_PRICE_TRIAL_7D),
+                        callback_data="premium:buy:trial7d",
+                    ),
+                ],
                 # FLAC and "no ads 24h" SKUs are HIDDEN until they can actually
                 # be delivered: no download path consumes flac_credits, and no
                 # ads exist to remove — selling either is a refund/trust
                 # incident waiting to happen (2026-07 audit). Handlers kept;
                 # re-add the buttons when a lossless pipeline / real ads exist.
-                [InlineKeyboardButton(
-                    text=t(lang, "gift_premium_btn"),
-                    callback_data="premium:gift",
-                )],
-                [promo_btn],
+                [
+                    InlineKeyboardButton(
+                        text=t(lang, "gift_premium_btn"),
+                        callback_data="premium:gift",
+                    ),
+                    promo_btn,
+                ],
             ]
         )
 

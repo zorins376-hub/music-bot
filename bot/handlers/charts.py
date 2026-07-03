@@ -818,11 +818,16 @@ async def _chart_prewarm_loop() -> None:
 # ── UI builders ──────────────────────────────────────────────────────────
 
 def _chart_menu_kb() -> InlineKeyboardMarkup:
+    # 2-per-row grid (matches the main menu's button width).
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎵 Apple Music Global", callback_data=ChartCb(src="shazam", p=0).pack())],
-        [InlineKeyboardButton(text="▶ YouTube Music Top", callback_data=ChartCb(src="youtube", p=0).pack())],
-        [InlineKeyboardButton(text="🇷🇺 Яндекс Топ Россия", callback_data=ChartCb(src="vk", p=0).pack())],
-        [InlineKeyboardButton(text="📻 Русское Радио", callback_data=ChartCb(src="rusradio", p=0).pack())],
+        [
+            InlineKeyboardButton(text="🎵 Apple Music Global", callback_data=ChartCb(src="shazam", p=0).pack()),
+            InlineKeyboardButton(text="▶ YouTube Music Top", callback_data=ChartCb(src="youtube", p=0).pack()),
+        ],
+        [
+            InlineKeyboardButton(text="🇷🇺 Яндекс Топ Россия", callback_data=ChartCb(src="vk", p=0).pack()),
+            InlineKeyboardButton(text="📻 Русское Радио", callback_data=ChartCb(src="rusradio", p=0).pack()),
+        ],
         [InlineKeyboardButton(text="🎶 Европа Плюс TOP40", callback_data=ChartCb(src="europa", p=0).pack())],
         [InlineKeyboardButton(text="◁ Меню", callback_data="action:menu")],
     ])

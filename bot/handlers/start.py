@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
 from sqlalchemy import select, update
 from sqlalchemy.sql import func
 
@@ -70,42 +70,73 @@ def _is_night_mode() -> bool:
     return local_hour >= 22 or local_hour < 6
 
 
-def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> InlineKeyboardMarkup:
-    # Row3 right slot: Mini App player (only when TMA_URL is configured)
-    charts_btn = InlineKeyboardButton(text=t(lang, "menu_charts"), callback_data="action:charts")
+# Persistent bottom "reply" keyboard — always-visible quick access (private only).
+# BLACK ROOM identity: leads with the fullscreen player (our differentiator) as a
+# web_app button, then core actions. Distinct from generic "Новинки/Топ/Подборки"
+# competitor keyboards. Button labels are matched exactly by the handlers below.
+_RK_PLAYER = {"ru": "◇ Плеер", "en": "◇ Player", "kg": "◇ Плеер"}
+_RK_CHARTS = {"ru": "🔥 Чарты", "en": "🔥 Charts", "kg": "🔥 Чарттар"}
+_RK_MIX = {"ru": "✨ Микс", "en": "✨ Mix", "kg": "✨ Микс"}
+_RK_FAV = {"ru": "♡ Моё", "en": "♡ Mine", "kg": "♡ Меники"}
+_RK_MENU = {"ru": "☰ Меню", "en": "☰ Menu", "kg": "☰ Меню"}
+_RK_MENU_TITLE = {"ru": "◇ Меню", "en": "◇ Menu", "kg": "◇ Меню"}
+
+# Branded header row shown at the top of the inline menu (decorative title).
+_BRAND_TITLE = "𝐓 𝐄 𝐐 𝐔 𝐈 𝐋 𝐀   𝐌 𝐔 𝐒 𝐈 𝐂"
+
+# Text shown above the inline menu buttons — nudges users that search is just a message.
+_MENU_INTRO = {
+    "ru": ("🎧 <b>Для поиска просто отправь сообщение</b>\n"
+           "Название трека, артиста или строчку из песни — я найду."),
+    "en": ("🎧 <b>To search, just send a message</b>\n"
+           "A track title, artist, or a line of lyrics — I'll find it."),
+    "kg": ("🎧 <b>Издөө үчүн жөн гана билдирүү жибер</b>\n"
+           "Тректин аты, аткаруучу же ырдын сабы — табам."),
+}
+
+# Short one-line header that carries the persistent ◇ Плеер keyboard on /start.
+# Replaces the old multi-line welcome blurb (BLACK ROOM / sources / etc.) which
+# the user asked to drop from the start screen.
+_START_HELLO = "🎧 <b>BLACK ROOM</b>"
+
+
+def _rk(d: dict, lang: str) -> str:
+    return d.get(lang, d["ru"])
+
+
+def _reply_keyboard(lang: str) -> ReplyKeyboardMarkup:
+    # Under the input box: a single ◇ Плеер launcher for the Mini App. Falls back
+    # to Charts/Mix when no Mini App is configured.
     if settings.TMA_URL:
-        row3 = [
-            charts_btn,
-            InlineKeyboardButton(
-                text=t(lang, "menu_player"),
-                web_app=WebAppInfo(url=settings.TMA_URL),
-            ),
-        ]
+        rows = [[KeyboardButton(text=_rk(_RK_PLAYER, lang), web_app=WebAppInfo(url=settings.TMA_URL))]]
     else:
-        row3 = [charts_btn]
+        rows = [[KeyboardButton(text=_rk(_RK_CHARTS, lang)), KeyboardButton(text=_rk(_RK_MIX, lang))]]
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def _main_menu(lang: str, admin: bool = False, bot_username: str = "") -> InlineKeyboardMarkup:
+    # Minimal branded card: TEQUILA MUSIC header, then Charts | Premium, then More.
+    # Wave/Radio/Library live under "More" so the top stays clean.
     rows = [
-        [InlineKeyboardButton(text=t(lang, "menu_search"), callback_data="action:search")],
+        [InlineKeyboardButton(text=_BRAND_TITLE, callback_data="hub:radio")],
         [
-            InlineKeyboardButton(text=t(lang, "menu_wave"), callback_data="hub:wave"),
-            InlineKeyboardButton(text=t(lang, "menu_radio"), callback_data="hub:radio"),
-        ],
-        row3,
-        [
-            InlineKeyboardButton(text=t(lang, "menu_library"), callback_data="hub:library"),
+            InlineKeyboardButton(text=t(lang, "menu_charts"), callback_data="action:charts"),
             InlineKeyboardButton(text=t(lang, "menu_premium"), callback_data="action:premium"),
         ],
         [InlineKeyboardButton(text=t(lang, "menu_more"), callback_data="menu:more")],
     ]
     if admin:
-        rows.append([
-            InlineKeyboardButton(text=t(lang, "menu_admin"), callback_data="action:admin"),
-        ])
+        rows.append([InlineKeyboardButton(text=t(lang, "menu_admin"), callback_data="action:admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _more_menu(lang: str) -> InlineKeyboardMarkup:
     """Expanded 'More' sub-menu."""
     rows = [
+        [
+            InlineKeyboardButton(text=t(lang, "menu_wave"), callback_data="hub:wave"),
+            InlineKeyboardButton(text=t(lang, "menu_library"), callback_data="hub:library"),
+        ],
         [
             InlineKeyboardButton(text=t(lang, "btn_video"), callback_data="action:video"),
             InlineKeyboardButton(text=t(lang, "btn_import"), callback_data="action:import_playlist"),
@@ -215,8 +246,15 @@ async def cmd_start(message: Message) -> None:
             await session.commit()
 
     bot_me = await message.bot.me()
+    # Welcome + persistent bottom keyboard (quick access always visible). The rich
+    # inline menu is one tap away via the "☰ Меню" button.
     await message.answer(
-        t(user.language, "start_message", name=html.escape(message.from_user.first_name or "")),
+        _START_HELLO,
+        reply_markup=_reply_keyboard(user.language),
+        parse_mode="HTML",
+    )
+    await message.answer(
+        _rk(_MENU_INTRO, user.language),
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
@@ -237,6 +275,40 @@ async def cmd_start(message: Message) -> None:
             )
     except Exception:
         logger.debug("trial welcome failed for %s", user.id, exc_info=True)
+
+
+# ── Persistent bottom-keyboard button routes (private chat) ────────────────
+# Registered in start.router (included before search.router), so the button
+# texts route to the right feature instead of being treated as a search query.
+
+@router.message(F.chat.type == "private", F.text.in_(set(_RK_CHARTS.values())))
+async def rk_charts(message: Message) -> None:
+    from bot.handlers.charts import cmd_charts
+    await cmd_charts(message)
+
+
+@router.message(F.chat.type == "private", F.text.in_(set(_RK_MIX.values())))
+async def rk_mix(message: Message) -> None:
+    from bot.handlers.mix import cmd_mix
+    await cmd_mix(message)
+
+
+@router.message(F.chat.type == "private", F.text.in_(set(_RK_FAV.values())))
+async def rk_fav(message: Message) -> None:
+    from bot.handlers.favorites import cmd_favorites
+    await cmd_favorites(message)
+
+
+@router.message(F.chat.type == "private", F.text.in_(set(_RK_MENU.values())))
+async def rk_menu(message: Message) -> None:
+    user = await get_or_create_user(message.from_user)
+    admin = is_admin(message.from_user.id, message.from_user.username)
+    bot_me = await message.bot.me()
+    await message.answer(
+        _rk(_MENU_INTRO, user.language),
+        reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "captcha:ok")
@@ -278,7 +350,13 @@ async def cb_captcha_ok(callback: CallbackQuery) -> None:
     chat_id = callback.message.chat.id if callback.message else uid
     await callback.bot.send_message(
         chat_id,
-        t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
+        _START_HELLO,
+        reply_markup=_reply_keyboard(user.language),
+        parse_mode="HTML",
+    )
+    await callback.bot.send_message(
+        chat_id,
+        _rk(_MENU_INTRO, user.language),
         reply_markup=_main_menu(user.language, admin=admin, bot_username=bot_me.username or ""),
         parse_mode="HTML",
     )
@@ -416,13 +494,13 @@ async def handle_menu_button(callback: CallbackQuery) -> None:
     _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
-            t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
+            _rk(_MENU_INTRO, user.language),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
     except Exception:
         await callback.message.answer(
-            t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
+            _rk(_MENU_INTRO, user.language),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
@@ -451,12 +529,18 @@ async def handle_back_to_main(callback: CallbackQuery) -> None:
     _username = bot_me.username or ""
     try:
         await callback.message.edit_text(
-            t(user.language, "start_message", name=html.escape(callback.from_user.first_name or "")),
+            _rk(_MENU_INTRO, user.language),
             reply_markup=_main_menu(user.language, admin=admin, bot_username=_username),
             parse_mode="HTML",
         )
     except Exception:
         logger.debug("menu:main edit failed for %s", callback.from_user.id, exc_info=True)
+
+
+@router.callback_query(lambda c: c.data == "noop")
+async def handle_noop(callback: CallbackQuery) -> None:
+    # Decorative brand-title button — just acknowledge with a tiny toast.
+    await callback.answer("🎧 TEQUILA MUSIC")
 
 
 def _hub_menu(lang: str, rows: list) -> InlineKeyboardMarkup:

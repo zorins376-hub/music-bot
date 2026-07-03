@@ -100,19 +100,21 @@ async def cmd_family(message: Message, user=None) -> None:
         
         buttons = []
         if is_owner:
-            buttons.append([InlineKeyboardButton(
+            # 2-per-row grid (matches the main menu's button width).
+            flat = [InlineKeyboardButton(
                 text=t(lang, "family_invite_btn"),
                 callback_data="family:invite"
-            )])
+            )]
             if not plan.is_premium:
-                buttons.append([InlineKeyboardButton(
+                flat.append(InlineKeyboardButton(
                     text=t(lang, "family_buy_30d_btn", price=_FAMILY_PRICE_30D),
                     callback_data="family:buy:30d"
-                )])
-            buttons.append([InlineKeyboardButton(
+                ))
+            flat.append(InlineKeyboardButton(
                 text=t(lang, "family_manage_btn"),
                 callback_data="family:manage"
-            )])
+            ))
+            buttons = [flat[i:i + 2] for i in range(0, len(flat), 2)]
         else:
             buttons.append([InlineKeyboardButton(
                 text=t(lang, "family_leave_btn"),
@@ -125,14 +127,16 @@ async def cmd_family(message: Message, user=None) -> None:
         # No family plan
         text = t(lang, "family_info")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text=t(lang, "family_create_btn"),
-                callback_data="family:create"
-            )],
-            [InlineKeyboardButton(
-                text=t(lang, "family_join_btn"),
-                callback_data="family:join_prompt"
-            )],
+            [
+                InlineKeyboardButton(
+                    text=t(lang, "family_create_btn"),
+                    callback_data="family:create"
+                ),
+                InlineKeyboardButton(
+                    text=t(lang, "family_join_btn"),
+                    callback_data="family:join_prompt"
+                ),
+            ],
         ])
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -170,16 +174,18 @@ async def handle_family_create(callback: CallbackQuery) -> None:
         
         logger.info("Family plan %s created by user %s", new_plan.id, user.id)
     
-    # Show purchase options
+    # Show purchase options — 2-per-row grid (matches the main menu's button width).
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=t(lang, "family_buy_30d_btn", price=_FAMILY_PRICE_30D),
-            callback_data="family:buy:30d"
-        )],
-        [InlineKeyboardButton(
-            text=t(lang, "family_buy_90d_btn", price=_FAMILY_PRICE_90D),
-            callback_data="family:buy:90d"
-        )],
+        [
+            InlineKeyboardButton(
+                text=t(lang, "family_buy_30d_btn", price=_FAMILY_PRICE_30D),
+                callback_data="family:buy:30d"
+            ),
+            InlineKeyboardButton(
+                text=t(lang, "family_buy_90d_btn", price=_FAMILY_PRICE_90D),
+                callback_data="family:buy:90d"
+            ),
+        ],
         [InlineKeyboardButton(
             text=t(lang, "family_buy_365d_btn", price=_FAMILY_PRICE_365D),
             callback_data="family:buy:365d"
