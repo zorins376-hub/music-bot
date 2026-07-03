@@ -116,6 +116,10 @@ CURATED_YM_TRACKS: dict[int, dict] = {
     50684233: _track(50684233, "Лесник", "Король и Шут", duration=191),
     28397938: _track(28397938, "Восьмиклассница", "КИНО", duration=165),
     595258: _track(595258, "Я свободен", "Кипелов", duration=433),
+    # SAYAN — Мальборо: bootlegs literally titled with the lyric line "забери меня
+    # и прикури Мальборо" (e.g. doithomie) were outranking the original on word
+    # coverage, so pin the lyric to the real SAYAN track.
+    150053393: _track(150053393, "Мальборо", "SAYAN", duration=123),
 }
 
 CURATED_QUERY_PINS: dict[str, int] = {
@@ -182,6 +186,12 @@ CURATED_QUERY_PINS: dict[str, int] = {
     "восьмиклассница": 28397938,
     "я свободен словно птица в небесах": 595258,
     "я свободен": 595258,
+    "забери меня и прикури мальборо": 150053393,
+    "забери меня и прекури мальборо": 150053393,
+    "забери меня прикури мальборо": 150053393,
+    "забери меня и прикури марлборо": 150053393,
+    "sayan мальборо": 150053393,
+    "саян мальборо": 150053393,
 }
 
 
