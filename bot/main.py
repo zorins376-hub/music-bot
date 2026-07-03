@@ -184,6 +184,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="charts", description="Топ-чарты"),
         BotCommand(command="profile", description="Мой профиль"),
         BotCommand(command="favorites", description="Избранное"),
+        BotCommand(command="import_playlist", description="Импорт плейлиста"),
         BotCommand(command="settings", description="Настройки"),
     ]
     try:

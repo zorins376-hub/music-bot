@@ -318,7 +318,7 @@
   "ai_playlist_header": "✦ <b>AI Плейлист</b>\n\n<i>«{prompt}»</i>",
   "ai_playlist_empty": "· Суроо боюнча ырлар табылган жок. Башкача сүрөттөп көр.",
 
-  "import_prompt": "▸ <b>Плейлист импорттоо</b>\n\nПлейлист шилтемесин жөнөт:\n\n· Spotify: <code>https://open.spotify.com/playlist/...</code>\n· Яндекс.Музыка: <code>https://music.yandex.ru/users/.../playlists/...</code>",
+  "import_prompt": "▸ <b>Плейлист импорттоо</b>\n\nПлейлист шилтемесин жөнөт:\n\n· Яндекс.Музыка: <code>https://music.yandex.ru/users/.../playlists/...</code>\n· Apple Music: <code>https://music.apple.com/.../playlist/...</code>",
   "import_detecting": "· Плейлист шилтемеси табылды. Импорттоодо...",
   "import_progress": "· Импорт: {found}/{total} ырлар табылды...",
   "import_done": "✓ «<b>{name}</b>» плейлисти импорттолду.\n\nТабылды: {found}/{total} ыр",

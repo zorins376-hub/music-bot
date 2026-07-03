@@ -369,6 +369,10 @@ async def download_yandex(track_id: int, dest: Path, bitrate: int = 320, token: 
 _YANDEX_TRACK_RE = re.compile(
     r"https?://music\.yandex\.(?:ru|com|kz|by|uz)/(?:album/\d+/track/|track/)(\d+)"
 )
+# Album URL WITHOUT a /track/ part — the whole-album download flow.
+_YANDEX_ALBUM_RE = re.compile(
+    r"https?://music\.yandex\.(?:ru|com|kz|by|uz)/album/(\d+)(?![/\d]*track)"
+)
 
 
 def _yandex_track_id_from_url(text: str) -> int | None:
@@ -380,6 +384,50 @@ def _yandex_track_id_from_url(text: str) -> int | None:
 
 def is_yandex_music_url(text: str) -> bool:
     return _yandex_track_id_from_url(text) is not None
+
+
+def yandex_album_id_from_url(text: str) -> int | None:
+    """Album id for album-only links (track links return None)."""
+    if _yandex_track_id_from_url(text) is not None:
+        return None
+    m = _YANDEX_ALBUM_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def is_yandex_album_url(text: str) -> bool:
+    return yandex_album_id_from_url(text) is not None
+
+
+async def resolve_yandex_album(album_id: int, limit: int = 12) -> tuple[str, list[dict]]:
+    """Resolve a Yandex album to (album_title, [track dicts]) — first `limit` tracks."""
+    token = await _next_token()
+    if not token:
+        return "", []
+    token = await _refresh_token_if_needed(token)
+    if not token:
+        return "", []
+    try:
+        client = await _get_client(token)
+        if client is None:
+            return "", []
+        album = await client.albums_with_tracks(album_id)
+        if not album:
+            return "", []
+        title = album.title or ""
+        if album.artists:
+            title = f"{album.artists[0].name} — {title}"
+        out: list[dict] = []
+        for volume in (album.volumes or []):
+            for tr in volume:
+                d = _track_to_dict(tr, source_id=f"ym_{tr.id}")
+                if d:
+                    out.append(d)
+                if len(out) >= limit:
+                    return title, out
+        return title, out
+    except Exception as e:
+        logger.error("resolve_yandex_album error for %s: %s", album_id, e)
+        return "", []
 
 
 async def resolve_yandex_url(url: str) -> dict | None:

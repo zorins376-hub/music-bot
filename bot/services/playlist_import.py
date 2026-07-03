@@ -250,7 +250,7 @@ async def fetch_apple_music_playlist(url: str) -> tuple[str, list[dict]]:
 
     try:
         from bot.services.http_session import get_session
-        session = await get_session()
+        session = get_session()  # sync factory — `await` here broke Apple import entirely
 
         async with session.get(
             url,
@@ -282,14 +282,16 @@ async def fetch_apple_music_playlist(url: str) -> tuple[str, list[dict]]:
                 data = _json.loads(script.string or "")
                 if data.get("@type") == "MusicPlaylist":
                     for item in data.get("track", []):
-                        artist = item.get("byArtist", {}).get("name", "")
+                        artist = (item.get("byArtist") or {}).get("name", "")
                         title = item.get("name", "")
-                        if artist and title:
+                        # Apple's JSON-LD often has `name` but NO `byArtist` —
+                        # title alone still resolves fine via provider search.
+                        if title:
                             result.append({
                                 "title": title,
                                 "uploader": artist,
                                 "duration": 0,
-                                "yt_query": f"{artist} - {title}",
+                                "yt_query": f"{artist} - {title}" if artist else title,
                             })
             except Exception:
                 continue
@@ -360,7 +362,22 @@ async def import_playlist_tracks(
 
     total = len(ext_tracks)
 
-    # Search tracks in parallel batches of 5
+    # Search tracks in parallel batches of 5.
+    # Yandex-first: it's the fast, WORKING provider (~0.6s) and its tracks
+    # download reliably; YouTube (rate-limited via WARP) is only the fallback.
+    async def _resolve_one(query: str) -> list[dict]:
+        try:
+            from bot.services.yandex_provider import search_yandex
+            ya = await asyncio.wait_for(search_yandex(query, limit=1), timeout=8)
+            if ya:
+                return ya
+        except Exception:
+            pass
+        try:
+            return await search_tracks(query, max_results=1, source="youtube")
+        except Exception:
+            return []
+
     found: list[dict] = []
     seen_ids: set[str] = set()
     batch_size = 5
@@ -370,7 +387,7 @@ async def import_playlist_tracks(
         tasks = []
         for tr in batch:
             query = tr.get("yt_query") or f"{tr.get('uploader', '')} - {tr.get('title', '')}"
-            tasks.append(search_tracks(query.strip(), max_results=1, source="youtube"))
+            tasks.append(_resolve_one(query.strip()))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for res in results:

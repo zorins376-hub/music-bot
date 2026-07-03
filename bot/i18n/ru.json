@@ -318,7 +318,7 @@
   "ai_playlist_header": "✦ <b>AI Плейлист</b>\n\n<i>«{prompt}»</i>",
   "ai_playlist_empty": "· Не удалось найти треки по запросу. Попробуй описать иначе.",
 
-  "import_prompt": "▸ <b>Импорт плейлиста</b>\n\nОтправь ссылку на плейлист:\n\n· Spotify: <code>https://open.spotify.com/playlist/...</code>\n· Яндекс.Музыка: <code>https://music.yandex.ru/users/.../playlists/...</code>",
+  "import_prompt": "▸ <b>Импорт плейлиста</b>\n\nОтправь ссылку на плейлист:\n\n· Яндекс.Музыка: <code>https://music.yandex.ru/users/.../playlists/...</code>\n· Apple Music: <code>https://music.apple.com/.../playlist/...</code>",
   "import_detecting": "· Обнаружена ссылка на плейлист. Импортирую...",
   "import_progress": "· Импорт: {found}/{total} треков найдено...",
   "import_done": "✓ Плейлист «<b>{name}</b>» импортирован.\n\nНайдено: {found}/{total} треков",

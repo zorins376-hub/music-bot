@@ -45,7 +45,7 @@ from bot.services.search_engine import (
 )
 from bot.services.analytics import track_event
 from bot.services.share_links import create_share_link, resolve_share_link
-from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb, TrackCardCb, TrackMenuCb, WrongTrackPickCb
+from bot.callbacks import TrackCallback, FeedbackCallback, AddToPlCb, AddToQueueCb, LyricsCb, LyrTransCb, FavoriteCb, ShareTrackCb, SimilarCb, StoryCb, TrackCardCb, TrackMenuCb, WrongTrackPickCb, WtCollapseCb, WtExpandCb
 from bot.utils import fmt_duration
 
 logger = logging.getLogger(__name__)
@@ -753,6 +753,46 @@ async def _do_search(message: Message, query: str) -> None:
             else:
                 await message.answer(t(lang, "rate_limit_exceeded"))
             return
+
+    # Yandex ALBUM link → send the whole album (capped), track by track.
+    from bot.services.yandex_provider import is_yandex_album_url, resolve_yandex_album, yandex_album_id_from_url
+    if is_yandex_album_url(query):
+        _alb_id = yandex_album_id_from_url(query)
+        status = await message.answer("💿 Собираю альбом…")
+        _alb_cap = 5 if is_group else 10
+        _alb_title, _alb_tracks = await resolve_yandex_album(_alb_id, limit=_alb_cap)
+        if not _alb_tracks:
+            await status.edit_text(t(lang, "no_results"))
+            return
+        await record_listening_event(
+            user_id=user.id, query=query[:500], action="search", source="yandex"
+        )
+        try:
+            await status.edit_text(
+                f"💿 <b>{html.escape(_alb_title)}</b>\nОтправляю {len(_alb_tracks)} трек(ов)…",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        _sent_n = 0
+        for _ti in _alb_tracks:
+            try:
+                if await _send_album_track(message, user, _ti):
+                    _sent_n += 1
+            except Exception:
+                logger.debug("album track send failed", exc_info=True)
+            await asyncio.sleep(2)  # Telegram flood control
+        try:
+            if _sent_n:
+                await status.edit_text(
+                    f"💿 <b>{html.escape(_alb_title)}</b> — {_sent_n}/{len(_alb_tracks)} ✓",
+                    parse_mode="HTML",
+                )
+            else:
+                await status.edit_text(t(lang, "error_download"))
+        except Exception:
+            pass
+        return
 
     # Unsupported link (Instagram/TikTok/VK video/…) → friendly hint instead of
     # a garbage text search (the audit found reels/shorts links returning random
@@ -1656,17 +1696,44 @@ async def cb_wt_label(callback: CallbackQuery) -> None:
 
 
 def _group_track_keyboard(
-    alt_sid: str | None, num_alts: int, tid: int | None, lang: str = "ru"
+    alt_sid: str | None,
+    num_alts: int,
+    tid: int | None,
+    lang: str = "ru",
+    *,
+    alts: list[dict] | None = None,
+    expanded: bool = False,
 ) -> InlineKeyboardMarkup | None:
-    """Group track buttons: wrong-track alternatives + a lyrics button.
+    """Group track buttons: «Не тот трек?» dropdown + a lyrics button.
 
-    Lyrics is the #1 feature of the segment leader — surface it on every group
-    delivery, not only in the private-chat feedback keyboard.
+    Collapsed (default): one «🔁 Не тот трек?» button — tapping it expands the
+    named alternatives in place (no permanent #1 #2 #3 clutter under the track).
+    Expanded: one row per alternative (artist — title) + «‹ Скрыть».
     """
     rows: list[list[InlineKeyboardButton]] = []
-    wt = _wrong_track_keyboard(alt_sid, num_alts) if alt_sid else None
-    if wt:
-        rows.extend(wt.inline_keyboard)
+    if alt_sid and num_alts > 0:
+        if expanded and alts:
+            for i, a in enumerate(alts[:4]):
+                label = f"{(a.get('uploader') or '')[:24]} — {(a.get('title') or '')[:32]}".strip(" —")
+                rows.append([
+                    InlineKeyboardButton(
+                        text=label or f"#{i + 1}",
+                        callback_data=WrongTrackPickCb(sid=alt_sid, i=i).pack(),
+                    )
+                ])
+            rows.append([
+                InlineKeyboardButton(
+                    text="‹ Скрыть",
+                    callback_data=WtCollapseCb(sid=alt_sid, tid=tid or 0).pack(),
+                )
+            ])
+        else:
+            rows.append([
+                InlineKeyboardButton(
+                    text="🔁 Не тот трек?",
+                    callback_data=WtExpandCb(sid=alt_sid, tid=tid or 0).pack(),
+                )
+            ])
     if tid:
         rows.append([
             InlineKeyboardButton(
@@ -1675,6 +1742,111 @@ def _group_track_keyboard(
             )
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
+@router.callback_query(WtExpandCb.filter())
+async def cb_wt_expand(callback: CallbackQuery, callback_data: WtExpandCb) -> None:
+    """«Не тот трек?» → expand the named alternatives in place."""
+    alts = await cache.get_search(callback_data.sid)
+    if not alts:
+        await callback.answer("Список устарел — повтори запрос", show_alert=True)
+        return
+    try:
+        user = await get_or_create_user(callback.from_user)
+        lang = user.language
+    except Exception:
+        lang = "ru"
+    kb = _group_track_keyboard(
+        callback_data.sid, len(alts), callback_data.tid or None, lang,
+        alts=alts, expanded=True,
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer("Выбери правильный вариант")
+
+
+@router.callback_query(WtCollapseCb.filter())
+async def cb_wt_collapse(callback: CallbackQuery, callback_data: WtCollapseCb) -> None:
+    """«‹ Скрыть» → collapse back to the single button."""
+    alts = await cache.get_search(callback_data.sid)
+    try:
+        user = await get_or_create_user(callback.from_user)
+        lang = user.language
+    except Exception:
+        lang = "ru"
+    kb = _group_track_keyboard(
+        callback_data.sid, len(alts) if alts else 0,
+        callback_data.tid or None, lang,
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
+
+
+async def _send_album_track(message: Message, user, track_info: dict) -> bool:
+    """Send one album track: cached file_id if available, else Yandex download.
+
+    Compact single-track delivery for the whole-album flow — no status messages,
+    no original-message cleanup (the album loop manages its own status).
+    """
+    lang = user.language
+    bitrate = int(user.quality) if user.quality in ("128", "192", "320") else 192
+    video_id = track_info.get("video_id", "")
+    _af = _is_ad_free(user)
+
+    file_id = await cache.get_file_id(video_id, bitrate)
+    if not file_id:
+        try:
+            from bot.services.telegram_cache import get_file_id as _tg_get_fid
+            file_id = await _tg_get_fid(video_id)
+        except Exception:
+            file_id = None
+    if file_id:
+        await _ensure_caption_duration(track_info)
+        await message.answer_audio(
+            audio=file_id,
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
+            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+            **_audio_tag_kwargs(track_info),
+        )
+        await _post_download(user.id, track_info, file_id, bitrate)
+        return True
+
+    if not track_info.get("ym_track_id"):
+        return False
+    mp3_path: Path | None = None
+    try:
+        _dl_id = uuid.uuid4().hex[:8]
+        mp3_path = settings.DOWNLOAD_DIR / f"{video_id}_{_dl_id}.mp3"
+        await download_yandex(track_info["ym_track_id"], mp3_path, bitrate)
+        if not track_info.get("duration_fmt"):
+            try:
+                from mutagen import File as _MutFile
+                _mf = _MutFile(str(mp3_path))
+                if _mf and _mf.info and getattr(_mf.info, "length", 0):
+                    track_info["duration"] = int(_mf.info.length)
+                    track_info["duration_fmt"] = _fmt_duration(int(_mf.info.length))
+            except Exception:
+                pass
+        sent = await message.answer_audio(
+            audio=FSInputFile(mp3_path),
+            duration=int(track_info["duration"]) if track_info.get("duration") else None,
+            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+            **_audio_tag_kwargs(track_info),
+        )
+        await cache.set_file_id(video_id, sent.audio.file_id, bitrate)
+        await _post_download(user.id, track_info, sent.audio.file_id, bitrate)
+        return True
+    except Exception:
+        logger.debug("album track download failed for %s", video_id, exc_info=True)
+        return False
+    finally:
+        if mp3_path:
+            cleanup_file(mp3_path)
 
 
 async def _group_auto_play(
@@ -1706,7 +1878,7 @@ async def _group_auto_play(
             _alt_list = await cache.get_search(alt_sid)
             if _alt_list:
                 _alt_n = len(_alt_list)
-                _wt_kb = _wrong_track_keyboard(alt_sid, _alt_n)
+                _wt_kb = _group_track_keyboard(alt_sid, _alt_n, None, lang)
         except Exception:
             pass
 
@@ -1832,7 +2004,7 @@ async def _group_auto_play(
                 _num_alts = len(_alt_list) if _alt_list else 0
             except Exception:
                 pass
-        _wt_kb = _wrong_track_keyboard(alt_sid, _num_alts) if _num_alts > 0 else None
+        _wt_kb = _group_track_keyboard(alt_sid, _num_alts, None, lang) if _num_alts > 0 else None
         # Curated pins / some results carry no duration -> caption showed "?:??".
         # Read it from the downloaded file so the caption matches the audio bubble.
         if not track_info.get("duration_fmt") and mp3_path:

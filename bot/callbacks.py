@@ -87,3 +87,15 @@ class WrongTrackPickCb(CallbackData, prefix="wtp"):
     """Pick an alternative track when the bot selected the wrong one in a group."""
     sid: str  # alternate-candidates session ID
     i: int    # index into the alternate list
+
+
+class WtExpandCb(CallbackData, prefix="wtx"):
+    """Expand the wrong-track alternatives list under a group track."""
+    sid: str  # alternate-candidates session ID
+    tid: int = 0  # track DB id (to rebuild the lyrics button)
+
+
+class WtCollapseCb(CallbackData, prefix="wtc"):
+    """Collapse the alternatives list back to the single button."""
+    sid: str
+    tid: int = 0

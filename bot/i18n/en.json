@@ -318,7 +318,7 @@
   "ai_playlist_header": "✦ <b>AI Playlist</b>\n\n<i>\"{prompt}\"</i>",
   "ai_playlist_empty": "· Could not find tracks for this request. Try a different description.",
 
-  "import_prompt": "▸ <b>Import Playlist</b>\n\nSend a playlist link:\n\n· Spotify: <code>https://open.spotify.com/playlist/...</code>\n· Yandex Music: <code>https://music.yandex.ru/users/.../playlists/...</code>",
+  "import_prompt": "▸ <b>Import Playlist</b>\n\nSend a playlist link:\n\n· Yandex Music: <code>https://music.yandex.ru/users/.../playlists/...</code>\n· Apple Music: <code>https://music.apple.com/.../playlist/...</code>",
   "import_detecting": "· Playlist link detected. Importing...",
   "import_progress": "· Import: {found}/{total} tracks found...",
   "import_done": "✓ Playlist \"<b>{name}</b>\" imported.\n\nFound: {found}/{total} tracks",
