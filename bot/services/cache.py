@@ -226,31 +226,110 @@ class Cache:
             logger.debug("set_query_cache failed query=%s", query, exc_info=True)
 
     # ── Final ranked-result cache (whole-pipeline bypass on repeats) ─────
+    # Two tiers: Redis (RAM, 1 GB, evicted by SIZE via volatile-lru — oldest
+    # unused entries go first, not by age) + Postgres (disk, permanent history).
+    # A RAM miss falls through to disk and re-warms RAM, so LRU eviction or a
+    # Redis restart never loses a cached search.
 
     async def get_result_cache(self, norm_query: str) -> list[dict] | None:
         """Return the cached final ranked results for a normalized query, or None."""
         try:
             data = await self.redis.get(f"rcache:{norm_query}")
-            return json.loads(data) if data else None
+            if data:
+                return json.loads(data)
         except Exception:
+            pass
+        # Disk tier (Postgres) — survives RAM eviction / Redis restarts.
+        try:
+            results = await self._disk_get_results(norm_query)
+        except Exception:
+            logger.debug("disk result-cache read failed q=%s", norm_query, exc_info=True)
             return None
+        if results:
+            try:  # re-warm the RAM tier
+                await self.redis.setex(
+                    f"rcache:{norm_query}", settings.RCACHE_TTL,
+                    json.dumps(results, ensure_ascii=False),
+                )
+            except Exception:
+                pass
+        return results
 
     async def set_result_cache(self, norm_query: str, results: list[dict]) -> None:
-        """Cache the final ranked results for a normalized query (RCACHE_TTL)."""
+        """Cache the final ranked results in RAM (Redis) AND on disk (Postgres)."""
+        payload = json.dumps(results, ensure_ascii=False)
         try:
-            await self.redis.setex(
-                f"rcache:{norm_query}", settings.RCACHE_TTL,
-                json.dumps(results, ensure_ascii=False),
-            )
+            await self.redis.setex(f"rcache:{norm_query}", settings.RCACHE_TTL, payload)
         except Exception:
             logger.debug("set_result_cache failed query=%s", norm_query, exc_info=True)
+        try:
+            await self._disk_set_results(norm_query, payload)
+        except Exception:
+            logger.debug("disk result-cache write failed q=%s", norm_query, exc_info=True)
 
     async def bust_result_cache(self, norm_query: str) -> None:
-        """Invalidate the ranked-result cache for a query (e.g. on a 'wrong track' fix)."""
+        """Invalidate BOTH tiers for a query (e.g. on a 'wrong track' fix)."""
         try:
             await self.redis.delete(f"rcache:{norm_query}")
         except Exception:
             pass
+        try:
+            from sqlalchemy import delete as _sa_delete
+            from bot.models.base import async_session
+            from bot.models.search_cache import SearchCache
+            async with async_session() as session:
+                await session.execute(
+                    _sa_delete(SearchCache).where(SearchCache.norm_query == norm_query)
+                )
+                await session.commit()
+        except Exception:
+            logger.debug("disk result-cache bust failed q=%s", norm_query, exc_info=True)
+
+    @staticmethod
+    async def _disk_get_results(norm_query: str) -> list[dict] | None:
+        from sqlalchemy import select, update as _sa_update
+        from bot.models.base import async_session
+        from bot.models.search_cache import SearchCache
+
+        async with async_session() as session:
+            row = await session.execute(
+                select(SearchCache.results_json).where(SearchCache.norm_query == norm_query)
+            )
+            payload = row.scalar_one_or_none()
+            if not payload:
+                return None
+            try:
+                await session.execute(
+                    _sa_update(SearchCache)
+                    .where(SearchCache.norm_query == norm_query)
+                    .values(hits=SearchCache.hits + 1)
+                )
+                await session.commit()
+            except Exception:
+                pass
+        try:
+            data = json.loads(payload)
+            return data if isinstance(data, list) and data else None
+        except Exception:
+            return None
+
+    @staticmethod
+    async def _disk_set_results(norm_query: str, payload: str) -> None:
+        from datetime import datetime, timezone
+        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+        from bot.models.base import async_session
+        from bot.models.search_cache import SearchCache
+
+        async with async_session() as session:
+            stmt = _pg_insert(SearchCache).values(
+                norm_query=norm_query, results_json=payload,
+                updated_at=datetime.now(timezone.utc),
+            ).on_conflict_do_update(
+                index_elements=[SearchCache.norm_query],
+                set_={"results_json": payload, "updated_at": datetime.now(timezone.utc)},
+            )
+            await session.execute(stmt)
+            await session.commit()
 
     # ── Rate limiting ────────────────────────────────────────────────────────
 

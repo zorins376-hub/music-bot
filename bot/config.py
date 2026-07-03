@@ -95,11 +95,15 @@ class Settings(BaseSettings):
     # made any tap older than that die with "Сессия истекла" (top UX complaint
     # class in the 2026-07 audit). Payload is a few KB; volatile-lru caps memory.
     SEARCH_SESSION_TTL: int = 24 * 3600
-    # Search caches are long-lived; Redis maxmemory + volatile-lru is the real
-    # governor (evicts least-recently-used cache keys when the size cap is hit),
-    # so these TTLs are just a freshness ceiling, not the primary eviction driver.
-    QCACHE_TTL: int = 7 * 24 * 3600           # provider-search result cache (7d)
-    RCACHE_TTL: int = 7 * 24 * 3600           # final ranked-result cache per query (7d)
+    # Search caches are governed by SIZE, not time: Redis maxmemory 1gb +
+    # volatile-lru evicts the least-recently-used keys when the cap is hit.
+    # The TTL is only a distant freshness ceiling (and keeps keys in the
+    # volatile set so LRU can evict them — do NOT remove it entirely: TTL-less
+    # keys are invisible to volatile-lru and would wedge Redis at maxmemory).
+    # rcache additionally has a Postgres disk tier (see bot/models/search_cache.py),
+    # so eviction from RAM never loses history.
+    QCACHE_TTL: int = 90 * 24 * 3600          # provider-search result cache (90d)
+    RCACHE_TTL: int = 90 * 24 * 3600          # final ranked-result cache per query (90d)
 
     # ── Paths ─────────────────────────────────────────────────────────────
     DOWNLOAD_DIR: Path = _BASE / "downloads"
