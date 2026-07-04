@@ -1037,6 +1037,36 @@ async def prefetch_tracks(
     return {"prefetched": results}
 
 
+@app.post("/api/catalog/seed")
+async def catalog_seed(request: Request, x_seed_token: str | None = Header(None)):
+    """Metadata-collector → bot pipeline. Accepts {"tracks":[{"artist","title"}]}
+    and queues the "artist - title" strings in Redis `catalog:seed`, which the cache
+    warmer + Yandex-first prefetcher drain (resolve → download → CDN file_id).
+    Authenticated by the shared CATALOG_SEED_TOKEN header (empty token = disabled)."""
+    token = getattr(settings, "CATALOG_SEED_TOKEN", "") or ""
+    if not token or x_seed_token != token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    body = await request.json()
+    tracks = body.get("tracks") or []
+    if not isinstance(tracks, list):
+        raise HTTPException(status_code=400, detail="tracks must be a list")
+    queries: list[str] = []
+    for t in tracks[:5000]:
+        if not isinstance(t, dict):
+            continue
+        artist = str(t.get("artist") or "").strip()
+        title = str(t.get("title") or "").strip()
+        q = f"{artist} - {title}".strip(" -")
+        if len(q) > 4:
+            queries.append(q)
+    added = 0
+    if queries:
+        from bot.services.cache import cache
+        added = await cache.redis.sadd("catalog:seed", *queries)
+    logger.info("catalog seed: received=%d queued=%d new=%d", len(tracks), len(queries), added)
+    return {"received": len(tracks), "queued": len(queries), "new": added}
+
+
 async def _background_cache(video_id: str, stream_url: str, dest: Path) -> None:
     """Download audio via parallel chunks in background so next play is instant."""
     if dest.exists():

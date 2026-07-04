@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     # 500'd on `settings.LASTFM_API_KEY` and ~7 ForYou sections were dead.
     LASTFM_API_KEY: str = ""
 
+    # Shared secret for the metadata-collector → bot catalog-seed pipeline.
+    # The collector POSTs {tracks:[{artist,title}]} to /api/catalog/seed with this
+    # token; matched queries are queued in Redis `catalog:seed` for the warmer +
+    # prefetcher to resolve on Yandex and cache. Empty = endpoint disabled.
+    CATALOG_SEED_TOKEN: str = ""
+
     # ── Yandex Music ──────────────────────────────────────────────────────
     YANDEX_MUSIC_TOKEN: Optional[str] = None
     YANDEX_TOKENS: Optional[str] = None  # пул токенов через запятую (ротация)

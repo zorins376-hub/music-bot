@@ -225,6 +225,21 @@ async def prefetch_chart_tracks(
     except Exception as e:
         logger.warning("Prefetch: external chart fetch failed: %s", e)
 
+    # Catalog seed queries from the metadata collector (auto-pipeline) — resolve
+    # + download via Yandex so the collected music becomes cached audio.
+    try:
+        from bot.services.cache import cache
+        seed = await cache.redis.smembers("catalog:seed")
+        for q in list(seed or [])[:1500]:
+            q = (q if isinstance(q, str) else q.decode()).strip()
+            key = q.lower()
+            if len(q) < 3 or key in seen_q:
+                continue
+            seen_q.add(key)
+            items.append((q, ""))
+    except Exception as e:
+        logger.warning("Prefetch: catalog seed read failed: %s", e)
+
     if not items:
         logger.info("Prefetch: no tracks to warm")
         return stats

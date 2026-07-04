@@ -142,6 +142,17 @@ async def _candidates() -> list[str]:
     except Exception:
         logger.debug("warmer: cis chart scan failed", exc_info=True)
 
+    # 2d) Catalog seed queries pushed by the metadata collector (auto-pipeline).
+    try:
+        seed = await cache.redis.smembers("catalog:seed")
+        for q in (seed or []):
+            q = (q if isinstance(q, str) else q.decode()).strip()
+            if len(q) > 4 and q.lower() not in seen:
+                seen.add(q.lower())
+                out.append(q)
+    except Exception:
+        logger.debug("warmer: catalog seed scan failed", exc_info=True)
+
     # 3) Popular tracks from our own DB -> "Artist Title"
     try:
         from sqlalchemy import select
