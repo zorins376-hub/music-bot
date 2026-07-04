@@ -4,8 +4,14 @@ Slowly pre-resolves queries into the two-tier result cache (Redis RAM +
 Postgres disk) so users hit instant Tier-0 answers instead of waiting for the
 live engine. Candidate sources, in priority order:
 
-1. Real user queries from the search:audit history (what people actually type);
-2. "Artist Title" of popular tracks in our own DB (what they will likely type).
+1. Real user queries — the Redis search:audit ring AND the full DB search
+   history (every distinct query ever typed, most-frequent first);
+2. Current top-chart tracks (5 sources, deep) + Last.fm global/Russia charts —
+   fresh popular tracks users will likely type next;
+3. "Artist Title" of popular tracks in our own DB.
+
+All provider resolution goes through Yandex (never YouTube), so aggressive
+warming never competes with users for the YouTube quota it gets rate-limited on.
 
 Safety properties:
 - GENTLE: a small batch every few minutes (default 6 per 180s) — invisible to
@@ -26,14 +32,50 @@ from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
-_WARM_INTERVAL = 180          # seconds between batches
-_WARM_BATCH = 6               # queries resolved per batch
+_WARM_INTERVAL = 150          # seconds between batches
+_WARM_BATCH = 10              # queries resolved per batch
 _WARM_START_DELAY = 120       # let the bot settle after startup
 _DONE_SET = "warm:done"       # Redis set of already-processed norm queries
 _AUDIT_SCAN = 3000            # how many recent audit entries to scan
-_DB_SCAN = 3000               # how many popular tracks to scan
+_DB_HISTORY_SCAN = 5000       # how many distinct DB search queries to scan
+_DB_SCAN = 4000               # how many popular tracks to scan
+_CHART_DEPTH = 150            # how deep into each chart to warm
+_LASTFM_LIMIT = 200           # top tracks per Last.fm chart
 
 _task: asyncio.Task | None = None
+
+
+async def _lastfm_top_tracks() -> list[str]:
+    """Parse Last.fm charts (global + Russia geo) into 'Artist Title' queries — a
+    fresh popular-track source beyond our own charts/DB."""
+    key = getattr(settings, "LASTFM_API_KEY", "") or ""
+    if not key:
+        return []
+    import aiohttp
+
+    out: list[str] = []
+    endpoints = (
+        f"http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&limit={_LASTFM_LIMIT}&api_key={key}&format=json",
+        f"http://ws.audioscrobbler.com/2.0/?method=geo.gettoptracks&country=Russia&limit={_LASTFM_LIMIT}&api_key={key}&format=json",
+    )
+    try:
+        async with aiohttp.ClientSession() as sess:
+            for url in endpoints:
+                try:
+                    async with sess.get(url, timeout=aiohttp.ClientTimeout(total=12)) as r:
+                        data = await r.json()
+                except Exception:
+                    continue
+                tracks = ((data or {}).get("tracks") or {}).get("track") or []
+                for t in tracks:
+                    name = (t.get("name") or "").strip()
+                    artist = ((t.get("artist") or {}).get("name") or "").strip()
+                    q = f"{artist} {name}".strip()
+                    if len(q) > 4:
+                        out.append(q)
+    except Exception:
+        logger.debug("warmer: lastfm fetch failed", exc_info=True)
+    return out
 
 
 async def _candidates() -> list[str]:
@@ -62,6 +104,32 @@ async def _candidates() -> list[str]:
     except Exception:
         logger.debug("warmer: audit scan failed", exc_info=True)
 
+    # 1b) EVERY distinct query users have ever typed (DB search history — broader
+    # and more durable than the Redis audit ring), most-frequent first.
+    try:
+        from sqlalchemy import func as _func, select as _select
+        from bot.models.base import async_session
+        from bot.models.track import ListeningHistory
+
+        async with async_session() as session:
+            rows = await session.execute(
+                _select(ListeningHistory.query)
+                .where(
+                    ListeningHistory.action == "search",
+                    ListeningHistory.query.isnot(None),
+                )
+                .group_by(ListeningHistory.query)
+                .order_by(_func.count().desc())
+                .limit(_DB_HISTORY_SCAN)
+            )
+            for (q,) in rows:
+                q = (q or "").strip()
+                if len(q) > 4 and q.lower() not in seen:
+                    seen.add(q.lower())
+                    out.append(q)
+    except Exception:
+        logger.debug("warmer: db history scan failed", exc_info=True)
+
     # 2) Current TOP-CHART tracks -> "Artist Title": these are the queries users
     # are MOST likely to type next, so they belong in the fast-access cache
     # before they are ever searched. Charts refresh over time; new entries are
@@ -73,7 +141,7 @@ async def _candidates() -> list[str]:
                 tracks = await _get_chart(source)
             except Exception:
                 continue
-            for tr in (tracks or [])[:100]:
+            for tr in (tracks or [])[:_CHART_DEPTH]:
                 artist = (tr.get("uploader") or tr.get("artist") or "").strip()
                 title = (tr.get("title") or "").strip()
                 q = f"{artist} {title}".strip()
@@ -82,6 +150,16 @@ async def _candidates() -> list[str]:
                     out.append(q)
     except Exception:
         logger.debug("warmer: chart scan failed", exc_info=True)
+
+    # 2b) Last.fm charts (global + Russia geo) — a fresh external popular-track
+    # source beyond our own charts, so the warm pool keeps growing.
+    try:
+        for q in await _lastfm_top_tracks():
+            if len(q) > 4 and q.lower() not in seen:
+                seen.add(q.lower())
+                out.append(q)
+    except Exception:
+        logger.debug("warmer: lastfm scan failed", exc_info=True)
 
     # 3) Popular tracks from our own DB -> "Artist Title"
     try:
