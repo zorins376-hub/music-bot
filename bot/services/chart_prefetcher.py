@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 # How many tracks to download in parallel
 _PREFETCH_CONCURRENCY = 3
 
-# Interval between full prefetch runs (1 hour)
-_PREFETCH_INTERVAL = 6 * 3600  # was 1h: hourly runs burned ~119 doomed YouTube
-# hits/cycle through the rate-limited WARP proxy, starving ORGANIC user downloads
-# (2026-07 audit). Charts change slowly; 6h warming is plenty.
+# Interval between full prefetch runs. Now that warming is Yandex-first (never
+# rate-limited), it no longer competes with organic YouTube downloads, so we can
+# run more often to fill file_ids faster. 3h keeps Yandex load gentle.
+_PREFETCH_INTERVAL = 3 * 3600
 
 # Minimum file size to consider track already cached (10KB)
 _MIN_CACHED_SIZE = 10 * 1024
@@ -70,141 +70,141 @@ def _is_yandex_id(video_id: str) -> bool:
 
 async def prefetch_chart_tracks(
     bitrate: int = 192,
-    max_per_chart: int = 100,
+    max_per_chart: int = 150,
 ) -> dict[str, int]:
-    """Download all chart tracks to local cache.
-    
+    """Warm chart tracks into the Telegram-CDN file_id cache — Yandex-first.
+
+    For every chart track we resolve "Artist Title" on Yandex (which is never
+    rate-limited) and download from there, falling back to the chart's YouTube id
+    only when Yandex has no match AND YouTube is healthy. This fills file_ids fast
+    without burning the rate-limited YouTube/WARP quota that organic user downloads
+    need. Deduped by query so the same song isn't resolved twice across charts.
+
     Returns dict with counts: {"downloaded": N, "skipped": N, "failed": N}
     """
     from bot.handlers.charts import _get_chart, _CHART_FETCHERS
     from bot.services.download_manager import download_manager
+    from bot.services.yandex_provider import download_yandex, search_yandex
 
     stats = {"downloaded": 0, "skipped": 0, "failed": 0}
     semaphore = asyncio.Semaphore(_PREFETCH_CONCURRENCY)
-    
-    async def download_one(video_id: str) -> bool:
-        """Download single track. Returns True if downloaded, False if skipped/failed."""
-        # Skip permanently failed videos (age-restricted, geo-blocked, etc.)
-        if video_id in _PERMANENT_FAILURES:
-            if time.time() - _PERMANENT_FAILURES[video_id] < _FAILURE_TTL:
-                return False  # still blacklisted
-            else:
-                del _PERMANENT_FAILURES[video_id]  # expired, retry
 
-        mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-
-        # Skip if already cached
-        if mp3_path.exists() and mp3_path.stat().st_size > _MIN_CACHED_SIZE:
-            return False
-
-        async with semaphore:
-            try:
-                await download_manager.download(video_id, bitrate=bitrate)
-                # Upload to Telegram CDN cache (fire-and-forget, skips if already cached)
-                try:
-                    from bot.services.telegram_cache import schedule_upload, get_file_id as _get_cache_fid
-                    dl_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-                    if dl_path.exists() and not await _get_cache_fid(video_id):
-                        schedule_upload(dl_path, video_id)
-                except Exception:
-                    logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
-                return True
-            except Exception as e:
-                err_msg = str(e)
-                # Check if this is a permanent failure
-                if any(pattern.lower() in err_msg.lower() for pattern in _PERMANENT_ERROR_PATTERNS):
-                    _PERMANENT_FAILURES[video_id] = time.time()
-                    logger.info("Prefetch: permanently skipping %s (reason: %s)", video_id, err_msg[:100])
-                else:
-                    logger.debug("Prefetch failed for %s: %s", video_id, e)
-                stats["failed"] += 1
-                return False
-
-    async def download_one_ym(video_id: str) -> bool:
-        """Download single Yandex track. Returns True if downloaded."""
-        mp3_path = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-        if mp3_path.exists() and mp3_path.stat().st_size > _MIN_CACHED_SIZE:
-            return False
-        async with semaphore:
-            try:
-                from bot.services.yandex_provider import download_yandex
-                track_id = int(video_id[3:])  # strip "ym_" prefix
-                await asyncio.wait_for(
-                    download_yandex(track_id, mp3_path),
-                    timeout=120,
-                )
-                try:
-                    from bot.services.telegram_cache import schedule_upload, get_file_id as _get_cache_fid
-                    if mp3_path.exists() and not await _get_cache_fid(video_id):
-                        schedule_upload(mp3_path, video_id)
-                except Exception:
-                    logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
-                return True
-            except asyncio.TimeoutError:
-                logger.warning("Prefetch: timeout downloading ym track %s", video_id)
-                stats["failed"] += 1
-                return False
-            except Exception as e:
-                logger.debug("Prefetch failed for %s: %s", video_id, e)
-                stats["failed"] += 1
-                return False
-
-    # Collect all unique video IDs from all charts
-    yt_video_ids: set[str] = set()
-    ym_video_ids: set[str] = set()
-    
-    for source in _CHART_FETCHERS:
-        try:
-            tracks = await _get_chart(source)
-            if not tracks:
-                continue
-            
-            for track in tracks[:max_per_chart]:
-                video_id = track.get("video_id", "").strip()
-                if video_id and _is_youtube_id(video_id):
-                    yt_video_ids.add(video_id)
-                elif video_id and _is_yandex_id(video_id):
-                    ym_video_ids.add(video_id)
-                    
-        except Exception as e:
-            logger.warning("Prefetch: failed to get chart %s: %s", source, e)
-    
-    total = len(yt_video_ids) + len(ym_video_ids)
-    if not total:
-        logger.info("Prefetch: no tracks to download")
-        return stats
-    
-    # Skip the YouTube half while the provider is degraded — warming a dead
-    # provider just burns the shared WARP/YouTube quota that organic user
-    # downloads need (the audit found ~119 doomed yt hits per hourly cycle).
+    yt_disabled = False
     try:
         from bot.services.provider_health import is_provider_disabled
-        if yt_video_ids and is_provider_disabled("youtube"):
-            logger.info("Prefetch: youtube disabled by health check — skipping %d yt tracks", len(yt_video_ids))
-            yt_video_ids = set()
+        yt_disabled = is_provider_disabled("youtube")
     except Exception:
         pass
 
-    logger.info("Prefetch: starting download of %d unique tracks (%d yt, %d ym)",
-                total, len(yt_video_ids), len(ym_video_ids))
+    async def _upload_if_new(video_id: str, path: Path) -> None:
+        try:
+            from bot.services.telegram_cache import get_file_id as _get_cache_fid, schedule_upload
+            if path.exists() and not await _get_cache_fid(video_id):
+                schedule_upload(path, video_id)
+        except Exception:
+            logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
 
-    # Download all tracks concurrently (limited by semaphore)
-    tasks = [download_one(vid) for vid in yt_video_ids]
-    tasks += [download_one_ym(vid) for vid in ym_video_ids]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+    async def _dl_yandex(ym_id: int) -> bool:
+        """True=downloaded, False=already cached; raises on error."""
+        vid = f"ym_{ym_id}"
+        mp3 = settings.DOWNLOAD_DIR / f"{vid}.mp3"
+        if mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE:
+            return False
+        await asyncio.wait_for(download_yandex(ym_id, mp3, bitrate), timeout=120)
+        await _upload_if_new(vid, mp3)
+        return True
+
+    async def _dl_youtube(video_id: str) -> bool:
+        """True=downloaded, False=already cached; raises on error (fallback only)."""
+        if video_id in _PERMANENT_FAILURES:
+            if time.time() - _PERMANENT_FAILURES[video_id] < _FAILURE_TTL:
+                return False
+            del _PERMANENT_FAILURES[video_id]
+        mp3 = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
+        if mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE:
+            return False
+        try:
+            await download_manager.download(video_id, bitrate=bitrate)
+            await _upload_if_new(video_id, settings.DOWNLOAD_DIR / f"{video_id}.mp3")
+            return True
+        except Exception as e:
+            if any(p.lower() in str(e).lower() for p in _PERMANENT_ERROR_PATTERNS):
+                _PERMANENT_FAILURES[video_id] = time.time()
+                logger.info("Prefetch: permanently skipping %s (%s)", video_id, str(e)[:80])
+            raise
+
+    async def warm_one(query: str, video_id: str):
+        """True=downloaded, False=already cached, None=failed."""
+        async with semaphore:
+            # 1) Yandex first — a ym_ chart id resolves directly; otherwise search.
+            ym_id: int | None = None
+            if _is_yandex_id(video_id):
+                try:
+                    ym_id = int(video_id[3:])
+                except Exception:
+                    ym_id = None
+            if ym_id is None and query:
+                try:
+                    r = await asyncio.wait_for(search_yandex(query, limit=1), timeout=10)
+                    if r and r[0].get("ym_track_id"):
+                        ym_id = int(r[0]["ym_track_id"])
+                except Exception:
+                    ym_id = None
+            if ym_id is not None:
+                try:
+                    return await _dl_yandex(ym_id)
+                except Exception as e:
+                    logger.debug("Prefetch(ym) failed for %r: %s", query[:50], e)
+            # 2) Fallback: YouTube (only when healthy and it's a real yt id).
+            if video_id and _is_youtube_id(video_id) and not yt_disabled:
+                try:
+                    return await _dl_youtube(video_id)
+                except Exception as e:
+                    logger.debug("Prefetch(yt) failed for %s: %s", video_id, e)
+            return None
+
+    # Collect (query, video_id) from all charts, deduped by query.
+    seen_q: set[str] = set()
+    items: list[tuple[str, str]] = []
+    for source in _CHART_FETCHERS:
+        try:
+            tracks = await _get_chart(source)
+        except Exception as e:
+            logger.warning("Prefetch: failed to get chart %s: %s", source, e)
+            continue
+        for track in (tracks or [])[:max_per_chart]:
+            artist = (track.get("uploader") or track.get("artist") or "").strip()
+            title = (track.get("title") or "").strip()
+            query = f"{artist} {title}".strip()
+            video_id = (track.get("video_id") or "").strip()
+            key = query.lower()
+            if len(query) < 3 or key in seen_q:
+                continue
+            seen_q.add(key)
+            items.append((query, video_id))
+
+    if not items:
+        logger.info("Prefetch: no tracks to warm")
+        return stats
+
+    logger.info(
+        "Prefetch: warming %d chart tracks (Yandex-first, yt_fallback=%s)",
+        len(items), "off" if yt_disabled else "on",
+    )
+
+    results = await asyncio.gather(*[warm_one(q, v) for q, v in items], return_exceptions=True)
     for r in results:
         if r is True:
             stats["downloaded"] += 1
         elif r is False:
             stats["skipped"] += 1
-        # Exceptions already counted in download_one
-    
+        else:  # None or an exception from gather
+            stats["failed"] += 1
+
     logger.info(
-        "Prefetch complete: %d downloaded, %d skipped (cached), %d failed",
-        stats["downloaded"], stats["skipped"], stats["failed"]
+        "Prefetch complete: %d downloaded, %d skipped, %d failed (of %d)",
+        stats["downloaded"], stats["skipped"], stats["failed"], len(items),
     )
-    
     return stats
 
 
