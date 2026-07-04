@@ -161,6 +161,20 @@ async def _candidates() -> list[str]:
     except Exception:
         logger.debug("warmer: lastfm scan failed", exc_info=True)
 
+    # 2c) CIS per-country Apple charts (RU/BY/KZ/AM/AZ/KG/MD/TJ/UZ/UA/GE top-100) —
+    # locally-popular tracks for our audience.
+    try:
+        from bot.handlers.charts import cis_chart_tracks
+        for tr in await cis_chart_tracks():
+            artist = (tr.get("artist") or tr.get("uploader") or "").strip()
+            title = (tr.get("title") or "").strip()
+            q = f"{artist} {title}".strip()
+            if len(q) > 4 and q.lower() not in seen:
+                seen.add(q.lower())
+                out.append(q)
+    except Exception:
+        logger.debug("warmer: cis chart scan failed", exc_info=True)
+
     # 3) Popular tracks from our own DB -> "Artist Title"
     try:
         from sqlalchemy import select

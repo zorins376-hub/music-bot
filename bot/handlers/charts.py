@@ -189,6 +189,51 @@ async def _fetch_apple_chart(storefront: str) -> list[dict]:
     return []
 
 
+# CIS + nearby storefronts where Apple Music is available. Per-country top-100
+# songs = locally-popular tracks for our RU/KZ/KG/BY/… audience. Used to feed the
+# cache warmer and the file_id prefetcher (not shown as separate chart buttons).
+_CIS_STOREFRONTS = ["ru", "by", "kz", "am", "az", "kg", "md", "tj", "uz", "ua", "ge"]
+_CIS_CACHE_KEY = "chart:cis_all"
+
+
+async def cis_chart_tracks(per_country: int = 100, force: bool = False) -> list[dict]:
+    """Apple Music top-`per_country` for every CIS storefront, combined + deduped
+    by "artist - title". Cached in Redis (_CHART_TTL) so repeat calls are cheap."""
+    if not force:
+        try:
+            raw = await cache.redis.get(_CIS_CACHE_KEY)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+
+    seen: set[str] = set()
+    out: list[dict] = []
+    for sf in _CIS_STOREFRONTS:
+        try:
+            tracks = await _fetch_apple_chart(sf)
+        except Exception as e:
+            logger.debug("cis chart %s failed: %s", sf, e)
+            continue
+        for t in (tracks or [])[:per_country]:
+            artist = (t.get("artist") or "").strip()
+            title = (t.get("title") or "").strip()
+            q = f"{artist} - {title}".strip(" -")
+            key = q.lower()
+            if len(q) > 4 and key not in seen:
+                seen.add(key)
+                t["_cis"] = sf
+                out.append(t)
+
+    if out:
+        try:
+            await cache.redis.setex(_CIS_CACHE_KEY, _CHART_TTL, json.dumps(out, ensure_ascii=False))
+        except Exception:
+            pass
+    logger.info("CIS charts: %d unique tracks across %d storefronts", len(out), len(_CIS_STOREFRONTS))
+    return out
+
+
 def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 100, cyrillic_only: bool = False) -> list[dict]:
     """Try multiple YouTube playlists, return first that works. Individual songs only."""
     import yt_dlp

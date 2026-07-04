@@ -183,6 +183,22 @@ async def prefetch_chart_tracks(
             seen_q.add(key)
             items.append((query, video_id))
 
+    # CIS per-country Apple charts — locally-popular tracks; no video_id, so they
+    # resolve + download via Yandex (never rate-limited).
+    try:
+        from bot.handlers.charts import cis_chart_tracks
+        for track in await cis_chart_tracks(per_country=max_per_chart):
+            artist = (track.get("artist") or track.get("uploader") or "").strip()
+            title = (track.get("title") or "").strip()
+            query = f"{artist} {title}".strip()
+            key = query.lower()
+            if len(query) < 3 or key in seen_q:
+                continue
+            seen_q.add(key)
+            items.append((query, ""))
+    except Exception as e:
+        logger.warning("Prefetch: CIS chart fetch failed: %s", e)
+
     if not items:
         logger.info("Prefetch: no tracks to warm")
         return stats
