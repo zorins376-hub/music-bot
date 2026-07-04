@@ -89,6 +89,19 @@ def _cleanup_stale_downloads(max_age_sec: int = 3600) -> None:
         logger.info("Cleaned up %d stale download(s)", removed)
 
 
+async def _periodic_download_cleanup(interval_sec: int = 1800) -> None:
+    """Keep downloads/ bounded. Prefetch + organic downloads pile up mp3s, but the
+    Telegram-CDN file_id is the permanent instant-delivery cache, so local files
+    older than an hour are redundant — evict them every 30 min (was startup-only,
+    which let the dir grow to 8 GB between restarts)."""
+    while True:
+        await asyncio.sleep(interval_sec)
+        try:
+            _cleanup_stale_downloads()
+        except Exception:
+            logger.debug("periodic download cleanup failed", exc_info=True)
+
+
 async def on_startup(bot: Bot) -> None:
     from bot.services.downloader import log_runtime_info
     log_runtime_info()
@@ -100,8 +113,9 @@ async def on_startup(bot: Bot) -> None:
     _fire_task(startup_cookie_check())
     _fire_task(start_cookie_health_scheduler())
 
-    # Cleanup stale downloads from previous runs
+    # Cleanup stale downloads from previous runs, then keep the dir bounded.
     _cleanup_stale_downloads()
+    _fire_task(_periodic_download_cleanup())
 
     await init_db()
 

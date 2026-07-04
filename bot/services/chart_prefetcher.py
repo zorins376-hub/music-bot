@@ -104,9 +104,20 @@ async def prefetch_chart_tracks(
         except Exception:
             logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
 
+    async def _cdn_cached(video_id: str) -> bool:
+        """True if this track already has a Telegram-CDN file_id (fully warm)."""
+        try:
+            from bot.services.telegram_cache import get_file_id as _gf
+            return bool(await _gf(video_id))
+        except Exception:
+            return False
+
     async def _dl_yandex(ym_id: int) -> bool:
         """True=downloaded, False=already cached; raises on error."""
         vid = f"ym_{ym_id}"
+        # Already on the CDN → warm; skip so we don't re-download after cleanup.
+        if await _cdn_cached(vid):
+            return False
         mp3 = settings.DOWNLOAD_DIR / f"{vid}.mp3"
         if mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE:
             return False
@@ -116,6 +127,8 @@ async def prefetch_chart_tracks(
 
     async def _dl_youtube(video_id: str) -> bool:
         """True=downloaded, False=already cached; raises on error (fallback only)."""
+        if await _cdn_cached(video_id):
+            return False
         if video_id in _PERMANENT_FAILURES:
             if time.time() - _PERMANENT_FAILURES[video_id] < _FAILURE_TTL:
                 return False
