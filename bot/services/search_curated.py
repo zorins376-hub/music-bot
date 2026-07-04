@@ -120,6 +120,10 @@ CURATED_YM_TRACKS: dict[int, dict] = {
     # и прикури Мальборо" (e.g. doithomie) were outranking the original on word
     # coverage, so pin the lyric to the real SAYAN track.
     150053393: _track(150053393, "Мальборо", "SAYAN", duration=123),
+    # Мэйби Бэйби — the bare artist name transliterates to "Maybe Baby" and collides
+    # with Buddy Holly's classic + compilations, so searching just the artist misses.
+    # Pin the artist to their most popular song.
+    42237523: _track(42237523, "Аскорбинка", "Мэйби Бэйби", duration=129),
 }
 
 CURATED_QUERY_PINS: dict[str, int] = {
@@ -192,6 +196,11 @@ CURATED_QUERY_PINS: dict[str, int] = {
     "забери меня и прикури марлборо": 150053393,
     "sayan мальборо": 150053393,
     "саян мальборо": 150053393,
+    "мэйби бэйби": 42237523,
+    "мейби бейби": 42237523,
+    "мэйби бейби": 42237523,
+    "мейби бэйби": 42237523,
+    "мэйби бэйби аскорбинка": 42237523,
 }
 
 
