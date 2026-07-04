@@ -40,42 +40,8 @@ _AUDIT_SCAN = 3000            # how many recent audit entries to scan
 _DB_HISTORY_SCAN = 5000       # how many distinct DB search queries to scan
 _DB_SCAN = 4000               # how many popular tracks to scan
 _CHART_DEPTH = 150            # how deep into each chart to warm
-_LASTFM_LIMIT = 200           # top tracks per Last.fm chart
 
 _task: asyncio.Task | None = None
-
-
-async def _lastfm_top_tracks() -> list[str]:
-    """Parse Last.fm charts (global + Russia geo) into 'Artist Title' queries — a
-    fresh popular-track source beyond our own charts/DB."""
-    key = getattr(settings, "LASTFM_API_KEY", "") or ""
-    if not key:
-        return []
-    import aiohttp
-
-    out: list[str] = []
-    endpoints = (
-        f"http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&limit={_LASTFM_LIMIT}&api_key={key}&format=json",
-        f"http://ws.audioscrobbler.com/2.0/?method=geo.gettoptracks&country=Russia&limit={_LASTFM_LIMIT}&api_key={key}&format=json",
-    )
-    try:
-        async with aiohttp.ClientSession() as sess:
-            for url in endpoints:
-                try:
-                    async with sess.get(url, timeout=aiohttp.ClientTimeout(total=12)) as r:
-                        data = await r.json()
-                except Exception:
-                    continue
-                tracks = ((data or {}).get("tracks") or {}).get("track") or []
-                for t in tracks:
-                    name = (t.get("name") or "").strip()
-                    artist = ((t.get("artist") or {}).get("name") or "").strip()
-                    q = f"{artist} {name}".strip()
-                    if len(q) > 4:
-                        out.append(q)
-    except Exception:
-        logger.debug("warmer: lastfm fetch failed", exc_info=True)
-    return out
 
 
 async def _candidates() -> list[str]:
@@ -151,15 +117,16 @@ async def _candidates() -> list[str]:
     except Exception:
         logger.debug("warmer: chart scan failed", exc_info=True)
 
-    # 2b) Last.fm charts (global + Russia geo) — a fresh external popular-track
-    # source beyond our own charts, so the warm pool keeps growing.
+    # 2b) External no-auth charts: Last.fm (global + all CIS geo) + Deezer global.
     try:
-        for q in await _lastfm_top_tracks():
+        from bot.handlers.charts import external_popular_tracks
+        for tr in await external_popular_tracks():
+            q = f"{(tr.get('artist') or '').strip()} {(tr.get('title') or '').strip()}".strip()
             if len(q) > 4 and q.lower() not in seen:
                 seen.add(q.lower())
                 out.append(q)
     except Exception:
-        logger.debug("warmer: lastfm scan failed", exc_info=True)
+        logger.debug("warmer: external chart scan failed", exc_info=True)
 
     # 2c) CIS per-country Apple charts (RU/BY/KZ/AM/AZ/KG/MD/TJ/UZ/UA/GE top-100) —
     # locally-popular tracks for our audience.

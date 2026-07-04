@@ -234,6 +234,77 @@ async def cis_chart_tracks(per_country: int = 100, force: bool = False) -> list[
     return out
 
 
+# External no-auth popular-track sources for warming: Last.fm geo charts across
+# all CIS countries + Deezer's global chart. Combined + deduped, Redis-cached.
+_EXT_CACHE_KEY = "chart:external_all"
+_LASTFM_GEO = [
+    "Russia", "Kazakhstan", "Belarus", "Ukraine", "Armenia", "Azerbaijan",
+    "Kyrgyzstan", "Moldova", "Uzbekistan", "Tajikistan", "Georgia",
+]
+
+
+async def external_popular_tracks(force: bool = False) -> list[dict]:
+    """Last.fm (global + all-CIS geo) + Deezer global chart, combined + deduped by
+    "artist - title". No auth beyond the Last.fm key. Returns [{artist,title,query}]."""
+    if not force:
+        try:
+            raw = await cache.redis.get(_EXT_CACHE_KEY)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+
+    seen: set[str] = set()
+    out: list[dict] = []
+
+    def _add(artist: str, title: str) -> None:
+        artist = (artist or "").strip()
+        title = (title or "").strip()
+        q = f"{artist} - {title}".strip(" -")
+        k = q.lower()
+        if len(q) > 4 and k not in seen:
+            seen.add(k)
+            out.append({"artist": artist, "title": title, "query": q})
+
+    from bot.config import settings as _cfg
+    key = getattr(_cfg, "LASTFM_API_KEY", "") or ""
+    try:
+        sess = get_session()
+        # Last.fm — global chart + top tracks per CIS country
+        if key:
+            urls = [f"http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&limit=200&api_key={key}&format=json"]
+            urls += [
+                f"http://ws.audioscrobbler.com/2.0/?method=geo.gettoptracks&country={c}&limit=100&api_key={key}&format=json"
+                for c in _LASTFM_GEO
+            ]
+            for url in urls:
+                try:
+                    async with sess.get(url, timeout=aiohttp.ClientTimeout(total=12)) as r:
+                        data = await r.json(content_type=None)
+                    for t in ((data or {}).get("tracks") or {}).get("track") or []:
+                        _add((t.get("artist") or {}).get("name"), t.get("name"))
+                except Exception:
+                    continue
+        # Deezer global chart (public, no auth)
+        try:
+            async with sess.get("https://api.deezer.com/chart/0/tracks?limit=100", timeout=aiohttp.ClientTimeout(total=12)) as r:
+                data = await r.json(content_type=None)
+            for t in (data or {}).get("data") or []:
+                _add((t.get("artist") or {}).get("name"), t.get("title"))
+        except Exception:
+            logger.debug("deezer chart failed", exc_info=True)
+    except Exception:
+        logger.debug("external_popular_tracks failed", exc_info=True)
+
+    if out:
+        try:
+            await cache.redis.setex(_EXT_CACHE_KEY, _CHART_TTL, json.dumps(out, ensure_ascii=False))
+        except Exception:
+            pass
+    logger.info("External charts: %d unique tracks (Last.fm all-CIS + Deezer)", len(out))
+    return out
+
+
 def _fetch_yt_playlist_sync(playlist_urls: list[str], max_tracks: int = 100, cyrillic_only: bool = False) -> list[dict]:
     """Try multiple YouTube playlists, return first that works. Individual songs only."""
     import yt_dlp

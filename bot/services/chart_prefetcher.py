@@ -199,6 +199,19 @@ async def prefetch_chart_tracks(
     except Exception as e:
         logger.warning("Prefetch: CIS chart fetch failed: %s", e)
 
+    # External no-auth charts (Last.fm all-CIS geo + Deezer global) — more hits.
+    try:
+        from bot.handlers.charts import external_popular_tracks
+        for track in await external_popular_tracks():
+            query = f"{(track.get('artist') or '').strip()} {(track.get('title') or '').strip()}".strip()
+            key = query.lower()
+            if len(query) < 3 or key in seen_q:
+                continue
+            seen_q.add(key)
+            items.append((query, ""))
+    except Exception as e:
+        logger.warning("Prefetch: external chart fetch failed: %s", e)
+
     if not items:
         logger.info("Prefetch: no tracks to warm")
         return stats
