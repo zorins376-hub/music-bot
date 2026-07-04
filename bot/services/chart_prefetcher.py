@@ -96,13 +96,24 @@ async def prefetch_chart_tracks(
     except Exception:
         pass
 
-    async def _upload_if_new(video_id: str, path: Path) -> None:
+    async def _upload_and_cleanup(video_id: str, path: Path, artist=None, title=None, duration=None) -> None:
+        """Upload to the CDN cache channel (AWAITED), then DELETE the local mp3.
+        The track lives on Telegram's CDN now (file_id): the bot delivers by file_id
+        and /api/stream restores it from the CDN on demand, so keeping it on disk
+        only fills the 38 GB shared volume. Metadata is passed so upload_to_cache
+        never skips on 'no title/artist' (Yandex mp3s often lack ID3 tags)."""
         try:
-            from bot.services.telegram_cache import get_file_id as _get_cache_fid, schedule_upload
-            if path.exists() and not await _get_cache_fid(video_id):
-                schedule_upload(path, video_id)
+            from bot.services.telegram_cache import get_file_id as _gf, upload_to_cache
+            if not path.exists():
+                return
+            if await _gf(video_id):
+                path.unlink(missing_ok=True)  # already on CDN → drop the local copy
+                return
+            fid = await upload_to_cache(path, video_id, title=title, artist=artist, duration=duration)
+            if fid:
+                path.unlink(missing_ok=True)
         except Exception:
-            logger.debug("schedule_upload failed for %s", video_id, exc_info=True)
+            logger.debug("upload/cleanup failed for %s", video_id, exc_info=True)
 
     async def _cdn_cached(video_id: str) -> bool:
         """True if this track already has a Telegram-CDN file_id (fully warm)."""
@@ -112,45 +123,45 @@ async def prefetch_chart_tracks(
         except Exception:
             return False
 
-    async def _dl_yandex(ym_id: int) -> bool:
-        """True=downloaded, False=already cached; raises on error."""
+    async def _dl_yandex(ym_id: int, artist=None, title=None, duration=None) -> bool:
+        """Download (if not local), push to CDN, delete local. True=processed."""
         vid = f"ym_{ym_id}"
-        # Already on the CDN → warm; skip so we don't re-download after cleanup.
-        if await _cdn_cached(vid):
-            return False
         mp3 = settings.DOWNLOAD_DIR / f"{vid}.mp3"
-        if mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE:
+        if await _cdn_cached(vid):
+            mp3.unlink(missing_ok=True)  # already on CDN → drop stale local copy
             return False
-        await asyncio.wait_for(download_yandex(ym_id, mp3, bitrate), timeout=120)
-        await _upload_if_new(vid, mp3)
+        if not (mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE):
+            await asyncio.wait_for(download_yandex(ym_id, mp3, bitrate), timeout=120)
+        await _upload_and_cleanup(vid, mp3, artist=artist, title=title, duration=duration)
         return True
 
-    async def _dl_youtube(video_id: str) -> bool:
-        """True=downloaded, False=already cached; raises on error (fallback only)."""
+    async def _dl_youtube(video_id: str, artist=None, title=None) -> bool:
+        """Download (if not local), push to CDN, delete local (fallback only)."""
+        mp3 = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
         if await _cdn_cached(video_id):
+            mp3.unlink(missing_ok=True)
             return False
         if video_id in _PERMANENT_FAILURES:
             if time.time() - _PERMANENT_FAILURES[video_id] < _FAILURE_TTL:
                 return False
             del _PERMANENT_FAILURES[video_id]
-        mp3 = settings.DOWNLOAD_DIR / f"{video_id}.mp3"
-        if mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE:
-            return False
-        try:
-            await download_manager.download(video_id, bitrate=bitrate)
-            await _upload_if_new(video_id, settings.DOWNLOAD_DIR / f"{video_id}.mp3")
-            return True
-        except Exception as e:
-            if any(p.lower() in str(e).lower() for p in _PERMANENT_ERROR_PATTERNS):
-                _PERMANENT_FAILURES[video_id] = time.time()
-                logger.info("Prefetch: permanently skipping %s (%s)", video_id, str(e)[:80])
-            raise
+        if not (mp3.exists() and mp3.stat().st_size > _MIN_CACHED_SIZE):
+            try:
+                await download_manager.download(video_id, bitrate=bitrate)
+            except Exception as e:
+                if any(p.lower() in str(e).lower() for p in _PERMANENT_ERROR_PATTERNS):
+                    _PERMANENT_FAILURES[video_id] = time.time()
+                    logger.info("Prefetch: permanently skipping %s (%s)", video_id, str(e)[:80])
+                raise
+        await _upload_and_cleanup(video_id, mp3, artist=artist, title=title)
+        return True
 
     async def warm_one(query: str, video_id: str):
         """True=downloaded, False=already cached, None=failed."""
         async with semaphore:
             # 1) Yandex first — a ym_ chart id resolves directly; otherwise search.
             ym_id: int | None = None
+            up_artist = up_title = up_dur = None
             if _is_yandex_id(video_id):
                 try:
                     ym_id = int(video_id[3:])
@@ -161,17 +172,23 @@ async def prefetch_chart_tracks(
                     r = await asyncio.wait_for(search_yandex(query, limit=1), timeout=10)
                     if r and r[0].get("ym_track_id"):
                         ym_id = int(r[0]["ym_track_id"])
+                        up_artist = r[0].get("artist") or r[0].get("uploader")
+                        up_title = r[0].get("title")
+                        up_dur = r[0].get("duration")
                 except Exception:
                     ym_id = None
+            # Fallback title so upload_to_cache never drops on "no metadata".
+            if not up_title and not up_artist and query:
+                up_title = query
             if ym_id is not None:
                 try:
-                    return await _dl_yandex(ym_id)
+                    return await _dl_yandex(ym_id, up_artist, up_title, up_dur)
                 except Exception as e:
                     logger.debug("Prefetch(ym) failed for %r: %s", query[:50], e)
             # 2) Fallback: YouTube (only when healthy and it's a real yt id).
             if video_id and _is_youtube_id(video_id) and not yt_disabled:
                 try:
-                    return await _dl_youtube(video_id)
+                    return await _dl_youtube(video_id, up_artist, up_title)
                 except Exception as e:
                     logger.debug("Prefetch(yt) failed for %s: %s", video_id, e)
             return None
