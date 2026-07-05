@@ -1106,6 +1106,16 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
         source_results = await asyncio.gather(*tasks)
         for batch in source_results:
             all_results.extend(batch)
+        # Groups skip YouTube/SoundCloud for speed — but niche tracks that live ONLY
+        # on YouTube (e.g. local Bishkek/Kyrgyz songs: "Асхат Норузбаев — На Иссык-Куле",
+        # "312 — Зона отдыха 312") then never surface and a wrong Yandex near-match wins.
+        # So when Yandex/Spotify gave NO confident hit, fetch YouTube too (only then —
+        # mainstream queries keep their Yandex-only speed).
+        if is_group and not _skip_engine and _budget_left() > 1 and not _direct_hit_present(all_results, provider_query):
+            try:
+                all_results.extend(await _search_source("youtube", _search_yt, max_results))
+            except Exception:
+                logger.debug("group youtube fallback failed", exc_info=True)
 
     for alias_q in ([] if _skip_engine else get_query_search_aliases(provider_query)):
         if _budget_left() <= 0:
