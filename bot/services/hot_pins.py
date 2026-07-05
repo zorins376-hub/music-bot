@@ -7,15 +7,16 @@ instantly and outranks the result cache. Two writers:
 
   1. Admins — ``/admin pin <query> => <artist - title>``  (source="manual")
   2. Auto-promoter — a learned "🔁 Не тот трек?" correction confirmed enough
-     times is promoted here automatically (source="auto").
+     times is promoted here automatically (source="auto", given a bounded TTL).
 
 Unlike search_memory (per-query learning gated by a confirmation threshold), a
 hot pin is an explicit, immediately-authoritative override — listable and
 removable by admins. Writing one busts any stale result cache for that query so
 it takes effect at once (no waiting for RCACHE_TTL).
 
-Storage: one Redis hash ``hotpins`` mapping ``field = normalized query`` ->
-JSON ``{track, q, added_by, source, ts, hits}``.
+Storage:
+  Redis hash ``hotpins``       field = normalized query -> JSON {track,q,added_by,source,ts,exp?}
+  Redis hash ``hotpins:hits``  field = normalized query -> integer hit counter (atomic HINCRBY)
 """
 from __future__ import annotations
 
@@ -27,15 +28,19 @@ import time
 logger = logging.getLogger(__name__)
 
 _HKEY = "hotpins"
+_HITS = "hotpins:hits"
 _TRACK_FIELDS = (
     "video_id", "source", "title", "uploader",
     "duration", "duration_fmt", "file_id", "ym_track_id",
 )
 # Learned corrections with at least this many confirmations get auto-promoted.
 # Higher than search_memory's auto-pick threshold (3) so a promoted pin is
-# well-established before it becomes a listable, near-permanent override.
+# well-established before it becomes a listable override.
 _PROMOTE_MIN_COUNT = 5
-_PROMOTER_INTERVAL = 1800  # 30 min
+_PROMOTER_INTERVAL = 1800          # 30 min
+_AUTO_TTL = 180 * 24 * 3600        # auto pins self-expire after 180d (manual = never)
+_LOOKUP_TIMEOUT = 1.0              # hot-path guard: never let a Redis stall wedge a search
+_PROMOTE_TIMEOUT = 30.0
 
 
 def _slim(track: dict) -> dict:
@@ -63,6 +68,10 @@ def _variants(query: str) -> list[str]:
         return [k] if k else []
 
 
+def _fld(field) -> str:
+    return field.decode() if isinstance(field, (bytes, bytearray)) else field
+
+
 async def set_hot_pin(query: str, track: dict, *, added_by: int = 0, source: str = "manual") -> bool:
     """Pin `track` as the instant answer for `query`. Busts stale cache. Returns ok."""
     key = _key(query)
@@ -75,8 +84,9 @@ async def set_hot_pin(query: str, track: dict, *, added_by: int = 0, source: str
         "added_by": int(added_by or 0),
         "source": source,
         "ts": int(time.time()),
-        "hits": 0,
     }
+    if source == "auto":
+        payload["exp"] = int(time.time()) + _AUTO_TTL
     try:
         await cache.redis.hset(_HKEY, key, json.dumps(payload, ensure_ascii=False))
         await cache.bust_result_cache(key)  # a stale wrong cache must not shadow the pin
@@ -86,12 +96,11 @@ async def set_hot_pin(query: str, track: dict, *, added_by: int = 0, source: str
         )
         return True
     except Exception:
-        logger.debug("hot_pins set failed", exc_info=True)
+        logger.warning("hot_pins set failed for %r", key, exc_info=True)
         return False
 
 
-async def get_hot_pin(query: str) -> dict | None:
-    """Return the pinned track dict for `query`, or None. Bumps a hit counter."""
+async def _lookup(query: str) -> dict | None:
     from bot.services.cache import cache
     for v in _variants(query):
         try:
@@ -104,15 +113,32 @@ async def get_hot_pin(query: str) -> dict | None:
             payload = json.loads(raw)
         except Exception:
             continue
+        exp = payload.get("exp")
+        if exp and time.time() > float(exp):
+            # Auto pin aged out — evict lazily and skip.
+            try:
+                await cache.redis.hdel(_HKEY, v)
+                await cache.redis.hdel(_HITS, v)
+            except Exception:
+                pass
+            continue
         track = payload.get("track")
         if track and track.get("video_id"):
-            try:  # best-effort hit counter
-                payload["hits"] = int(payload.get("hits", 0)) + 1
-                await cache.redis.hset(_HKEY, v, json.dumps(payload, ensure_ascii=False))
+            try:  # atomic, best-effort popularity counter
+                await cache.redis.hincrby(_HITS, v, 1)
             except Exception:
                 pass
             return dict(track)
     return None
+
+
+async def get_hot_pin(query: str) -> dict | None:
+    """Return the pinned track for `query`, or None. Bounded so a Redis stall
+    can never wedge the search hot path — on timeout/error we just skip pins."""
+    try:
+        return await asyncio.wait_for(_lookup(query), timeout=_LOOKUP_TIMEOUT)
+    except Exception:
+        return None
 
 
 async def remove_hot_pin(query: str) -> bool:
@@ -122,10 +148,14 @@ async def remove_hot_pin(query: str) -> bool:
     from bot.services.cache import cache
     try:
         removed = await cache.redis.hdel(_HKEY, key)
+        try:
+            await cache.redis.hdel(_HITS, key)
+        except Exception:
+            pass
         await cache.bust_result_cache(key)
         return bool(removed)
     except Exception:
-        logger.debug("hot_pins remove failed", exc_info=True)
+        logger.warning("hot_pins remove failed for %r", key, exc_info=True)
         return False
 
 
@@ -135,12 +165,21 @@ async def list_hot_pins() -> list[dict]:
         raw = await cache.redis.hgetall(_HKEY)
     except Exception:
         return []
+    try:
+        hits_raw = await cache.redis.hgetall(_HITS) or {}
+    except Exception:
+        hits_raw = {}
+    hits = {_fld(k): int(v) for k, v in hits_raw.items() if str(_fld(v)).lstrip("-").isdigit()}
+    now = time.time()
     out: list[dict] = []
     for field, val in (raw or {}).items():
         try:
             payload = json.loads(val)
-            q = field.decode() if isinstance(field, (bytes, bytearray)) else field
+            q = _fld(field)
             payload.setdefault("q", q)
+            if payload.get("exp") and now > float(payload["exp"]):
+                continue  # expired auto pin (lazy-cleaned on next lookup)
+            payload["hits"] = hits.get(q, 0)
             out.append(payload)
         except Exception:
             continue
@@ -148,7 +187,7 @@ async def list_hot_pins() -> list[dict]:
     return out
 
 
-async def promote_learned_pins(scan_limit: int = 2000) -> dict:
+async def promote_learned_pins(scan_limit: int = 5000) -> dict:
     """Promote well-confirmed learned corrections (search_memory) into hot pins."""
     from bot.services.cache import cache
     promoted = 0
@@ -170,8 +209,9 @@ async def promote_learned_pins(scan_limit: int = 2000) -> dict:
                     track = payload.get("track")
                     if not q or not track or not track.get("video_id"):
                         continue
-                    if await cache.redis.hexists(_HKEY, q):
-                        continue  # already pinned
+                    pin_key = _key(q)  # SAME normalization set_hot_pin writes under
+                    if not pin_key or await cache.redis.hexists(_HKEY, pin_key):
+                        continue  # already pinned (idempotent)
                     if await set_hot_pin(q, track, added_by=0, source="auto"):
                         promoted += 1
                 except Exception:
@@ -179,7 +219,7 @@ async def promote_learned_pins(scan_limit: int = 2000) -> dict:
             if cursor == 0 or seen >= scan_limit:
                 break
     except Exception:
-        logger.debug("promote_learned_pins failed", exc_info=True)
+        logger.warning("promote_learned_pins failed", exc_info=True)
     if promoted:
         logger.info("hot_pins: auto-promoted %d learned correction(s)", promoted)
     return {"promoted": promoted, "scanned": seen}
@@ -189,15 +229,15 @@ async def _promoter_loop(interval_sec: int = _PROMOTER_INTERVAL) -> None:
     await asyncio.sleep(120)  # let startup settle first
     while True:
         try:
-            await promote_learned_pins()
+            await asyncio.wait_for(promote_learned_pins(), timeout=_PROMOTE_TIMEOUT)
         except Exception:
-            logger.debug("hot_pins promoter loop error", exc_info=True)
+            logger.warning("hot_pins promoter loop error", exc_info=True)
         await asyncio.sleep(interval_sec)
 
 
 async def start_hot_pins_promoter() -> None:
     asyncio.create_task(_promoter_loop())
     logger.info(
-        "hot_pins: auto-promoter started (every %ds, min_count=%d)",
-        _PROMOTER_INTERVAL, _PROMOTE_MIN_COUNT,
+        "hot_pins: auto-promoter started (every %ds, min_count=%d, auto_ttl=%dd)",
+        _PROMOTER_INTERVAL, _PROMOTE_MIN_COUNT, _AUTO_TTL // 86400,
     )

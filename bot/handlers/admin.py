@@ -916,6 +916,10 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         if len(raw_query) < 2 or len(target_query) < 2:
             await message.answer("Запрос и целевой трек не должны быть пустыми.")
             return
+        from bot.services.search_curated import is_junk_search_query
+        if is_junk_search_query(raw_query):
+            await message.answer("Запрос выглядит мусорным (@бот / ссылка / слишком короткий) — не закрепляю.")
+            return
         from bot.services.search_engine import deduplicate_results, detect_script
         from bot.services.hot_pins import set_hot_pin
         from bot.services.search_memory import remember_correction
@@ -997,6 +1001,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     elif subcmd in ("misses", "промахи"):
         import json as _json
         from collections import Counter
+        from bot.services.search_curated import is_junk_search_query
         try:
             raw = await cache.redis.lrange("search:audit", 0, 4999)
         except Exception:
@@ -1012,7 +1017,7 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             if e.get("t") != "search":
                 continue
             q = (e.get("q") or "").strip()
-            if not q:
+            if not q or is_junk_search_query(q):
                 continue
             k = q.lower()
             examples.setdefault(k, q)
