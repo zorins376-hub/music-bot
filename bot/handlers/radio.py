@@ -157,6 +157,12 @@ async def handle_live_play(callback: CallbackQuery, callback_data: LiveCb) -> No
             await asyncio.sleep(0.3)
         except Exception as e:
             logger.warning("Live play skip %s: %s", tr.source_id, e)
+            try:
+                from bot.services.file_id_heal import is_dead_file_id_error, drop_dead_file_id
+                if is_dead_file_id_error(e):
+                    await drop_dead_file_id(tr.source_id, None)
+            except Exception:
+                pass
 
 
 # ── Auto-capture channel posts ──────────────────────────────────────────

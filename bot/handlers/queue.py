@@ -30,6 +30,52 @@ def _queue_key(user_id: int) -> str:
     return f"queue:{user_id}"
 
 
+async def _deliver_queue_audio(msg, track: dict) -> bool:
+    """Deliver a queued track: cached file_id (self-healing) or a fresh download,
+    so a dead/expired file_id never silently loses the track. True if delivered."""
+    from bot.services.file_id_heal import send_or_heal
+    vid = track.get("video_id") or track.get("source_id") or ""
+    dur = int(track["duration"]) if track.get("duration") else 0
+    file_id = track.get("file_id")
+    if file_id:
+        sent = await send_or_heal(lambda: msg.answer_audio(
+            audio=file_id, duration=dur, **_audio_tag_kwargs(track),
+        ), vid, None)
+        if sent is not None:
+            return True
+    # No usable cached file_id (missing or purged as dead) → re-download so the
+    # queued track still plays and a fresh valid file_id gets cached.
+    if not vid:
+        return False
+    try:
+        import uuid as _uuid
+        from aiogram.types import FSInputFile
+        from aiogram.enums import ChatAction
+        from bot.services.downloader import download_track, cleanup_file
+        from bot.config import settings as _cfg
+        try:
+            await msg.bot.send_chat_action(msg.chat.id, ChatAction.UPLOAD_DOCUMENT)
+        except Exception:
+            pass
+        # Source-aware download (mirror _group_auto_play): yandex needs download_yandex.
+        if track.get("source") == "yandex" and track.get("ym_track_id"):
+            from bot.services.yandex_provider import download_yandex
+            mp3 = _cfg.DOWNLOAD_DIR / f"{vid}_{_uuid.uuid4().hex[:8]}.mp3"
+            await download_yandex(track["ym_track_id"], mp3, 192)
+        else:
+            mp3 = await download_track(vid, bitrate=192, dl_id=_uuid.uuid4().hex[:8])
+        sent = await msg.answer_audio(audio=FSInputFile(str(mp3)), duration=dur, **_audio_tag_kwargs(track))
+        try:
+            await cache.set_file_id(vid, sent.audio.file_id, 192)
+        except Exception:
+            pass
+        cleanup_file(mp3)
+        return True
+    except Exception as e:
+        logger.warning("queue: download fallback failed for %s: %s", vid, e)
+        return False
+
+
 async def _get_queue(user_id: int) -> list[dict]:
     try:
         data = await cache.redis.get(_queue_key(user_id))
@@ -123,19 +169,9 @@ async def cmd_next(message: Message) -> None:
     track = items.pop(0)
     await _set_queue(user.id, items)
 
-    # Send cached audio if file_id available
-    file_id = track.get("file_id")
-    if file_id:
-        title = track.get("title", "Unknown")
-        artist = track.get("uploader", "Unknown")
-        dur = int(track["duration"]) if track.get("duration") else 0
-        await message.answer_audio(
-            audio=file_id,
-            duration=dur,
-            **_audio_tag_kwargs(track),
-        )
-    else:
-        # No cached file — tell user to search
+    # Deliver (cached file_id with self-heal, else fresh download)
+    if not await _deliver_queue_audio(message, track):
+        # Could not play (no source to re-download) — offer search
         title = f"{track.get('uploader', '?')} — {track.get('title', '?')}"
         await message.answer(f"⏭ {title}\n\n🔍", reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[
@@ -162,14 +198,7 @@ async def handle_queue_cb(callback: CallbackQuery, callback_data: QueueCb) -> No
         await _set_queue(user.id, items)
         await callback.answer()
 
-        file_id = track.get("file_id")
-        if file_id:
-            await callback.message.answer_audio(
-                audio=file_id,
-                duration=int(track["duration"]) if track.get("duration") else 0,
-                **_audio_tag_kwargs(track),
-            )
-        else:
+        if not await _deliver_queue_audio(callback.message, track):
             title = f"{track.get('uploader', '?')} — {track.get('title', '?')}"
             await callback.message.answer(f"⏭ {title}")
         # Refresh queue view

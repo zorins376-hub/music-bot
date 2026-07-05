@@ -25,6 +25,7 @@ from bot.db import get_or_create_user, get_popular_titles, get_random_popular_tr
 from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, search_tracks, is_youtube_url, extract_youtube_video_id, resolve_youtube_url
+from bot.services.file_id_heal import send_or_heal
 from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, search_spotify
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
@@ -1857,14 +1858,16 @@ async def _send_album_track(message: Message, user, track_info: dict) -> bool:
             file_id = None
     if file_id:
         await _ensure_caption_duration(track_info)
-        await message.answer_audio(
+        _sent = await send_or_heal(lambda: message.answer_audio(
             audio=file_id,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
             **_audio_tag_kwargs(track_info),
-        )
-        await _post_download(user.id, track_info, file_id, bitrate)
-        return True
+        ), video_id, bitrate)
+        if _sent is not None:
+            await _post_download(user.id, track_info, file_id, bitrate)
+            return True
+        file_id = None  # dead file_id purged → fall through to download
 
     if not track_info.get("ym_track_id"):
         return False
@@ -1943,23 +1946,25 @@ async def _group_auto_play(
     if local_fid:
         await _ensure_caption_duration(track_info)
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-        sent = await message.answer_audio(
+        sent = await send_or_heal(lambda: message.answer_audio(
             audio=local_fid,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
             reply_markup=_wt_kb,
             **_audio_tag_kwargs(track_info),
-        )
-        tid = await _post_download(user.id, track_info, local_fid, bitrate)
-        if tid:  # add the lyrics button once the track DB id is known
-            try:
-                await sent.edit_reply_markup(
-                    reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang)
-                )
-            except Exception:
-                pass
-        await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
-        return
+        ), video_id, bitrate)
+        if sent is not None:
+            tid = await _post_download(user.id, track_info, local_fid, bitrate)
+            if tid:  # add the lyrics button once the track DB id is known
+                try:
+                    await sent.edit_reply_markup(
+                        reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang)
+                    )
+                except Exception:
+                    pass
+            await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
+            return
+        # local file_id was dead → purged; fall through to cache/download below
 
     # Redis cache, then Postgres (durable file_id) before falling back to download.
     file_id = await cache.get_file_id(video_id, bitrate)
@@ -1972,23 +1977,25 @@ async def _group_auto_play(
     if file_id:
         await _ensure_caption_duration(track_info)
         caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-        sent = await message.answer_audio(
+        sent = await send_or_heal(lambda: message.answer_audio(
             audio=file_id,
             duration=int(track_info["duration"]) if track_info.get("duration") else None,
             caption=caption,
             reply_markup=_wt_kb,
             **_audio_tag_kwargs(track_info),
-        )
-        tid = await _post_download(user.id, track_info, file_id, bitrate)
-        if tid:
-            try:
-                await sent.edit_reply_markup(
-                    reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang)
-                )
-            except Exception:
-                pass
-        await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
-        return
+        ), video_id, bitrate)
+        if sent is not None:
+            tid = await _post_download(user.id, track_info, file_id, bitrate)
+            if tid:
+                try:
+                    await sent.edit_reply_markup(
+                        reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang)
+                    )
+                except Exception:
+                    pass
+            await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
+            return
+        # cached file_id was dead → purged; fall through to download below
 
     # Download (safe edit — status might already show "downloading" from a previous attempt)
     try:
@@ -2587,48 +2594,52 @@ async def handle_track_select(
         local_fid = track_info.get("file_id")
         if local_fid:
             caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-            await callback.message.answer_audio(
+            _sent = await send_or_heal(lambda: callback.message.answer_audio(
                 audio=local_fid,
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=caption,
                 message_effect_id=_EFFECT_FIRE if not is_group else None,
                 **_audio_tag_kwargs(track_info),
-            )
-            tid = await _post_download(user.id, track_info, local_fid, bitrate)
-            if is_group:
-                await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
-            else:
-                _bot_me = await callback.bot.me()
-                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
-                await callback.message.answer(
-                    t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
-                )
-            return
+            ), video_id, bitrate)
+            if _sent is not None:
+                tid = await _post_download(user.id, track_info, local_fid, bitrate)
+                if is_group:
+                    await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+                else:
+                    _bot_me = await callback.bot.me()
+                    _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
+                    await callback.message.answer(
+                        t(lang, "rate_track"),
+                        reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
+                    )
+                return
+            # local file_id dead → purged; fall through to cache/download
 
         # Проверяем Redis кэш
         file_id = await cache.get_file_id(video_id, bitrate)
         if file_id:
             cache_hits.inc()
             caption = _track_caption(lang, track_info, bitrate, ad_free=_af)
-            await callback.message.answer_audio(
+            _sent = await send_or_heal(lambda: callback.message.answer_audio(
                 audio=file_id,
                 duration=int(track_info["duration"]) if track_info.get("duration") else None,
                 caption=caption,
                 message_effect_id=_EFFECT_FIRE if not is_group else None,
                 **_audio_tag_kwargs(track_info),
-            )
-            tid = await _post_download(user.id, track_info, file_id, bitrate)
-            if is_group:
-                await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
-            else:
-                _bot_me = await callback.bot.me()
-                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
-                await callback.message.answer(
-                    t(lang, "rate_track"),
-                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
-                )
-            return
+            ), video_id, bitrate)
+            if _sent is not None:
+                tid = await _post_download(user.id, track_info, file_id, bitrate)
+                if is_group:
+                    await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+                else:
+                    _bot_me = await callback.bot.me()
+                    _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
+                    await callback.message.answer(
+                        t(lang, "rate_track"),
+                        reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
+                    )
+                return
+            # cached file_id dead → purged; fall through to download
 
         status = await callback.message.answer(t(lang, "downloading"))
         await callback.message.bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
@@ -3085,12 +3096,14 @@ async def handle_share_track(callback: CallbackQuery, callback_data: ShareTrackC
     # act == "dl"
     if track.file_id:
         await callback.answer()
-        await callback.message.answer_audio(
+        _sent = await send_or_heal(lambda: callback.message.answer_audio(
             audio=track.file_id,
             duration=int(track.duration) if track.duration else None,
             caption=t(lang, "shared_track_caption"),
             **_audio_tag_kwargs({"uploader": track.artist, "title": track.title}),
-        )
+        ), track.source_id, None)
+        if _sent is None:  # dead file_id purged — nothing to re-download inline here
+            await callback.message.answer(t(lang, "share_track_no_file"))
     else:
         await callback.answer()
         await callback.message.answer(t(lang, "share_track_no_file"))

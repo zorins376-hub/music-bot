@@ -348,31 +348,34 @@ async def _send_playlist_track_audio(message: Message, user, track: Track) -> bo
     """
     # 1) Direct DB file_id
     if track.file_id:
-        await message.answer_audio(
+        from bot.services.file_id_heal import send_or_heal
+        _sent = await send_or_heal(lambda: message.answer_audio(
             audio=track.file_id,
             duration=track.duration,
             **audio_tag_kwargs(track.artist or "", track.title or ""),
-        )
-        return True
+        ), track.source_id, None)
+        if _sent is not None:
+            return True
+        # dead file_id purged → fall through to cache/download below
 
     # 2) Try file_id cache by common bitrates, then DB fallback
+    from bot.services.file_id_heal import send_or_heal
     for br in (192, 320, 128):
         fid = await cache.get_file_id(track.source_id, br)
         if fid:
-            try:
-                await message.answer_audio(
-                    audio=fid,
-                    duration=track.duration,
-                    **audio_tag_kwargs(track.artist or "", track.title or ""),
-                )
+            _sent = await send_or_heal(lambda fid=fid: message.answer_audio(
+                audio=fid,
+                duration=track.duration,
+                **audio_tag_kwargs(track.artist or "", track.title or ""),
+            ), track.source_id, br)
+            if _sent is not None:
                 async with async_session() as session:
                     await session.execute(
                         update(Track).where(Track.id == track.id).values(file_id=fid)
                     )
                     await session.commit()
                 return True
-            except Exception:
-                continue
+            # dead file_id purged → try next bitrate / download
     # DB fallback (Redis might have expired)
     if not track.file_id:
         try:
