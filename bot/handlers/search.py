@@ -1187,14 +1187,14 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
         elif script == "latin":
             alt_query = transliterate_lat_to_cyr(provider_query)
         if alt_query and alt_query != provider_query:
+            # Weak pool (<3 hits) → try the transliterated query on BOTH Yandex and
+            # YouTube, in groups too. Niche tracks with Latin-script or fan-uploaded
+            # titles (Kyrgyz/Uzbek/underground) often live only on YouTube; this fires
+            # rarely (only when the pool is already thin) so group latency is unaffected.
             alt_tasks = [
                 _search_source("yandex", lambda q, limit=5: search_yandex(alt_query, limit=limit), max_results),
+                _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
             ]
-            if not is_group:
-                alt_tasks.insert(
-                    0,
-                    _search_source("youtube", lambda q, limit=5: search_tracks(alt_query, max_results=limit, source="youtube"), max_results),
-                )
             alt_results = await asyncio.gather(*alt_tasks)
             for batch in alt_results:
                 all_results.extend(batch)
@@ -1209,13 +1209,13 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
             corrected = None
         if corrected and normalize_query(corrected) != normalize_query(provider_query):
             logger.info("search: spell-corrected %r -> %r", provider_query, corrected)
+            # Same as transliteration: a typo'd niche query (e.g. "асхат норозбаев")
+            # only reaches the right track once corrected AND searched on YouTube.
+            # Fires only on a thin pool (<3), so mainstream latency is untouched.
             spell_tasks = [
                 _search_source("yandex", lambda q, limit=5: search_yandex(corrected, limit=limit), max_results),
+                _search_source("youtube", lambda q, limit=5: search_tracks(corrected, max_results=limit, source="youtube"), max_results),
             ]
-            if not is_group:
-                spell_tasks.append(
-                    _search_source("youtube", lambda q, limit=5: search_tracks(corrected, max_results=limit, source="youtube"), max_results),
-                )
             spell_results = await asyncio.gather(*spell_tasks)
             for batch in spell_results:
                 all_results.extend(batch)
@@ -1266,7 +1266,10 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
                             search_vk_fn=search_vk,
                             search_spotify_fn=search_spotify,
                             search_yt_fn=_search_yt,
-                            include_youtube=not is_group,
+                            # Groups too: this block only runs when there is NO direct
+                            # hit (guarded above), so the parsed "artist title" is worth
+                            # a YouTube pass to catch niche/regional tracks Yandex lacks.
+                            include_youtube=True,
                         ),
                         timeout=max(2, min(10, _budget_left())),
                     )
