@@ -1015,28 +1015,29 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
     _norm_q = normalize_query(provider_query)
     _tier0: list[dict] | None = None
     try:
-        # Curated pins are explicit human curation — they outrank a cached result,
-        # so a newly added pin takes effect immediately instead of being shadowed
-        # by a stale rcache entry for up to RCACHE_TTL. Free (in-process dict).
+        # Curated pins AND learned "🔁 Не тот трек?" corrections are both explicit
+        # human curation — they must outrank a cached result so a pin/correction
+        # takes effect immediately instead of being shadowed by a stale (wrong)
+        # rcache entry for up to RCACHE_TTL. So check BOTH before the result cache.
         from bot.services.search_curated import curated_track_for_query
         from bot.services.search_memory import get_learned_track as _get_learned
         _pin0 = curated_track_for_query(query) or curated_track_for_query(provider_query)
         if _pin0 and _pin0.get("video_id"):
             _tier0 = [_pin0]
         if _tier0 is None:
+            _lp = await _get_learned(provider_query)
+            if _lp and _lp.get("video_id"):
+                _tier0 = [_lp]
+        if _tier0 is None:
             _rc = await cache.get_result_cache(_norm_q)
             if _rc:
                 _tier0 = _rc
-        if _tier0 is None:
-            _pin0 = await _get_learned(provider_query)
-            if _pin0 and _pin0.get("video_id"):
-                _tier0 = [_pin0]
-            elif local_results and local_results[0].get("file_id"):
-                _qtok = set(_norm_q.split())
-                _lt0 = local_results[0]
-                _ltok = set(normalize_query(f"{_lt0.get('uploader','')} {_lt0.get('title','')}").split())
-                if _qtok and all(w in _ltok for w in _qtok):
-                    _tier0 = local_results
+        if _tier0 is None and local_results and local_results[0].get("file_id"):
+            _qtok = set(_norm_q.split())
+            _lt0 = local_results[0]
+            _ltok = set(normalize_query(f"{_lt0.get('uploader','')} {_lt0.get('title','')}").split())
+            if _qtok and all(w in _ltok for w in _qtok):
+                _tier0 = local_results
     except Exception:
         logger.debug("tier0 check failed", exc_info=True)
     _skip_engine = _tier0 is not None
