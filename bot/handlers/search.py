@@ -1024,6 +1024,15 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
         _pin0 = curated_track_for_query(query) or curated_track_for_query(provider_query)
         if _pin0 and _pin0.get("video_id"):
             _tier0 = [_pin0]
+        # Dynamic (Redis) hot pins — admin /pin + auto-promoted corrections. Same
+        # authority tier as static curated pins, editable with no deploy.
+        if _tier0 is None:
+            from bot.services.hot_pins import get_hot_pin as _get_hot_pin
+            _hp = await _get_hot_pin(provider_query)
+            if not (_hp and _hp.get("video_id")) and query != provider_query:
+                _hp = await _get_hot_pin(query)
+            if _hp and _hp.get("video_id"):
+                _tier0 = [_hp]
         if _tier0 is None:
             _lp = await _get_learned(provider_query)
             if _lp and _lp.get("video_id"):

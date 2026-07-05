@@ -67,6 +67,11 @@ def _is_admin(user_id: int) -> bool:
     return user_id in settings.ADMIN_IDS
 
 
+def _esc(s: object) -> str:
+    """Minimal HTML escape so a query with < & > can't break parse_mode=HTML."""
+    return (str(s) if s is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 async def _resolve_user(identifier: str):
     """Resolve user by ID or @username. Returns (User, error_text)."""
     identifier = identifier.strip().lstrip("@")
@@ -893,6 +898,145 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             parse_mode="HTML",
         )
 
+    # /admin pin <query> => <artist - title>  — dynamic Redis pin, no deploy
+    elif subcmd == "pin":
+        if len(args) < 3 or "=>" not in args[2]:
+            await message.answer(
+                "Использование:\n"
+                "<code>/admin pin запрос => исполнитель - трек</code>\n\n"
+                "Пример:\n"
+                "<code>/admin pin зона отдыха 312 => 312 - Зона отдыха 312</code>\n\n"
+                "Действует сразу, без деплоя. Список: <code>/admin pins</code>",
+                parse_mode="HTML",
+            )
+            return
+        raw_query, _, target_query = args[2].partition("=>")
+        raw_query = raw_query.strip()
+        target_query = target_query.strip()
+        if len(raw_query) < 2 or len(target_query) < 2:
+            await message.answer("Запрос и целевой трек не должны быть пустыми.")
+            return
+        from bot.services.search_engine import deduplicate_results, detect_script
+        from bot.services.hot_pins import set_hot_pin
+        from bot.services.search_memory import remember_correction
+        from bot.services.yandex_provider import search_yandex
+        from bot.services.vk_provider import search_vk
+        from bot.services.spotify_provider import search_spotify
+        from bot.services.downloader import search_tracks
+
+        batches = await asyncio.gather(
+            search_yandex(target_query, limit=5),
+            search_vk(target_query, limit=5),
+            search_spotify(target_query, limit=5),
+            search_tracks(target_query, max_results=5, source="youtube"),
+            return_exceptions=True,
+        )
+        found: list[dict] = []
+        for batch in batches:
+            if isinstance(batch, Exception):
+                logger.debug("admin pin provider failed: %s", batch)
+                continue
+            found.extend(batch or [])
+        found = deduplicate_results(found, lang_hint=detect_script(target_query), query=target_query)
+        if not found:
+            await message.answer("Не нашёл целевой трек. Попробуй точнее: исполнитель - название.")
+            return
+        chosen = found[0]
+        ok = await set_hot_pin(raw_query, chosen, added_by=message.from_user.id, source="manual")
+        # Also strengthen the learned memory so it survives even a registry wipe.
+        await remember_correction(raw_query, chosen, weight=5)
+        await log_admin_action(
+            message.from_user.id, "pin",
+            details=f"{raw_query} => {chosen.get('uploader', '')} - {chosen.get('title', '')}",
+        )
+        await message.answer(
+            ("✅ Закреплён динамический пин (действует сразу):\n" if ok
+             else "⚠️ Пин не сохранён (см. логи), но исправление запомнено:\n")
+            + f"<code>{_esc(raw_query)}</code>\n→ "
+            f"<b>{_esc(chosen.get('uploader', ''))} — {_esc(chosen.get('title', ''))}</b>\n"
+            f"Источник: <code>{_esc(chosen.get('source', '?'))}</code>",
+            parse_mode="HTML",
+        )
+
+    # /admin pins — list dynamic pins
+    elif subcmd == "pins":
+        from bot.services.hot_pins import list_hot_pins
+        pins = await list_hot_pins()
+        if not pins:
+            await message.answer(
+                "Динамических пинов нет.\nДобавить: <code>/admin pin запрос => артист - трек</code>",
+                parse_mode="HTML",
+            )
+            return
+        lines = [f"📌 <b>Динамические пины ({len(pins)})</b>  👤 вручную · 🤖 авто\n"]
+        for p in pins[:40]:
+            tr = p.get("track", {})
+            mark = "🤖" if p.get("source") == "auto" else "👤"
+            lines.append(
+                f"{mark} <code>{_esc(p.get('q', ''))}</code> → "
+                f"{_esc(tr.get('uploader', ''))} — {_esc(tr.get('title', ''))} "
+                f"· {p.get('hits', 0)}👁"
+            )
+        if len(pins) > 40:
+            lines.append(f"\n…и ещё {len(pins) - 40}")
+        lines.append("\nУдалить: <code>/admin unpin запрос</code>")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    # /admin unpin <query> — remove a dynamic pin
+    elif subcmd == "unpin":
+        if len(args) < 3 or len(args[2].strip()) < 2:
+            await message.answer("Использование: <code>/admin unpin запрос</code>", parse_mode="HTML")
+            return
+        from bot.services.hot_pins import remove_hot_pin
+        ok = await remove_hot_pin(args[2].strip())
+        if ok:
+            await log_admin_action(message.from_user.id, "unpin", details=args[2].strip()[:200])
+        await message.answer("🗑 Пин удалён." if ok else "Пин для этого запроса не найден.")
+
+    # /admin misses — zero-result & weak searches (triage panel)
+    elif subcmd in ("misses", "промахи"):
+        import json as _json
+        from collections import Counter
+        try:
+            raw = await cache.redis.lrange("search:audit", 0, 4999)
+        except Exception:
+            raw = []
+        hard: Counter = Counter()
+        soft: Counter = Counter()
+        examples: dict[str, str] = {}
+        for item in raw or []:
+            try:
+                e = _json.loads(item)
+            except Exception:
+                continue
+            if e.get("t") != "search":
+                continue
+            q = (e.get("q") or "").strip()
+            if not q:
+                continue
+            k = q.lower()
+            examples.setdefault(k, q)
+            if int(e.get("n", 0) or 0) == 0:
+                hard[k] += 1
+            elif float(e.get("top1_sc", 0) or 0) < 0.5:
+                # Heuristic only: a low score often still finds the right track
+                # (translit/typo matches score low), so this is a soft signal.
+                soft[k] += 1
+        if not hard and not soft:
+            await message.answer("Промахов не нашёл в последних 5000 поисках. 👍")
+            return
+        lines = ["🔎 <b>Панель промахов</b> (по последним 5000 поискам)\n"]
+        if hard:
+            lines.append("<b>❌ 0 результатов:</b>")
+            for k, c in hard.most_common(15):
+                lines.append(f"  ×{c} <code>{_esc(examples[k])}</code>")
+        if soft:
+            lines.append("\n<b>⚠️ Слабый результат (возможно не то):</b>")
+            for k, c in soft.most_common(15):
+                lines.append(f"  ×{c} <code>{_esc(examples[k])}</code>")
+        lines.append("\nЗакрепить верный: <code>/admin pin запрос => артист - трек</code>")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
     # /admin promo create <code> <type> <uses> | /admin promo list
     elif subcmd == "promo":
         promo_args = message.text.split(maxsplit=3) if len(args) >= 3 else []
@@ -1061,6 +1205,11 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
             "/admin tracks &lt;tequila|fullmoon&gt; — управление треками\n"
             "/admin load &lt;@channel&gt; &lt;tequila|fullmoon&gt; — загрузить из канала\n"
             "/admin audit — журнал действий\n"
+            "/admin misses — панель промахов (0/слабых результатов)\n"
+            "/admin pin запрос =&gt; артист - трек — закрепить (без деплоя)\n"
+            "/admin pins — список динамических пинов\n"
+            "/admin unpin запрос — удалить пин\n"
+            "/admin searchfix запрос =&gt; артист - трек — запомнить исправление\n"
             "/admin export — экспорт статистики CSV\n"
             "/admin block &lt;source_id&gt; [причина] — заблокировать трек (DMCA)\n"
             "/admin unblock &lt;source_id&gt; — разблокировать трек\n"

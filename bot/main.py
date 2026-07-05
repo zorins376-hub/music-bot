@@ -162,6 +162,11 @@ async def on_startup(bot: Bot) -> None:
     from bot.services.cache_warmer import start_cache_warmer
     await start_cache_warmer()
 
+    # Dynamic hot-pin auto-promoter — learned "🔁 Не тот трек?" corrections that
+    # were confirmed enough times become listable, deploy-free pins.
+    from bot.services.hot_pins import start_hot_pins_promoter
+    await start_hot_pins_promoter()
+
     # Weekly recap scheduler (Monday 10:00 UTC)
     from bot.services.weekly_recap import start_weekly_recap_scheduler
     await start_weekly_recap_scheduler(bot)
