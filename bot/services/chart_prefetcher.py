@@ -246,8 +246,11 @@ async def prefetch_chart_tracks(
     # + download via Yandex so the collected music becomes cached audio.
     try:
         from bot.services.cache import cache
-        seed = await cache.redis.smembers("catalog:seed")
-        for q in list(seed or [])[:1500]:
+        # Random sample each run so a large/growing catalog:seed gets fully
+        # covered over time (a fixed slice keeps re-processing the same head);
+        # tracks already on the CDN skip fast, so overlap is cheap.
+        seed = await cache.redis.srandmember("catalog:seed", 1800)
+        for q in (seed or []):
             q = (q if isinstance(q, str) else q.decode()).strip()
             key = q.lower()
             if len(q) < 3 or key in seen_q:
