@@ -1063,6 +1063,15 @@ async def catalog_seed(request: Request, x_seed_token: str | None = Header(None)
     if queries:
         from bot.services.cache import cache
         added = await cache.redis.sadd("catalog:seed", *queries)
+        # Nothing drains catalog:seed (the warmer/prefetcher only READ it), so cap
+        # the set — volatile-lru cannot evict a TTL-less set, so an unbounded seed
+        # would eventually wedge Redis at maxmemory. Random-evict the overflow.
+        try:
+            _over = int(await cache.redis.scard("catalog:seed")) - 40000
+            if _over > 0:
+                await cache.redis.spop("catalog:seed", _over)
+        except Exception:
+            pass
     logger.info("catalog seed: received=%d queued=%d new=%d", len(tracks), len(queries), added)
     return {"received": len(tracks), "queued": len(queries), "new": added}
 

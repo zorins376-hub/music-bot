@@ -175,31 +175,38 @@ async def _next_token() -> str | None:
 
 # ── Client cache (one per token to avoid repeated init) ──────────────────
 _clients: dict[str, object] = {}
+_client_locks: dict[str, asyncio.Lock] = {}
 
 
 async def _get_client(token: str):
     if token in _clients:
         return _clients[token]
-    try:
-        from yandex_music import ClientAsync
+    # Per-token lock so concurrent searches don't each run the expensive 12s init
+    # for the same token (double-check inside the lock).
+    lock = _client_locks.setdefault(token, asyncio.Lock())
+    async with lock:
+        if token in _clients:
+            return _clients[token]
+        try:
+            from yandex_music import ClientAsync
 
-        # Pass proxy from pool if available
-        proxy = _get_proxy_url()
-        kwargs: dict = {}
-        if proxy:
-            kwargs["proxy_url"] = proxy
-        client = await asyncio.wait_for(
-            ClientAsync(token, **kwargs).init(),
-            timeout=12,
-        )
-        _clients[token] = client
-        return client
-    except asyncio.TimeoutError:
-        logger.warning("Yandex client init timed out")
-        return None
-    except Exception as e:
-        logger.error("Yandex client init failed: %s", e)
-        return None
+            # Pass proxy from pool if available
+            proxy = _get_proxy_url()
+            kwargs: dict = {}
+            if proxy:
+                kwargs["proxy_url"] = proxy
+            client = await asyncio.wait_for(
+                ClientAsync(token, **kwargs).init(),
+                timeout=12,
+            )
+            _clients[token] = client
+            return client
+        except asyncio.TimeoutError:
+            logger.warning("Yandex client init timed out")
+            return None
+        except Exception as e:
+            logger.error("Yandex client init failed: %s", e)
+            return None
 
 
 def _get_proxy_url() -> str | None:

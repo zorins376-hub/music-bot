@@ -81,6 +81,49 @@ def _maybe_notify_youtube_auth_error(error: Exception, *, context: str) -> None:
         asyncio.run_coroutine_threadsafe(coro, loop)
 
 
+_PROXY_DOWN_PATTERNS = (
+    "unable to connect to proxy", "cannot connect to proxy",
+    "connection to proxy", "failed to connect to proxy", "proxyconnectionerror",
+)
+_last_proxy_alert_at = 0.0
+
+
+def _maybe_notify_proxy_error(error: Exception, *, context: str) -> None:
+    """Throttled admin alert when the YouTube (WARP) proxy looks down. Otherwise a
+    dead proxy silently breaks every YouTube download (the niche-track fallback)."""
+    global _last_proxy_alert_at
+    msg = str(error).lower()
+    if not any(p in msg for p in _PROXY_DOWN_PATTERNS):
+        return
+    now = time.monotonic()
+    if now - _last_proxy_alert_at < 1800:  # 30-min throttle
+        return
+    _last_proxy_alert_at = now
+    loop = _alert_loop
+    if loop is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.error("YouTube proxy appears DOWN (%s): %s", context, error)
+            return
+
+    async def _send() -> None:
+        try:
+            from bot.services.youtube_cookies import _admin_alert
+            await _admin_alert(
+                f"⚠️ YouTube proxy (WARP) may be DOWN — downloads failing ({context}). "
+                "Check warp-docker-relay / socat on the host."
+            )
+        except Exception:
+            logger.error("YouTube proxy DOWN (%s): %s", context, error)
+
+    try:
+        running = asyncio.get_running_loop()
+        running.create_task(_send())
+    except RuntimeError:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+
+
 def _mark_permanent_failure(video_id: str) -> None:
     _PERMANENT_FAILURES[video_id] = time.monotonic() + _PERM_FAIL_TTL
 
@@ -590,6 +633,7 @@ def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=No
     except Exception as e:
         _check_permanent_failure(video_id, e)
         _maybe_notify_youtube_auth_error(e, context=f"download {video_id}")
+        _maybe_notify_proxy_error(e, context=f"download {video_id}")
         if _is_expected_restriction_error(e):
             logger.warning("Download unavailable for %s: %s", video_id, e)
         else:
