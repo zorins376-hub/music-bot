@@ -27,6 +27,7 @@ from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, search_tracks, is_youtube_url, extract_youtube_video_id, resolve_youtube_url
 from bot.services.file_id_heal import send_or_heal
 from bot.services.telegram_cache import deliver_from_channel
+from bot.services.deezer_provider import search_deezer
 from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, search_spotify
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
@@ -1107,6 +1108,7 @@ async def _do_search(message: Message, query: str, auto_deliver: bool = False, a
     else:
         tasks = [
             _search_source("yandex", search_yandex, max_results),
+            _search_source("deezer", search_deezer, max_results),
             _search_source("spotify", search_spotify, max_results),
             _search_source("vk", search_vk, max_results),
         ]
@@ -1722,6 +1724,26 @@ async def _download_spotify_track(track_info: dict, bitrate: int) -> Path:
     raise RuntimeError(f"No downloadable source found for Spotify track: {query}")
 
 
+async def _download_deezer_track(track_info: dict, bitrate: int) -> Path:
+    """Download a Deezer track directly (ARL cookie + Blowfish) when DEEZER_ARL is
+    set; otherwise resolve via Yandex/YouTube from the artist+title (same as Spotify,
+    since Deezer results always carry a yt_query)."""
+    dz_id = track_info.get("dz_track_id")
+    arl = (getattr(settings, "DEEZER_ARL", "") or "").strip()
+    if dz_id and arl:
+        try:
+            from bot.services.deezer_provider import download_deezer
+            dest = settings.DOWNLOAD_DIR / f"{track_info['video_id']}_{uuid.uuid4().hex[:8]}.mp3"
+            quality = "MP3_320" if bitrate >= 320 else "MP3_128"
+            path = await download_deezer(int(dz_id), dest, quality)
+            if path:
+                return path
+            logger.info("Deezer direct download empty for %s — falling back to Yandex/YouTube", dz_id)
+        except Exception:
+            logger.debug("Deezer direct download failed for %s — falling back", dz_id, exc_info=True)
+    return await _download_spotify_track(track_info, bitrate)
+
+
 def _wrong_track_keyboard(alt_sid: str, num_alts: int) -> InlineKeyboardMarkup | None:
     """Build the '🔁 Не тот трек?' inline keyboard for group messages.
 
@@ -2041,6 +2063,8 @@ async def _group_auto_play(
             await download_vk(track_info["vk_url"], mp3_path)
         elif track_info.get("source") == "spotify":
             mp3_path = await _download_spotify_track(track_info, bitrate)
+        elif track_info.get("source") == "deezer":
+            mp3_path = await _download_deezer_track(track_info, bitrate)
         else:
             dl_vid = video_id
             if not _is_valid_yt_id(video_id):
@@ -2209,6 +2233,10 @@ async def _try_download_track(track: dict, bitrate: int) -> tuple[Path | None, s
         elif track.get("source") == "spotify":
             logger.info("TryDownload: src=spotify vid=%s", video_id)
             mp3_path = await _download_spotify_track(track, bitrate)
+            return mp3_path, ""
+        elif track.get("source") == "deezer":
+            logger.info("TryDownload: src=deezer vid=%s", video_id)
+            mp3_path = await _download_deezer_track(track, bitrate)
             return mp3_path, ""
         else:
             dl_vid = video_id if _is_valid_yt_id(video_id) else None
@@ -2708,6 +2736,8 @@ async def handle_track_select(
                 await download_vk(track_info["vk_url"], mp3_path)
             elif track_info.get("source") == "spotify":
                 mp3_path = await _download_spotify_track(track_info, bitrate)
+            elif track_info.get("source") == "deezer":
+                mp3_path = await _download_deezer_track(track_info, bitrate)
             else:
                 # For Yandex tracks missing ym_track_id, log the anomaly
                 if track_info.get("source") == "yandex":
