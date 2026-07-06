@@ -24,13 +24,27 @@ _inflight: set[str] = set()  # source_ids currently being uploaded (dedup)
 
 
 def _get_bot() -> Bot | None:
-    """Lazy-init a lightweight Bot instance for cache operations."""
+    """Lazy-init a lightweight Bot instance for cache operations.
+
+    Uses the SAME (local) Bot API server as the main bot when TELEGRAM_API_URL is
+    set — otherwise channel uploads get cloud-scoped file_ids that the main bot
+    (on the local API) can't deliver.
+    """
     global _bot
     if _bot is not None:
         return _bot
     if not settings.BOT_TOKEN:
         return None
-    _bot = Bot(token=settings.BOT_TOKEN)
+    session = None
+    api_url = getattr(settings, "TELEGRAM_API_URL", None)
+    if api_url:
+        try:
+            from aiogram.client.session.aiohttp import AiohttpSession
+            from aiogram.client.telegram import TelegramAPIServer
+            session = AiohttpSession(api=TelegramAPIServer.from_base(api_url))
+        except Exception:
+            session = None
+    _bot = Bot(token=settings.BOT_TOKEN, session=session) if session else Bot(token=settings.BOT_TOKEN)
     return _bot
 
 
@@ -106,6 +120,12 @@ async def upload_to_cache(
                 caption=caption[:200],
             )
             file_id = msg.audio.file_id if msg.audio else None
+            # The channel message_id is the PERMANENT delivery handle (copy_message).
+            try:
+                from bot.services.cache import cache as _cm
+                await _cm.set_cdn_msgid(source_id, msg.message_id)
+            except Exception:
+                logger.debug("set_cdn_msgid failed for %s", source_id, exc_info=True)
             if file_id:
                 # Save file_id + enriched metadata to DB
                 await _save_file_id(source_id, file_id, title=title, artist=artist, duration=duration)
@@ -148,26 +168,29 @@ async def mirror_to_channel(
     if not bot:
         return
     from bot.services.cache import cache
+    # Dedup on the permanent msgid map: post once per track to capture its channel
+    # message_id (the durable copy_message delivery handle). Tracks posted before
+    # this map existed get captured on their next play (a one-time re-post).
     try:
-        added = await cache.redis.sadd("cdn:posted", source_id)
-        if not added:  # 0 → already mirrored/uploaded before
+        if await cache.get_cdn_msgid(source_id):
             return
     except Exception:
         pass
     try:
-        await bot.send_audio(
+        _m = await bot.send_audio(
             chat_id=settings.CACHE_CHANNEL_ID,
             audio=file_id,
             title=title or None,
             performer=artist or None,
             duration=duration or None,
         )
+        try:  # permanent delivery handle for copy_message
+            await cache.set_cdn_msgid(source_id, _m.message_id)
+            await cache.redis.sadd("cdn:posted", source_id)
+        except Exception:
+            logger.debug("set_cdn_msgid (mirror) failed for %s", source_id, exc_info=True)
         logger.info("Mirrored %s to cache channel", source_id)
     except Exception:
-        try:  # roll the marker back so a later delivery can retry
-            await cache.redis.srem("cdn:posted", source_id)
-        except Exception:
-            pass
         logger.debug("mirror_to_channel failed for %s", source_id, exc_info=True)
 
 
@@ -250,6 +273,49 @@ async def _save_file_id(source_id: str, file_id: str, title: str | None = None,
             await session.commit()
     except Exception as e:
         logger.debug("_save_file_id failed for %s: %s", source_id, e)
+
+
+async def deliver_from_channel(
+    bot: Bot,
+    chat_id: int,
+    source_id: str,
+    caption: str | None = None,
+    reply_markup=None,
+    disable_notification: bool = False,
+    parse_mode: str | None = "HTML",
+):
+    """Deliver a track by COPYING its CDN-channel message.
+
+    A local-Bot-API file_id dies once the server drops the underlying file (the
+    small shared disk keeps only ~dozens). The channel message is permanent, so
+    copy_message serves the audio Telegram-side, forever, regardless of local
+    file retention. Returns the copy result (aiogram MessageId, has .message_id)
+    on success, or None so the caller falls back to file_id/download.
+    """
+    if not settings.CACHE_CHANNEL_ID:
+        return None
+    from bot.services.cache import cache
+    msgid = await cache.get_cdn_msgid(source_id)
+    if not msgid:
+        return None
+    try:
+        return await bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=settings.CACHE_CHANNEL_ID,
+            message_id=int(msgid),
+            caption=caption,
+            parse_mode=parse_mode if caption else None,
+            reply_markup=reply_markup,
+            disable_notification=disable_notification,
+        )
+    except Exception as e:
+        # Channel message deleted / invalid → drop the stale mapping and fall back.
+        try:
+            await cache.redis.delete(f"cdnmsg:{source_id}")
+        except Exception:
+            pass
+        logger.debug("deliver_from_channel failed for %s: %s", source_id, e)
+        return None
 
 
 def schedule_upload(mp3_path: Path, source_id: str, title: str | None = None,

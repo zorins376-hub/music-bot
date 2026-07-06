@@ -159,6 +159,26 @@ class Cache:
         except Exception:
             logger.debug("set_file_id failed source=%s", source_id, exc_info=True)
 
+    # ── CDN channel message ids ──────────────────────────────────────────────
+    # A file_id issued by the LOCAL Bot API dies once the server drops the file
+    # (small shared disk keeps only ~dozens). The CDN channel message, however,
+    # is permanent — copy_message serves it forever, Telegram-side. So we map
+    # source_id -> channel message_id and deliver by copying that message.
+    # Persistent (no TTL); tiny; captured in the daily backup.
+
+    async def set_cdn_msgid(self, source_id: str, message_id: int) -> None:
+        try:
+            await self.redis.set(f"cdnmsg:{source_id}", int(message_id))
+        except Exception:
+            logger.debug("set_cdn_msgid failed source=%s", source_id, exc_info=True)
+
+    async def get_cdn_msgid(self, source_id: str) -> int | None:
+        try:
+            v = await self.redis.get(f"cdnmsg:{source_id}")
+            return int(v) if v else None
+        except Exception:
+            return None
+
     # ── Search sessions ─────────────────────────────────────────────────────
 
     async def store_search(self, session_id: str, results: list[dict]) -> None:

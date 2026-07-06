@@ -26,6 +26,7 @@ from bot.i18n import t
 from bot.services.cache import cache
 from bot.services.downloader import cleanup_file, download_track, search_tracks, is_youtube_url, extract_youtube_video_id, resolve_youtube_url
 from bot.services.file_id_heal import send_or_heal
+from bot.services.telegram_cache import deliver_from_channel
 from bot.services.spotify_provider import is_spotify_url, resolve_spotify_url, search_spotify
 from bot.services.vk_provider import download_vk, search_vk
 from bot.services.yandex_provider import download_yandex, search_yandex, is_yandex_music_url, resolve_yandex_url
@@ -1942,6 +1943,28 @@ async def _group_auto_play(
 
     # Local file_id (channel tracks)
     _af = _is_ad_free(user)
+    # CDN channel delivery via copy_message — the channel post is permanent and
+    # Telegram-served, so it works even when the local Bot API has dropped the
+    # file_id's underlying file. Preferred over the ephemeral local file_id cache.
+    await _ensure_caption_duration(track_info)
+    _cdn = await deliver_from_channel(
+        message.bot, message.chat.id, video_id,
+        caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+        reply_markup=_wt_kb,
+    )
+    if _cdn is not None:
+        tid = await _post_download(user.id, track_info, "", bitrate)
+        if tid:
+            try:
+                await message.bot.edit_message_reply_markup(
+                    chat_id=message.chat.id, message_id=_cdn.message_id,
+                    reply_markup=_group_track_keyboard(alt_sid, _alt_n, tid, lang),
+                )
+            except Exception:
+                pass
+        await _delete_msgs(message.bot, message.chat.id, [status.message_id] + ([message.message_id] if delete_source else []))
+        return
+
     local_fid = track_info.get("file_id")
     if local_fid:
         await _ensure_caption_duration(track_info)
@@ -2589,6 +2612,27 @@ async def handle_track_select(
     _af = _is_ad_free(user)
 
     try:
+
+        # CDN channel delivery via copy_message (permanent, Telegram-served) —
+        # preferred over the local file_id cache which the local Bot API drops.
+        await _ensure_caption_duration(track_info)
+        _cdn = await deliver_from_channel(
+            callback.message.bot, callback.message.chat.id, video_id,
+            caption=_track_caption(lang, track_info, bitrate, ad_free=_af),
+            disable_notification=is_group,
+        )
+        if _cdn is not None:
+            tid = await _post_download(user.id, track_info, "", bitrate)
+            if is_group:
+                await _cleanup_group_search(callback.message.bot, callback_data.sid, callback.message)
+            else:
+                _bot_me = await callback.bot.me()
+                _share_url = f"https://t.me/{_bot_me.username}?start=tr_{tid}" if tid else ""
+                await callback.message.answer(
+                    t(lang, "rate_track"),
+                    reply_markup=_feedback_keyboard(lang, tid, _share_q, share_url=_share_url),
+                )
+            return
 
         # If track already has a file_id from local DB (channel tracks)
         local_fid = track_info.get("file_id")
