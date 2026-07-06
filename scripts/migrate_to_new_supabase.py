@@ -9,10 +9,13 @@ Steps:
 """
 import asyncio
 import asyncpg
+import os
 import sys
 
-OLD_DSN = "postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
-NEW_DSN = "postgresql://postgres.vexyurbyobnpzyatiikw:MusicBot_AI_2026!@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+OLD_DSN = os.environ.get("OLD_SUPABASE_DSN", "")
+NEW_DSN = os.environ.get("NEW_SUPABASE_DSN", "")
+if not OLD_DSN or not NEW_DSN:
+    raise SystemExit("Set OLD_SUPABASE_DSN and NEW_SUPABASE_DSN env vars (never hardcode DSNs).")
 
 # Tables in FK-safe insertion order (parents first, children last)
 TABLES_ORDERED = [

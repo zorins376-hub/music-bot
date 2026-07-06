@@ -1,15 +1,13 @@
 import asyncio
+import os
+
 import asyncpg
 
 async def check():
-    conn = await asyncpg.connect(
-        user='postgres.uhvbdwjchxcnoiodfnvw',
-        password='MmrqkRANx51jHvBuYQ2ahp4S',
-        host='aws-1-eu-central-1.pooler.supabase.com',
-        port=6543,
-        database='postgres',
-        statement_cache_size=0,
-    )
+    dsn = os.environ.get("OLD_SUPABASE_DSN") or os.environ.get("DATABASE_URL")
+    if not dsn:
+        raise SystemExit("Set OLD_SUPABASE_DSN (or DATABASE_URL) env var (never hardcode DSNs).")
+    conn = await asyncpg.connect(dsn, statement_cache_size=0)
     tables = await conn.fetch(
         "SELECT tablename FROM pg_tables WHERE schemaname='public'"
     )

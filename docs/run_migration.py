@@ -17,7 +17,7 @@ def run_migration():
     # Get DATABASE_URL - convert asyncpg format to psycopg2 format
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
-        db_url = "postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+        raise SystemExit("Set DATABASE_URL env var (never hardcode DSNs).")
     
     # Remove +asyncpg if present
     db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")

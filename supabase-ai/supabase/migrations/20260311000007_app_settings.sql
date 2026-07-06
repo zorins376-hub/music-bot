@@ -16,7 +16,11 @@ select cron.schedule(
     select net.http_post(
         url := 'https://vexyurbyobnpzyatiikw.supabase.co/functions/v1/embed-tracks',
         headers := jsonb_build_object(
-            'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZleHl1cmJ5b2JucHp5YXRpaWt3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzE3OTkzOCwiZXhwIjoyMDg4NzU1OTM4fQ.qa9t7XPT2XkYYz21yHg8vS_ZQLGWxNStJWRjuNWnU9U',
+            -- SECURITY: the service_role JWT that was inlined here leaked in a PUBLIC
+            -- repo and MUST be rotated in the Supabase dashboard. Do NOT inline keys;
+            -- read from Supabase Vault instead, e.g.:
+            --   'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key')
+            'Authorization', 'Bearer <ROTATED_SERVICE_ROLE_KEY__READ_FROM_VAULT>',
             'Content-Type', 'application/json'
         ),
         body := '{"batch_size": 50}'::jsonb

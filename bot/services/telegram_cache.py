@@ -176,6 +176,14 @@ async def mirror_to_channel(
             return
     except Exception:
         pass
+    # Atomic claim (SETNX) so two concurrent fire-and-forget mirrors of the same
+    # track can't both post a duplicate into the channel.
+    try:
+        claimed = await cache.redis.set(f"cdnmirror:{source_id}", "1", nx=True, ex=120)
+        if not claimed:
+            return
+    except Exception:
+        pass
     try:
         _m = await bot.send_audio(
             chat_id=settings.CACHE_CHANNEL_ID,
@@ -191,6 +199,10 @@ async def mirror_to_channel(
             logger.debug("set_cdn_msgid (mirror) failed for %s", source_id, exc_info=True)
         logger.info("Mirrored %s to cache channel", source_id)
     except Exception:
+        try:  # release the claim so a later delivery can retry
+            await cache.redis.delete(f"cdnmirror:{source_id}")
+        except Exception:
+            pass
         logger.debug("mirror_to_channel failed for %s", source_id, exc_info=True)
 
 
@@ -253,16 +265,19 @@ async def _save_file_id(source_id: str, file_id: str, title: str | None = None,
         from bot.models.track import Track
         async with async_session() as session:
             vals: dict = {"file_id": file_id}
-            # Also update missing metadata from ID3 tags
-            if title:
+            # Fill in missing title/artist on the DB track — INDEPENDENTLY. The old
+            # code dropped `artist` whenever it had just set `title`, so tracks that
+            # lacked both ended up with a title but no artist.
+            if title or artist:
                 from sqlalchemy import select
-                row = (await session.execute(
-                    select(Track.title).where(Track.source_id == source_id)
-                )).scalar_one_or_none()
-                if not row:
+                cur = (await session.execute(
+                    select(Track.title, Track.artist).where(Track.source_id == source_id)
+                )).one_or_none()
+                cur_title, cur_artist = cur if cur else (None, None)
+                if title and not cur_title:
                     vals["title"] = title
-            if artist:
-                vals.setdefault("artist", artist) if not vals.get("title") else None
+                if artist and not cur_artist:
+                    vals["artist"] = artist
             if duration:
                 vals["duration"] = duration
             await session.execute(

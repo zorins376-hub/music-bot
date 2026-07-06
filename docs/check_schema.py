@@ -1,5 +1,9 @@
+import os
 import psycopg2
-conn = psycopg2.connect('postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres')
+_dsn = os.environ.get("SUPABASE_DSN") or os.environ.get("DATABASE_URL")
+if not _dsn:
+    raise SystemExit("Set SUPABASE_DSN (or DATABASE_URL) env var (never hardcode DSNs).")
+conn = psycopg2.connect(_dsn.replace("postgresql+asyncpg://", "postgresql://"))
 cur = conn.cursor()
 
 # List all tables

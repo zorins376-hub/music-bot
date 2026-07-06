@@ -7,7 +7,9 @@ logs
 __pycache__
 *.pyc
 .venv
-.env.local
+.env
+.env.*
+!.env.example
 debug_out.txt
 cookies_b64.txt
 temp_supa
