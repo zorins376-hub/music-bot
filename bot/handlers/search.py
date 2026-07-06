@@ -2078,7 +2078,7 @@ async def _group_auto_play(
                     raise RuntimeError(f"Could not resolve YouTube ID for {video_id}")
             mp3_path = await download_track(dl_vid, bitrate, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex", "deezer"):
             cleanup_file(mp3_path)
             mp3_path = None
             dl_vid = video_id if _is_valid_yt_id(video_id) else (await _resolve_yt_video_id(track_info) or video_id)
@@ -2754,7 +2754,7 @@ async def handle_track_select(
                 mp3_path = await download_track(dl_vid, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
             file_size = mp3_path.stat().st_size
 
-            if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex"):
+            if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex", "deezer"):
                 cleanup_file(mp3_path)
                 mp3_path = None
                 await status.edit_text(t(lang, "error_too_large"))
