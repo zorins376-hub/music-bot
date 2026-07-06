@@ -531,17 +531,20 @@ def _search_sync(query: str, max_results: int, source: str = "youtube") -> list[
             raw_title = entry.get("title", "Unknown")
             uploader = entry.get("uploader") or entry.get("channel") or "Unknown"
             artist, title = _parse_artist_title(raw_title, uploader)
-            tracks.append(
-                {
-                    "video_id": entry.get("id", ""),
-                    "title": title,
-                    "uploader": artist,
-                    "duration": duration,
-                    "duration_fmt": _fmt_duration(int(duration)),
-                    "source": source,
-                    "upload_year": _extract_year(entry),
-                }
-            )
+            _t = {
+                "video_id": entry.get("id", ""),
+                "title": title,
+                "uploader": artist,
+                "duration": duration,
+                "duration_fmt": _fmt_duration(int(duration)),
+                "source": source,
+                "upload_year": _extract_year(entry),
+            }
+            if source == "soundcloud":
+                # SoundCloud downloads need the track URL (its numeric id can't be
+                # turned into a youtube URL). Store it for the download dispatch.
+                _t["sc_url"] = entry.get("url") or entry.get("webpage_url") or ""
+            tracks.append(_t)
         return tracks[:max_results]
     except Exception as e:
         _maybe_notify_youtube_auth_error(e, context="search")
@@ -586,10 +589,12 @@ def _list_formats_debug(video_id: str) -> None:
         _cleanup_temp_cookie(temp_cookie)
 
 
-def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=None, dl_id: str | None = None) -> Path:
+def _download_sync(video_id: str, output_dir: Path, bitrate: int, progress_cb=None, dl_id: str | None = None, url: str | None = None) -> Path:
     if _is_permanently_failed(video_id):
         raise yt_dlp.utils.DownloadError(f"Permanently failed (cached): {video_id}")
-    url = f"https://www.youtube.com/watch?v={video_id}"
+    # `url` override lets non-YouTube sources (SoundCloud, etc.) download by their
+    # own URL instead of a constructed youtube.com/watch?v=<id> (which fails).
+    url = url or f"https://www.youtube.com/watch?v={video_id}"
     file_stem = f"{video_id}_{dl_id}" if dl_id else video_id
     output_template = str(output_dir / f"{file_stem}.%(ext)s")
     cookiefile, temp_cookie = _prepare_cookiefile()
@@ -666,10 +671,10 @@ async def resolve_spotify(url: str) -> str | None:
     return await loop.run_in_executor(_ytdl_pool, _extract_spotify_meta, url)
 
 
-async def download_track(video_id: str, bitrate: int = 192, progress_cb=None, dl_id: str | None = None) -> Path:
+async def download_track(video_id: str, bitrate: int = 192, progress_cb=None, dl_id: str | None = None, url: str | None = None) -> Path:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        _ytdl_pool, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate, progress_cb, dl_id
+        _ytdl_pool, _download_sync, video_id, settings.DOWNLOAD_DIR, bitrate, progress_cb, dl_id, url
     )
 
 

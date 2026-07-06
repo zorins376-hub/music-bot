@@ -2065,6 +2065,8 @@ async def _group_auto_play(
             mp3_path = await _download_spotify_track(track_info, bitrate)
         elif track_info.get("source") == "deezer":
             mp3_path = await _download_deezer_track(track_info, bitrate)
+        elif track_info.get("source") == "soundcloud" and track_info.get("sc_url"):
+            mp3_path = await download_track(video_id, bitrate, dl_id=_dl_id, url=track_info["sc_url"])
         else:
             dl_vid = video_id
             if not _is_valid_yt_id(video_id):
@@ -2078,7 +2080,7 @@ async def _group_auto_play(
                     raise RuntimeError(f"Could not resolve YouTube ID for {video_id}")
             mp3_path = await download_track(dl_vid, bitrate, dl_id=_dl_id)
         file_size = mp3_path.stat().st_size
-        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex", "deezer"):
+        if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex", "deezer", "soundcloud"):
             cleanup_file(mp3_path)
             mp3_path = None
             dl_vid = video_id if _is_valid_yt_id(video_id) else (await _resolve_yt_video_id(track_info) or video_id)
@@ -2237,6 +2239,10 @@ async def _try_download_track(track: dict, bitrate: int) -> tuple[Path | None, s
         elif track.get("source") == "deezer":
             logger.info("TryDownload: src=deezer vid=%s", video_id)
             mp3_path = await _download_deezer_track(track, bitrate)
+            return mp3_path, ""
+        elif track.get("source") == "soundcloud" and track.get("sc_url"):
+            logger.info("TryDownload: src=soundcloud vid=%s", video_id)
+            mp3_path = await download_track(video_id, bitrate, dl_id=_dl_id, url=track["sc_url"])
             return mp3_path, ""
         else:
             dl_vid = video_id if _is_valid_yt_id(video_id) else None
@@ -2738,6 +2744,8 @@ async def handle_track_select(
                 mp3_path = await _download_spotify_track(track_info, bitrate)
             elif track_info.get("source") == "deezer":
                 mp3_path = await _download_deezer_track(track_info, bitrate)
+            elif track_info.get("source") == "soundcloud" and track_info.get("sc_url"):
+                mp3_path = await download_track(video_id, bitrate, dl_id=_dl_id, url=track_info["sc_url"])
             else:
                 # For Yandex tracks missing ym_track_id, log the anomaly
                 if track_info.get("source") == "yandex":
@@ -2754,7 +2762,7 @@ async def handle_track_select(
                 mp3_path = await download_track(dl_vid, bitrate, progress_cb=progress_cb, dl_id=_dl_id)
             file_size = mp3_path.stat().st_size
 
-            if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex", "deezer"):
+            if file_size > settings.MAX_FILE_SIZE and bitrate > 128 and track_info.get("source") not in ("vk", "yandex", "deezer", "soundcloud"):
                 cleanup_file(mp3_path)
                 mp3_path = None
                 await status.edit_text(t(lang, "error_too_large"))
