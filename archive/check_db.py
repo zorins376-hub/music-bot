@@ -1,13 +1,14 @@
 import asyncio
+import os
 import asyncpg
 
 async def check():
     conn = await asyncpg.connect(
-        user='postgres.uhvbdwjchxcnoiodfnvw',
-        password='MmrqkRANx51jHvBuYQ2ahp4S',
-        host='aws-1-eu-central-1.pooler.supabase.com',
-        port=6543,
-        database='postgres',
+        user=os.environ["SUPABASE_DB_USER"],
+        password=os.environ["SUPABASE_DB_PASSWORD"],
+        host=os.environ.get("SUPABASE_DB_HOST", "aws-1-eu-central-1.pooler.supabase.com"),
+        port=int(os.environ.get("SUPABASE_DB_PORT", "6543")),
+        database=os.environ.get("SUPABASE_DB_NAME", "postgres"),
         statement_cache_size=0,
     )
     tables = await conn.fetch(

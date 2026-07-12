@@ -1,14 +1,18 @@
-"""SSH deploy script — connects to VPS and sets up the music bot."""
+"""SSH deploy script — connects to VPS and sets up the music bot.
+
+Credentials are read from the environment; never hardcode them:
+    VPS_HOST, VPS_USER, VPS_PASS, BOT_TOKEN (and optional REPO)
+"""
 import paramiko
 import sys
 import time
 import os
 
-HOST = "89.169.52.174"
-USER = "root"
-PASS = "YjfWW9v6j2m5"
-REPO = "https://github.com/zorins376-hub/music-bot.git"
-BOT_TOKEN = "8561612277:AAHV80B9gjdwDY7MuQjZZnzAm7aNbQsM8Js"
+HOST = os.environ["VPS_HOST"]
+USER = os.environ.get("VPS_USER", "root")
+PASS = os.environ["VPS_PASS"]
+REPO = os.environ.get("REPO", "https://github.com/zorins376-hub/music-bot.git")
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 SETUP_SCRIPT = r"""#!/bin/bash
 set -euo pipefail

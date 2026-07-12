@@ -1,11 +1,15 @@
-"""Quick SSH command runner."""
+"""Quick SSH command runner.
+
+Reads VPS_HOST / VPS_USER / VPS_PASS from the environment.
+"""
+import os
 import paramiko
 import sys
 import time
 
-HOST = "89.169.52.174"
-USER = "root"
-PASS = "YjfWW9v6j2m5"
+HOST = os.environ["VPS_HOST"]
+USER = os.environ.get("VPS_USER", "root")
+PASS = os.environ["VPS_PASS"]
 
 
 def ssh_exec(cmd: str, timeout: int = 30) -> str:

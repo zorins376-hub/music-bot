@@ -30,20 +30,14 @@ SUPA_URL = os.environ.get(
     "SUPABASE_DB_URL",
     "https://uhvbdwjchxcnoiodfnvw.supabase.co",
 )
-SUPA_KEY = os.environ.get(
-    "SUPABASE_DB_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVodmJkd2pjaHhjbm9pb2RmbnZ3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTg1MDAwOSwiZXhwIjoyMDg3NDI2MDA5fQ.tLm2O84rRZHgcoPQgbgb8zVC3zRCBzy54xS0qCF_6Gw",
-)
+SUPA_KEY = os.environ["SUPABASE_DB_KEY"]
 
 # Optional extra source (music-bot-ai project = AI/ML). We import only users from it.
 SUPA_AI_URL = os.environ.get(
     "SUPABASE_AI_DB_URL",
     "https://vexyurbyobnpzyatiikw.supabase.co",
 )
-SUPA_AI_KEY = os.environ.get(
-    "SUPABASE_AI_DB_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZleHl1cmJ5b2JucHp5YXRpaWt3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzE3OTkzOCwiZXhwIjoyMDg4NzU1OTM4fQ.qa9t7XPT2XkYYz21yHg8vS_ZQLGWxNStJWRjuNWnU9U",
-)
+SUPA_AI_KEY = os.environ.get("SUPABASE_AI_DB_KEY", "")
 
 HEADERS = {
     "Authorization": f"Bearer {SUPA_KEY}",

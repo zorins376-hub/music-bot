@@ -1,9 +1,9 @@
-import paramiko, sys
+import os, paramiko, sys
 
-OLD_HOST = "31.129.33.216"
+OLD_HOST = os.environ.get("OLD_VPS_HOST", "31.129.33.216")
 
-# Try both passwords
-for pwd in ["YjfWW9v6j2m5", "changeme"]:
+# Passwords come from the environment (comma-separated), never hardcoded.
+for pwd in [p for p in os.environ.get("OLD_VPS_PASSWORDS", "").split(",") if p]:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:

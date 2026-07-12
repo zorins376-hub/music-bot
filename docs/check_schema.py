@@ -1,5 +1,6 @@
+import os
 import psycopg2
-conn = psycopg2.connect('postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres')
+conn = psycopg2.connect(os.environ["DATABASE_URL"])
 cur = conn.cursor()
 
 # List all tables

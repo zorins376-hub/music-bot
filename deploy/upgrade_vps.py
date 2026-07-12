@@ -17,10 +17,10 @@ except ImportError:
     os.system(f"{sys.executable} -m pip install paramiko")
     import paramiko
 
-VPS_HOST = "89.169.52.174"
-VPS_USER = "root"
-VPS_PASS = "YjfWW9v6j2m5"
-PROJECT_DIR = "/opt/music-bot"
+VPS_HOST = os.environ["VPS_HOST"]
+VPS_USER = os.environ.get("VPS_USER", "root")
+VPS_PASS = os.environ["VPS_PASS"]
+PROJECT_DIR = os.environ.get("PROJECT_DIR", "/opt/music-bot")
 
 # VPS-optimized settings to add/update
 VPS_SETTINGS = """

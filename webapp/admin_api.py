@@ -67,7 +67,11 @@ ADMIN_USERNAME = (os.environ.get("ADMIN_USERNAME") or "").strip()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 _SESSION_SECRET = (os.environ.get("ADMIN_SESSION_SECRET") or "").strip()
 
-if not ADMIN_USERNAME or not ADMIN_PASSWORD or not _SESSION_SECRET:
+# When any credential is missing the panel must be fully closed, not merely
+# warned about: empty ADMIN_USERNAME/ADMIN_PASSWORD would otherwise match an
+# empty login via hmac.compare_digest("", "") and hand out a valid token.
+_ADMIN_ENABLED = bool(ADMIN_USERNAME and ADMIN_PASSWORD and _SESSION_SECRET)
+if not _ADMIN_ENABLED:
     logger.warning(
         "ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_SESSION_SECRET must all be set; admin panel disabled"
     )
@@ -135,6 +139,8 @@ def _make_session_token(username: str) -> str:
 
 def _verify_session_token(token: str) -> bool:
     """Verify HMAC signature and expiry of session token."""
+    if not _ADMIN_ENABLED:
+        return False
     try:
         import base64
         raw = base64.urlsafe_b64decode(token.encode()).decode()
@@ -158,6 +164,9 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 async def admin_login(body: LoginRequest, request: Request):
     """Authenticate admin and return session token."""
+    if not _ADMIN_ENABLED:
+        raise HTTPException(status_code=503, detail="Admin panel is not configured")
+
     _check_login_rate_limit(request)
 
     if hmac.compare_digest(body.username, ADMIN_USERNAME) and hmac.compare_digest(body.password, ADMIN_PASSWORD):

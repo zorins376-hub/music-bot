@@ -1,12 +1,13 @@
 """One-shot deploy script: setup SSH key + deploy to VPS."""
+import os
 import paramiko
 import pathlib
 import sys
 import time
 
-HOST = "89.169.52.174"
-USER = "root"
-PASS = "YjfWW9v6j2m5"
+HOST = os.environ["VPS_HOST"]
+USER = os.environ.get("VPS_USER", "root")
+PASS = os.environ["VPS_PASS"]
 
 def ssh_exec(client, cmd, timeout=120):
     """Execute command and print output in real-time."""

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Kill all PostgreSQL connections and run sync."""
+import os
 import paramiko
 import sys
 import time
 from pathlib import Path
 
-HOST = "89.169.52.174"
-USER = "root"
-PASS = "YjfWW9v6j2m5"
+HOST = os.environ["VPS_HOST"]
+USER = os.environ.get("VPS_USER", "root")
+PASS = os.environ["VPS_PASS"]
 
 
 def run(ssh, cmd, timeout=120):

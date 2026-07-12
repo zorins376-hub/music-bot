@@ -1,8 +1,8 @@
 """Quick check: is data still on Supabase REST API?"""
-import asyncio, aiohttp, json
+import asyncio, aiohttp, json, os
 
-SUPA_URL = "https://uhvbdwjchxcnoiodfnvw.supabase.co"
-SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVodmJkd2pjaHhjbm9pb2RmbnZ3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTg1MDAwOSwiZXhwIjoyMDg3NDI2MDA5fQ.tLm2O84rRZHgcoPQgbgb8zVC3zRCBzy54xS0qCF_6Gw"
+SUPA_URL = os.environ.get("SUPABASE_URL", "https://uhvbdwjchxcnoiodfnvw.supabase.co")
+SUPA_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 HEADERS = {
     "Authorization": f"Bearer {SUPA_KEY}",

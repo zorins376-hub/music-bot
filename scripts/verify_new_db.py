@@ -1,8 +1,9 @@
 """Verify bot can connect to new Supabase DB and all features work."""
 import asyncio
+import os
 import asyncpg
 
-DSN = "postgresql://postgres.vexyurbyobnpzyatiikw:MusicBot_AI_2026!@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+DSN = os.environ.get("NEW_DATABASE_URL") or os.environ["DATABASE_URL"]
 
 async def test():
     conn = await asyncpg.connect(DSN, timeout=15, statement_cache_size=0)

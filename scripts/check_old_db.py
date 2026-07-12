@@ -1,8 +1,9 @@
 """Check old Supabase DB (uhvbdwjchxcnoiodfnvw) — list tables and row counts."""
 import asyncio
+import os
 import asyncpg
 
-OLD_DB = "postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+OLD_DB = os.environ["OLD_DATABASE_URL"]
 
 
 async def main():

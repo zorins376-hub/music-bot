@@ -3,6 +3,7 @@
 v4.0: queue, cache, limits, admin panel (broadcast/ban/users)
 """
 
+import os
 import re
 import asyncio
 import logging
@@ -18,7 +19,7 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes,
 )
 
-TOKEN = "7778709205:AAGfUz2Cj5AWRGv2hsiy-ItpNqtw5xuWCXI"
+TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_IDS = {8558910353, 8258955906}
 DOWNLOAD_DIR = Path("/tmp/blackbox_downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)

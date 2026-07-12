@@ -1,9 +1,10 @@
 """Check old Supabase project (uhvbdwjchxcnoiodfnvw) — the bot's current DB."""
 import asyncio
+import os
 import asyncpg
 
-OLD_DB = "postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
-NEW_DB = "postgresql://postgres.vexyurbyobnpzyatiikw:MusicBot_AI_2026!@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+OLD_DB = os.environ["OLD_DATABASE_URL"]
+NEW_DB = os.environ["NEW_DATABASE_URL"]
 
 
 async def audit_db(label, dsn):

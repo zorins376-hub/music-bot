@@ -8,11 +8,12 @@ Steps:
 4. Verify row counts match
 """
 import asyncio
+import os
 import asyncpg
 import sys
 
-OLD_DSN = "postgresql://postgres.uhvbdwjchxcnoiodfnvw:MmrqkRANx51jHvBuYQ2ahp4S@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
-NEW_DSN = "postgresql://postgres.vexyurbyobnpzyatiikw:MusicBot_AI_2026!@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+OLD_DSN = os.environ["OLD_DATABASE_URL"]
+NEW_DSN = os.environ["NEW_DATABASE_URL"]
 
 # Tables in FK-safe insertion order (parents first, children last)
 TABLES_ORDERED = [
